@@ -38,7 +38,11 @@ data:
           config:
             to: https://urbanlink.fr/login
             when:
-              - error: [401, 403]
+              # Des NOMS d'erreur, pas des codes HTTP. Avec [401, 403] le
+              # schema echouait ("expected string, but got number") et le
+              # oneOf basculait sur la branche qui exige enabled: false --
+              # d'ou deux erreurs pour une seule cause.
+              - error: ["unauthorized", "forbidden"]
                 request:
                   header:
                     accept:

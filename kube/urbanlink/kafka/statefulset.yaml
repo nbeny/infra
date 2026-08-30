@@ -88,15 +88,17 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 6
+          # Meme constat que pour la liveness, verifie sur la machine : meme
+          # avec 30 secondes de marge, kafka-topics.sh expire. Demarrer une
+          # JVM, charger les classes du client et negocier avec le broker
+          # coute plus que cela sur ce noeud. On s'en tient donc au signal
+          # qui a du sens ici : le broker accepte-t-il des connexions.
           readinessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 30
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            timeoutSeconds: 5
             failureThreshold: 6
   volumeClaimTemplates:
     - metadata:
