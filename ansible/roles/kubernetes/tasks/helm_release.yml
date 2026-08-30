@@ -1,0 +1,74 @@
+---
+# ---------------------------------------------------------------------------
+#  Deploiement idempotent d'une release Helm
+# ---------------------------------------------------------------------------
+# `helm upgrade --install` est idempotent dans son EFFET, mais il cree une
+# revision a chaque appel et affiche toujours "has been upgraded". Ansible le
+# rapporte donc systematiquement comme modifie, ce qui noie la derive reelle
+# dans du bruit.
+#
+# On compare ici l'etat deployé a l'etat voulu -- version du chart ET valeurs --
+# et on ne lance l'upgrade que s'ils different.
+#
+# Parametres attendus :
+#   hr_name       nom de la release
+#   hr_chart      chart (ex: istio/istiod)
+#   hr_namespace  namespace cible
+#   hr_version    version du chart
+#   hr_values     chemin d'un fichier de valeurs, ou "" si aucun
+#   hr_set        liste de "cle=valeur" pour --set, ou [] si aucune
+#   hr_timeout    duree max, defaut 10m
+
+- name: "[{{ hr_name }}] Relever la version du chart deployee"
+  ansible.builtin.shell:
+    cmd: >-
+      helm list -n {{ hr_namespace }} -f '^{{ hr_name }}$' -o json 2>/dev/null
+      | python3 -c "import json,sys; d=json.load(sys.stdin) or []; print(d[0]['chart'].rsplit('-',1)[-1] if d else 'absent')"
+    executable: /bin/bash
+  register: hr_deployed_version
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: "[{{ hr_name }}] Relever les valeurs deployees"
+  ansible.builtin.shell:
+    cmd: "helm get values {{ hr_name }} -n {{ hr_namespace }} -o yaml 2>/dev/null || echo absent"
+    executable: /bin/bash
+  register: hr_deployed_values
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: "[{{ hr_name }}] Lire les valeurs voulues"
+  ansible.builtin.slurp:
+    src: "{{ hr_values }}"
+  register: hr_wanted_values
+  when: hr_values | length > 0
+
+# Helm normalise et reordonne les valeurs qu'il stocke : une comparaison
+# textuelle serait toujours fausse. On compare donc les structures decodees.
+- name: "[{{ hr_name }}] Determiner s'il faut deployer"
+  ansible.builtin.set_fact:
+    hr_needs_deploy: >-
+      {{ (hr_deployed_version.stdout | trim) != hr_version
+         or (hr_values | length > 0
+             and ((hr_wanted_values.content | b64decode | from_yaml) | default({}, true)
+                  != ((hr_deployed_values.stdout | from_yaml) | default({}, true)))) }}
+
+- name: "[{{ hr_name }}] Deja a jour"
+  ansible.builtin.debug:
+    msg: "Release {{ hr_name }} en {{ hr_version }}, valeurs inchangees."
+  when: not (hr_needs_deploy | bool)
+
+- name: "[{{ hr_name }}] Deployer"
+  ansible.builtin.command: >-
+    helm upgrade --install {{ hr_name }} {{ hr_chart }}
+      --namespace {{ hr_namespace }} --create-namespace
+      --version {{ hr_version }}
+      {% if hr_values | length > 0 %}--values {{ hr_values }}{% endif %}
+      {% for s in hr_set | default([]) %}--set {{ s }} {% endfor %}
+      --wait --timeout {{ hr_timeout | default('10m') }}
+  when: hr_needs_deploy | bool
+  changed_when: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf

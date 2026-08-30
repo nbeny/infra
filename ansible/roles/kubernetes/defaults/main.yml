@@ -51,3 +51,59 @@ k8s_crowdsec_appsec_collections:
 
 # Profil AppSec applique au listener (doit exister dans les collections above).
 k8s_crowdsec_appsec_config: crowdsecurity/virtual-patching
+
+# --- Service mesh ----------------------------------------------------------
+# `none` par defaut : Istio est utile sur un cluster qui porte des charges
+# reelles, pas sur un cluster de test. Activer par host_vars.
+k8s_service_mesh: none               # istio | none
+k8s_istio_version: "1.30.4"
+k8s_istio_namespace: istio-system
+
+# `ambient` (sans sidecar) ou `default` (avec sidecar).
+# Ambient est le bon choix des qu'il y a des Jobs ou des pods hostNetwork :
+# un sidecar empeche un Job de se terminer, et ne capture rien en hostNetwork.
+k8s_istio_mode: ambient
+
+# Namespaces enroles dans le maillage. Traefik en est volontairement absent :
+# il reste la porte d'entree, hors mesh, et joint les services via la
+# politique PERMISSIVE.
+k8s_istio_namespaces:
+  - urbanconnect
+
+# Prometheus + Kiali : le graphe de service et les metriques du mesh.
+k8s_istio_observability: true
+
+# Passerelle d'entree Istio. Quand elle est active, elle REMPLACE Traefik et
+# reprend ses NodePort : les deux ne peuvent pas ecouter sur les memes ports.
+k8s_istio_gateway: false
+k8s_istio_gateway_namespace: istio-ingress
+k8s_istio_gateway_nodeport_http: 30080
+k8s_istio_gateway_nodeport_https: 30443
+# Desinstalle la release Helm de Traefik au profit de la passerelle Istio.
+k8s_istio_replaces_traefik: false
+
+# Fournisseurs d'autorisation externe, equivalents du `forwardAuth` Traefik.
+# Referencables depuis une AuthorizationPolicy en action CUSTOM.
+#
+# CrowdSec n'y figure PAS, et c'est un constat, pas un oubli : son bouncer est
+# un plugin Go specifique a Traefik. Le portage Envoy officiel
+# (crowdsecurity/cs-envoy-bouncer) n'a ni release ni image publiee, et brancher
+# l'AppSec en direct est impossible -- `includeAdditionalHeadersInCheck` n'accepte
+# que des valeurs FIXES, alors que l'AppSec exige l'URI et l'IP client de chaque
+# requete. CrowdSec reste donc a sa place actuelle : le nginx du noeud Proxmox,
+# ou il fonctionne et ou le trafic Internet arrive reellement.
+k8s_istio_ext_authz:
+  - name: oathkeeper
+    service: oathkeeper-api.urbanconnect.svc.cluster.local
+    port: 4456
+    path_prefix: /decisions
+    include_headers:
+      - authorization
+      - cookie
+      - x-forwarded-for
+      - x-forwarded-proto
+      - x-forwarded-host
+      - x-request-id
+    headers_upstream:
+      - x-user-id
+      - x-user-email

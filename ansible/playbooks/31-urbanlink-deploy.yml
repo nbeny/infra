@@ -25,6 +25,14 @@
     urbanlink_gateway_namespace: istio-ingress
     urbanlink_tls_secret: uc-tls-cert
     urbanlink_domain: urbanlink.fr
+    # Environnement de configuration : `prod` ou `dev`.
+    #   config/common/  -- schema d'identite, mapper OIDC : commun aux deux
+    #   config/prod/    -- URLs en urbanlink.fr, cookies sur le domaine
+    #   config/dev/     -- URLs en localhost, pour un poste de developpement
+    # Les deux fournissent un `kratos.yml` : le nom du fichier monte ne change
+    # pas, seul son contenu change. Le deploiement n'a donc pas a savoir dans
+    # quel environnement il tourne.
+    urbanlink_env: prod
 
   tasks:
 
@@ -101,15 +109,23 @@
       ansible.builtin.shell:
         cmd: >-
           kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
-          create configmap {{ item.name }} --from-file={{ item.src }}
+          create configmap {{ item.name }} {{ item.src }}
           --dry-run=client -o yaml
           | kubectl --kubeconfig {{ urbanlink_kubeconfig }} apply -f -
         executable: /bin/bash
       loop:
-        - { name: kratos-config, src: "{{ urbanlink_manifests_dest }}/_config/kratos/" }
-        - { name: postgres-init, src: "{{ urbanlink_manifests_dest }}/_config/postgres-init/" }
+        # kratos-config est construite depuis DEUX repertoires : `kubectl
+        # create configmap` accepte plusieurs --from-file et fusionne. Cela
+        # evite de dupliquer identity.schema.json et oidc.google.jsonnet dans
+        # chaque environnement -- une duplication qui divergerait.
+        - name: kratos-config
+          src: >-
+            --from-file={{ urbanlink_manifests_dest }}/config/common/kratos/
+            --from-file={{ urbanlink_manifests_dest }}/config/{{ urbanlink_env }}/kratos/
+        - name: postgres-init
+          src: "--from-file={{ urbanlink_manifests_dest }}/config/common/postgres-init/"
       loop_control:
-        label: "{{ item.name }}"
+        label: "{{ item.name }} ({{ urbanlink_env }})"
       changed_when: true
 
     # ---------------------------------------------------------------------

@@ -22,11 +22,13 @@ spec:
             - kratos
             - serve
             - -c
-            # kratos.yml pointe sur localhost:3000 : c'est la config de
-            # developpement. kratos.urbanlink.yml porte les vraies URLs.
-            # Les variables d'env ci-dessous surchargent base_url et
-            # cookies, mais PAS les ui_url -- le fichier monte compte.
-            - /etc/config/kratos/kratos.urbanlink.yml
+            # Le contenu de ce fichier vient de config/<env>/kratos/, la
+            # ConfigMap `kratos-config` etant construite depuis config/common/
+            # plus le repertoire de l'environnement. Le nom ne change pas ;
+            # seul le contenu change. Cela compte : les variables d'env
+            # ci-dessous surchargent base_url et cookies, mais PAS les
+            # `ui_url` -- c'est le fichier qui les porte.
+            - /etc/config/kratos/kratos.yml
             - --watch-courier
           ports:
             - containerPort: 4433

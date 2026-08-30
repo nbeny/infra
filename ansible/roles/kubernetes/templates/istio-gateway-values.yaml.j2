@@ -1,0 +1,43 @@
+# {{ ansible_managed }}
+# Passerelle d'entree Istio -- remplace Traefik.
+
+# La passerelle vit dans son PROPRE namespace, pas dans istio-system : c'est la
+# recommandation d'Istio depuis la 1.5. Un composant expose a l'exterieur ne
+# doit pas partager son namespace avec le plan de controle, sinon une
+# compromission de la passerelle donne acces aux secrets d'istiod.
+replicaCount: 1
+
+service:
+  # Bare-metal : pas de LoadBalancer, on expose en NodePort sur les ports
+  # que Traefik occupait.
+  type: NodePort
+  ports:
+    - name: status-port
+      port: 15021
+      targetPort: 15021
+    - name: http2
+      port: 80
+      targetPort: 80
+      nodePort: {{ k8s_istio_gateway_nodeport_http }}
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: {{ k8s_istio_gateway_nodeport_https }}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# Un seul noeud : le PDB par defaut empecherait toute mise a jour.
+podDisruptionBudget: {}
+
+autoscaling:
+  enabled: false
+
+# La passerelle est elle-meme une charge du mesh : elle parle mTLS aux
+# services enroles en aval.
+labels:
+  istio: ingressgateway

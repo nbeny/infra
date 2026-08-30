@@ -1,0 +1,7 @@
+# {{ ansible_managed }}
+# istio-cni -- role kubernetes.
+#
+# Ne remplace PAS Flannel : se chaine derriere lui pour rediriger le trafic des
+# pods enroles vers le ztunnel du noeud. Sans lui, le label ambient d'un
+# namespace n'a aucun effet.
+profile: {{ k8s_istio_mode }}

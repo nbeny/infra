@@ -1,0 +1,39 @@
+---
+# ============================================================================
+#  VM urbanlink -- cluster applicatif UrbanLink
+# ============================================================================
+# Ce qui distingue cette VM des autres noeuds Debian du lab. Le reste vient de
+# group_vars/debian_nodes.yml.
+
+k8s_apiserver_advertise_address: 10.0.0.111
+k8s_single_node: true
+
+# --- Service mesh ---------------------------------------------------------
+# Istio n'est actif QUE sur cette VM : le cluster de test n'a pas de charge
+# reelle a mailler, et istiod + ztunnel y couteraient de la memoire pour rien.
+#
+# Il s'ajoute sous Traefik, il ne le remplace pas : les manifests de
+# kube/urbanlink dependent des CRD Traefik et du bouncer CrowdSec.
+#
+#   Internet -> Traefik (+ CrowdSec) -> | mesh Istio |
+#
+# Mode ambient impose par le stack : trois Jobs (kratos-migrate, minio-init,
+# elasticsearch-setup) ne se termineraient jamais avec un sidecar, et coturn
+# tourne en hostNetwork, ou un sidecar ne capture rien.
+k8s_service_mesh: istio
+k8s_istio_mode: ambient
+k8s_istio_namespaces:
+  - urbanconnect
+k8s_istio_observability: true
+
+# --- Istio REMPLACE Traefik -----------------------------------------------
+# La passerelle Istio reprend les NodePort de Traefik : les deux ne peuvent
+# pas ecouter sur les memes ports, Traefik est donc desinstalle d'abord.
+#
+# Ce que la bascule fait perdre : le bouncer CrowdSec, qui etait un plugin Go
+# du binaire Traefik. Aucun portage utilisable n'existe cote Envoy (voir
+# kube/urbanlink/ingress-istio/authorization.yaml pour le detail). CrowdSec
+# reste actif sur le nginx du noeud Proxmox, la vraie porte d'entree Internet.
+k8s_ingress_controller: none
+k8s_istio_gateway: true
+k8s_istio_replaces_traefik: true
