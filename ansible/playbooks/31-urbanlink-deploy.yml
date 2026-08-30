@@ -297,17 +297,103 @@
           secrets.env contient encore {{ ul_placeholders.stdout | trim }}
           valeur(s) CHANGE_ME. Lancer scripts/secrets/bootstrap.sh.
 
+    # ---------------------------------------------------------------------
+    #  Connexion Google : le bloc `providers` ENTIER, ou rien
+    # ---------------------------------------------------------------------
+    # ⚠️ **Kratos ne mappe NI `GOOGLE_CLIENT_ID` NI `GOOGLE_CLIENT_SECRET`.**
+    # Il ne lit une variable d'environnement que si son nom decrit un CHEMIN de
+    # configuration ; ces deux-la n'en decrivent aucun, il les ignore purement
+    # et simplement. Le YAML garde donc ses placeholders et Google refuse la
+    # connexion — mesure sur le cluster : le pod voyait bien les deux variables,
+    # et sa configuration montee annoncait toujours
+    # `client_id: CHANGE_ME.apps.googleusercontent.com`. L'ecran affiche
+    # « Impossible d'initier la connexion Google ».
+    #
+    # Le seul override qui fonctionne est le bloc `providers` ENTIER, en JSON
+    # **BRUT** (jamais base64 : Kratos ne le decode pas, `providers` tombe a
+    # null et il refuse de demarrer), via
+    # `SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS`. C'est deja ce que fait le
+    # developpement — cf. `config/common/kratos/scripts/gen-google-oidc-env.mjs`
+    # du depot applicatif, dont l'en-tete enonce la meme regle.
+    #
+    # ⚠️ **La FORME du bloc n'est pas recopiee ici, elle est LUE.** Elle vit
+    # dans `config/{{ urbanlink_env }}/kratos/kratos.yml`, et l'y relire evite
+    # une troisieme copie qui divergerait en silence (le generateur de dev en
+    # est deja une, et son en-tete le signale). On ne substitue que les deux
+    # identifiants.
+    - name: Lire les identifiants Google depuis secrets.env
+      ansible.builtin.shell:
+        cmd: |
+          sed -n 's/^GOOGLE_CLIENT_ID=//p'     {{ urbanlink_manifests_dest }}/secrets.env | head -1
+          sed -n 's/^GOOGLE_CLIENT_SECRET=//p' {{ urbanlink_manifests_dest }}/secrets.env | head -1
+        executable: /bin/bash
+      register: ul_google
+      changed_when: false
+      no_log: true
+
+    - name: Relever la presence des identifiants Google
+      ansible.builtin.set_fact:
+        ul_google_ok: "{{ (ul_google.stdout_lines | length) >= 2
+                          and (ul_google.stdout_lines[0] | trim | length) > 0
+                          and (ul_google.stdout_lines[1] | trim | length) > 0 }}"
+
+    - name: Avertir que la connexion Google restera fermee
+      ansible.builtin.debug:
+        msg: >-
+          GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET sont vides dans secrets.env :
+          le bloc `providers` ne sera pas injecte et Kratos gardera ses
+          placeholders. Tout le reste fonctionne — seule la connexion Google
+          repondra « Impossible d'initier la connexion ». URI de redirection a
+          declarer cote Google : https://auth.{{ urbanlink_domain }}/self-service/methods/oidc/callback/google
+      when: not ul_google_ok
+
+    - name: Lire la configuration Kratos de l'environnement
+      ansible.builtin.slurp:
+        src: "{{ urbanlink_config_dest }}/{{ urbanlink_env }}/kratos/kratos.yml"
+      register: ul_kratos_yml
+      when: ul_google_ok
+
+    # `map('combine', …)` remplace les deux cles dans CHAQUE provider declare :
+    # il n'y a que Google aujourd'hui, et un second fournisseur voudrait de
+    # toute facon ses propres identifiants — le jour venu, cette tache devra
+    # apparier par `id` plutot que d'appliquer la meme paire a tous.
+    - name: Construire le bloc providers avec les vrais identifiants
+      ansible.builtin.set_fact:
+        ul_oidc_providers: >-
+          {{ (ul_kratos_yml.content | b64decode | from_yaml).selfservice.methods.oidc.config.providers
+             | map('combine', {'client_id': ul_google.stdout_lines[0] | trim,
+                               'client_secret': ul_google.stdout_lines[1] | trim})
+             | list | to_json }}
+      when: ul_google_ok
+      no_log: true
+
+    # Passe par un FICHIER et non `--from-literal` : le JSON contient des
+    # guillemets et des deux-points, qu'une ligne de commande shell abimerait.
+    - name: Deposer le bloc providers
+      ansible.builtin.copy:
+        content: "{{ ul_oidc_providers }}"
+        dest: /tmp/kratos-oidc-providers.json
+        mode: "0600"
+      when: ul_google_ok
+      no_log: true
+
     - name: Creer le Secret applicatif
       ansible.builtin.shell:
         cmd: >-
           kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
           create secret generic urbanconnect-secrets
           --from-env-file={{ urbanlink_manifests_dest }}/secrets.env
+          {{ '--from-file=KRATOS_OIDC_PROVIDERS=/tmp/kratos-oidc-providers.json' if ul_google_ok else '' }}
           --dry-run=client -o yaml
           | kubectl --kubeconfig {{ urbanlink_kubeconfig }} apply -f -
         executable: /bin/bash
       no_log: true
       changed_when: true
+
+    - name: Retirer le bloc providers du disque
+      ansible.builtin.file:
+        path: /tmp/kratos-oidc-providers.json
+        state: absent
 
     # ---------------------------------------------------------------------
     #  TLS de la passerelle

@@ -76,16 +76,33 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: KRATOS_CIPHER_SECRET
-            - name: GOOGLE_CLIENT_ID
+            # ⚠️ **Ici vivaient `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_SECRET`,
+            # et Kratos ne les lisait PAS.** Il ne prend une variable
+            # d'environnement en compte que si son nom decrit un CHEMIN de sa
+            # configuration ; ces deux noms n'en decrivent aucun. Elles etaient
+            # donc parfaitement inertes : la configuration montee gardait
+            # `client_id: CHANGE_ME.apps.googleusercontent.com`, et l'ecran
+            # repondait « Impossible d'initier la connexion Google ». Mesure sur
+            # le cluster — le pod voyait bien les deux variables.
+            #
+            # Le seul override qui fonctionne est le bloc `providers` ENTIER, en
+            # JSON brut. `31-urbanlink-deploy.yml` le derive de
+            # `config/<env>/kratos/kratos.yml` en y substituant les deux vrais
+            # identifiants, et le depose sous la cle `KRATOS_OIDC_PROVIDERS`.
+            # C'est la meme mecanique qu'en developpement
+            # (`gen-google-oidc-env.mjs`), a ceci pres que la source est le
+            # Secret du cluster et non un fichier pose a cote.
+            #
+            # ⚠️ `optional: true` : sans identifiants Google renseignes, le
+            # playbook ne cree pas la cle. Sans ce drapeau, TOUT Kratos
+            # refuserait de demarrer — donc l'inscription par mot de passe
+            # aussi — pour une connexion tierce facultative.
+            - name: SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
-                  key: GOOGLE_CLIENT_ID
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: urbanconnect-secrets
-                  key: GOOGLE_CLIENT_SECRET
+                  key: KRATOS_OIDC_PROVIDERS
+                  optional: true
             - name: SELFSERVICE_DEFAULT_BROWSER_RETURN_URL
               value: "https://urbanlink.fr"
             - name: SERVE_PUBLIC_BASE_URL
