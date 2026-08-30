@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+#  Acces SSH au lab depuis le poste client
+#
+#  Les VMs vivent sur 10.0.0.0/24, un reseau interne NATe derriere le noeud
+#  Proxmox. Rien n'y est routable depuis le LAN : toute connexion passe par le
+#  noeud, qui sert de rebond (ProxyJump).
+#
+#  Windows :  %USERPROFILE%\.ssh\config
+#  Linux    :  ~/.ssh/config
+#
+#  `terraform output ssh_config` regenere ce bloc avec les VMs reellement
+#  deployees.
+# ---------------------------------------------------------------------------
+
+# --- Le rebond --------------------------------------------------------------
+Host pve
+    HostName 192.168.100.50
+    User root
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+    ServerAliveInterval 60
+
+# --- Regle generique : toute VM du lab --------------------------------------
+# Permet `ssh 10.0.0.190` sans declarer chaque machine.
+Host 10.0.0.*
+    User nbeny
+    IdentityFile ~/.ssh/id_rsa
+    ProxyJump pve
+    StrictHostKeyChecking accept-new
+    # Les VMs sont recreees souvent : leurs cles d'hote changent a chaque
+    # rebuild. On isole leurs empreintes pour ne pas polluer le known_hosts
+    # principal ni declencher d'avertissement a chaque redeploiement.
+    UserKnownHostsFile ~/.ssh/known_hosts_lab
+
+# --- Alias par machine ------------------------------------------------------
+Host urbanconnect
+    HostName 10.0.0.100
+    User nbeny
+    ProxyJump pve
+    UserKnownHostsFile ~/.ssh/known_hosts_lab
+    StrictHostKeyChecking accept-new
+
+Host kali
+    HostName 10.0.0.103
+    User nbeny
+    ProxyJump pve
+    UserKnownHostsFile ~/.ssh/known_hosts_lab
+    StrictHostKeyChecking accept-new
+
+Host test-k8s
+    HostName 10.0.0.190
+    User nbeny
+    ProxyJump pve
+    UserKnownHostsFile ~/.ssh/known_hosts_lab
+    StrictHostKeyChecking accept-new
+
+# ---------------------------------------------------------------------------
+#  Tunnels utiles
+# ---------------------------------------------------------------------------
+#
+#  Interface web Proxmox            ssh -L 8006:127.0.0.1:8006 pve
+#                                   -> https://localhost:8006
+#
+#  Bureau Kali en RDP               ssh -L 3389:127.0.0.1:3389 kali
+#                                   -> mstsc /v:localhost:3389
+#
+#  API Kubernetes en local          ssh -L 6443:127.0.0.1:6443 test-k8s
+#                                   puis pointer KUBECONFIG sur une copie du
+#                                   /etc/kubernetes/admin.conf de la VM
+# ---------------------------------------------------------------------------
