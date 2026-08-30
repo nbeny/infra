@@ -30,7 +30,7 @@
 ==============================================================================
 ## /system/ntp/client/print
 ==============================================================================
-  enabled=true primary-ntp=162.159.200.1 secondary-ntp=162.159.200.123 server-dns-names= mode=unicast poll-interval=4m16s active-server=162.159.200.1 last-update-from=162.159.200.1 last-update-before=1m46s680ms last-adjustment=349us
+  enabled=true primary-ntp=162.159.200.1 secondary-ntp=162.159.200.123 server-dns-names= mode=unicast
 
 ==============================================================================
 ## /system/scheduler/print

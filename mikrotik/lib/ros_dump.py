@@ -44,6 +44,9 @@ VOLATILE = {
     "forwarding", "sending-rstp", "point-to-point-port", "external-fdb-status",
     "actual-mtu", "l2mtu", "port-number", "public-address", "dst-address-list",
     ".nextid", "hw-offload", "bad-blocks", "start-time", "start-date",
+    # Etat d'execution du client NTP -- apparu une fois NTP active.
+    "poll-interval", "last-update-from", "last-update-before",
+    "last-adjustment", "active-server",
     # `.id` est un handle interne reattribue des qu'un objet est recree :
     # rejouer un .rsc le fait changer sans que la configuration bouge. Le
     # garder rendrait tout diff faussement positif. L'identite d'une ligne,
