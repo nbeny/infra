@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oathkeeper
+  namespace: urbanconnect
+  labels:
+    app: oathkeeper
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: oathkeeper
+  template:
+    metadata:
+      labels:
+        app: oathkeeper
+    spec:
+      containers:
+        - name: oathkeeper
+          image: oryd/oathkeeper:v0.40.9
+          args:
+            - serve
+            - --config
+            - /etc/oathkeeper/oathkeeper.yaml
+          ports:
+            - containerPort: 4456
+              name: api
+            - containerPort: 4455
+              name: proxy
+          volumeMounts:
+            - name: config
+              mountPath: /etc/oathkeeper
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health/alive
+              port: 4456
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 4456
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: oathkeeper-config
+            items:
+              - key: oathkeeper.yaml
+                path: oathkeeper.yaml
+              - key: access-rules.yaml
+                path: access-rules.yaml

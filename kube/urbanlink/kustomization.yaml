@@ -1,0 +1,122 @@
+# Déploiement complet : kubectl apply -k kube/
+# Prérequis :
+#   1. kubectl create configmap kratos-config --from-file=./kratos/ -n urbanconnect
+#   2. kubectl create configmap postgres-init --from-file=init-db.sql --from-file=postgres-init/create-databases.sh -n urbanconnect
+#   3. Remplir kube/secrets.yaml avec les vraies valeurs (ou utiliser Sealed Secrets)
+#   4. Ingress = Traefik (CRD IngressRoute/Middleware) avec ACME natif — installer
+#      Traefik + ses CRDs via Helm AVANT `apply -k` (cf. ingress/ingressroute.yaml).
+#      cert-manager n'est plus requis pour le TLS ingress.
+#   5. Edge security = CrowdSec (agent + LAPI + AppSec) via Helm + plugin bouncer
+#      déclaré dans Traefik (cf. crowdsec/middleware.yaml). Clé bouncer à monter
+#      dans le pod Traefik. La Middleware `crowdsec` est chaînée avant l'auth.
+#
+# Ordre de déploiement recommandé :
+#   1. namespace → secrets
+#   2. postgres (instance unique app+kratos+temporal+directus), postgres-nominatim,
+#      redis, minio, kafka, elasticsearch
+#   3. pgbouncer (après postgres)
+#   4. kratos-migrate (après postgres), minio-init (après minio),
+#      elasticsearch-setup (après elasticsearch — fixe le mdp kibana_system)
+#   5. kratos (après kratos-migrate), temporal (auto-setup après postgres)
+#   6. oathkeeper (après kratos), directus, nominatim, kafka-ui, temporal-ui,
+#      kibana (après elasticsearch-setup)
+#   7. backend (après pgbouncer, redis, kratos, minio, kafka, temporal, elasticsearch)
+#   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
+#   9. frontend (après backend)
+#  10. coturn (DaemonSet hostNetwork sur nœuds publics), geoipupdate, pgadmin
+#  11. ingress Traefik — master (chaînes uc-edge/uc-edge-auth + TLSOption) puis
+#      children (child-public, child-internal) qui référencent le master
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: urbanconnect
+
+resources:
+  # Foundation
+  - namespace.yaml
+  - secrets.yaml
+
+  # Databases
+  - postgres/statefulset.yaml
+  - postgres/service.yaml
+  - postgres-nominatim/statefulset.yaml
+  - postgres-nominatim/service.yaml
+
+  # Connection pooler
+  - pgbouncer/deployment.yaml
+  - pgbouncer/service.yaml
+
+  # Cache
+  - redis/statefulset.yaml
+  - redis/service.yaml
+
+  # Couche async — Kafka (événementiel / fanout) + Temporal (workflows durables)
+  - kafka/statefulset.yaml
+  - kafka/service.yaml
+  - kafka-ui/deployment.yaml
+  - kafka-ui/service.yaml
+  - temporal/deployment.yaml
+  - temporal/service.yaml
+  - temporal-ui/deployment.yaml
+  - temporal-ui/service.yaml
+
+  # Recherche & feeds — Elasticsearch (index de lecture) + Kibana (exploration)
+  - elasticsearch/statefulset.yaml
+  - elasticsearch/service.yaml
+  - elasticsearch/setup-job.yaml
+  - kibana/deployment.yaml
+  - kibana/service.yaml
+
+  # Object storage
+  - minio/statefulset.yaml
+  - minio/service.yaml
+  - minio/init-job.yaml
+
+  # Auth
+  - kratos/migrate-job.yaml
+  - kratos/deployment.yaml
+  - kratos/service.yaml
+
+  # Access proxy — Oathkeeper (forward-auth Kratos à l'edge via Traefik)
+  - oathkeeper/configmap.yaml
+  - oathkeeper/deployment.yaml
+  - oathkeeper/service.yaml
+  - oathkeeper/middleware.yaml
+
+  # CMS
+  - directus/deployment.yaml
+  - directus/service.yaml
+
+  # Geocoding
+  - nominatim/statefulset.yaml
+  - nominatim/service.yaml
+
+  # GeoIP
+  - geoipupdate/pvc.yaml
+  - geoipupdate/cronjob.yaml
+
+  # Admin tools
+  - pgadmin/deployment.yaml
+  - pgadmin/service.yaml
+
+  # Application
+  - backend/deployment.yaml
+  - backend/service.yaml
+  - backend/hpa.yaml
+  - temporal-worker/deployment.yaml
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - frontend/hpa.yaml
+
+  # WebRTC (appels) — STUN/TURN sur les nœuds publics (hostNetwork)
+  - coturn/daemonset.yaml
+
+  # Edge security — CrowdSec bouncer + AppSec (WAF) via plugin Traefik
+  - crowdsec/middleware.yaml
+
+  # Ingress — pattern master/children Traefik (ACME natif)
+  #   master   : politique edge partagée (chaînes uc-edge/uc-edge-auth + TLSOption)
+  #   children : IngressRoutes par tier, référencent le master, extensibles
+  - ingress/master.yaml
+  - ingress/child-public.yaml
+  - ingress/child-internal.yaml

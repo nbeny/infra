@@ -1,0 +1,183 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: urbanconnect
+  labels:
+    app: temporal-worker
+spec:
+  # Process dédié exécutant les workflows + activités Temporal. Doit rester en
+  # cohérence avec le backend (SCHEDULER_BACKEND=temporal) sinon double-exécution
+  # des crons. Un seul réplica suffit (Temporal répartit les tasks ; scaler au
+  # besoin, les workers sont stateless).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-worker
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+    spec:
+      containers:
+        - name: temporal-worker
+          # ⚠️ Image glibc (Debian) dédiée : @temporalio/worker embarque un module
+          # natif (core-bridge) incompatible avec musl → NE PAS réutiliser l'image
+          # backend prod (Alpine). À construire depuis ./backTs sur base node:20-slim
+          # (cf. target à ajouter au Dockerfile) et pousser sous ce tag.
+          image: urbanconnect-temporal-worker:prod
+          # En prod, remplacer par le registry : registry.urbanconnect.fr/temporal-worker:TAG
+          command:
+            - sh
+            - -c
+            - npx prisma generate && npm run temporal:worker:nest
+          env:
+            - name: NODE_ENV
+              value: production
+            # Rôle worker : désactive les consumers Kafka (les events restent à l'API)
+            - name: APP_ROLE
+              value: worker
+            # Doit être cohérent avec le backend (sinon double-exécution cron)
+            - name: SCHEDULER_BACKEND
+              value: temporal
+            - name: ASYNC_BACKEND
+              value: kafka
+            # Database
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: DATABASE_URL
+            # Redis
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: REDIS_PASSWORD
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: REDIS_URL
+            # Kafka (le worker ne consomme pas mais AppModule provisionne le producer)
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_CLIENT_ID
+              value: urbanconnect-temporal-worker
+            - name: KAFKAJS_NO_PARTITIONER_WARNING
+              value: "1"
+            # Temporal
+            - name: TEMPORAL_ADDRESS
+              value: temporal:7233
+            - name: TEMPORAL_NAMESPACE
+              value: default
+            - name: TEMPORAL_TASK_QUEUE
+              value: urbanconnect
+            # Kratos (AppModule bootstrap complet)
+            - name: KRATOS_PUBLIC_URL
+              value: http://kratos:4433
+            - name: KRATOS_ADMIN_URL
+              value: http://kratos:4434
+            - name: KRATOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_WEBHOOK_SECRET
+            # MinIO / S3
+            - name: S3_ENDPOINT
+              value: http://minio:9000
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_USER
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_BUCKET_NAME
+            - name: S3_REGION
+              value: eu-west-3
+            - name: S3_FORCE_PATH_STYLE
+              value: "true"
+            - name: MINIO_ENDPOINT
+              value: minio
+            - name: MINIO_PORT
+              value: "9000"
+            - name: MINIO_USE_SSL
+              value: "false"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_PASSWORD
+            # Nominatim
+            - name: NOMINATIM_INTERNAL_URL
+              value: http://nominatim:8080
+            # JWT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: JWT_SECRET
+            - name: JWT_EXPIRATION
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: JWT_EXPIRATION
+            - name: FRONTEND_URL
+              value: "https://urbanconnect.fr"
+            # Stripe
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_SECRET_KEY
+            - name: STRIPE_CONNECT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_CONNECT_WEBHOOK_SECRET
+            # Google OAuth
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_SECRET
+            # Elasticsearch — le worker exécute le cron nocturne de réindexation
+            # (SearchReindexService, anti-drift 03:00 UTC) → accès ES requis.
+            - name: ELASTICSEARCH_URL
+              value: http://elasticsearch:9200
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: ELASTICSEARCH_PASSWORD
+            - name: SEARCH_ENGINE
+              value: elasticsearch
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kratos
+  namespace: urbanconnect
+  labels:
+    app: kratos
+spec:
+  selector:
+    app: kratos
+  ports:
+    - name: public
+      port: 4433
+      targetPort: 4433
+    - name: admin
+      port: 4434
+      targetPort: 4434

@@ -1,0 +1,87 @@
+# ============================================================================
+# CHILD « internal » — outils d'admin (surface réduite / à durcir).
+# Référence la politique master (uc-edge + uc-tls).
+# Domaines : directus (CMS), minio console, pgadmin.
+#
+# ⚠️ Ces hôtes exposent des consoles d'admin. Recommandé en complément (non fait
+# ici pour rester non-intrusif) : restreindre par IP (Middleware ipWhiteList) ou
+# ajouter une auth basic edge. Ex :
+#   apiVersion: traefik.io/v1alpha1
+#   kind: Middleware
+#   metadata: { name: uc-admin-allowlist, namespace: urbanconnect }
+#   spec: { ipWhiteList: { sourceRange: [ "203.0.113.0/24" ] } }
+# puis chaîner `uc-admin-allowlist` avant `uc-edge` sur ce child (ou dans un
+# Middleware chain dédié côté master).
+# ============================================================================
+
+# ------------------------------------------------------------------- Directus CMS
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-internal-directus
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`directus.urbanconnect.fr`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge
+      services:
+        - name: directus
+          port: 8055
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls
+---
+# --------------------------------------------------------------- MinIO Console
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-internal-minio-console
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`minio.urbanconnect.fr`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge
+      services:
+        - name: minio
+          port: 9001
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls
+---
+# ---------------------------------------------------------------------- PgAdmin
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-internal-pgadmin
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`pgadmin.urbanconnect.fr`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge
+      services:
+        - name: pgadmin
+          port: 80
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls

@@ -1,0 +1,72 @@
+# coturn — STUN/TURN pour les appels WebRTC.
+# hostNetwork : TURN a besoin de l'IP publique du nœud + d'une plage de ports UDP
+# relay joignable de l'extérieur. Un Service ClusterIP/LoadBalancer ne convient pas
+# (relay UDP dynamique). Le backend délivre des credentials TURN éphémères
+# (use-auth-secret) ; les clients atteignent turn:<IP_PUBLIQUE_NŒUD>:3478.
+#
+# ⚠️ À adapter avant prod :
+#   - nodeSelector ci-dessous : cibler le(s) nœud(s) ayant une IP publique routable.
+#   - Ouvrir 3478/tcp+udp et 49160-49200/udp sur le firewall / security group.
+#   - --no-tls/--no-dtls repris du dev : pour la prod, ajouter un cert (turns:5349).
+#   - TURN_URLS du backend doit pointer vers l'IP/FQDN public (voir backend/deployment.yaml).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: coturn
+  namespace: urbanconnect
+  labels:
+    app: coturn
+spec:
+  selector:
+    matchLabels:
+      app: coturn
+  template:
+    metadata:
+      labels:
+        app: coturn
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      # Décommenter et adapter pour n'exécuter coturn que sur les nœuds publics :
+      # nodeSelector:
+      #   urbanconnect.fr/turn: "true"
+      containers:
+        - name: coturn
+          image: coturn/coturn:4.6-alpine
+          command:
+            - sh
+            - -c
+            - |
+              exec turnserver \
+                -n \
+                --log-file=stdout \
+                --listening-port=3478 \
+                --min-port=49160 \
+                --max-port=49200 \
+                --fingerprint \
+                --use-auth-secret \
+                --static-auth-secret="$TURN_SECRET" \
+                --realm=urbanconnect \
+                --no-cli \
+                --no-tls \
+                --no-dtls
+          env:
+            - name: TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: TURN_SECRET
+          ports:
+            - containerPort: 3478
+              hostPort: 3478
+              protocol: TCP
+            - containerPort: 3478
+              hostPort: 3478
+              protocol: UDP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

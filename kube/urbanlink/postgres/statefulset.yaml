@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: urbanconnect
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgis/postgis:16-3.5
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: KRATOS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_DB_USER
+            - name: KRATOS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_DB_PASSWORD
+            - name: KRATOS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_DB_NAME
+            - name: DIRECTUS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: DIRECTUS_DB_USER
+            - name: DIRECTUS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: DIRECTUS_DB_PASSWORD
+            - name: DIRECTUS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: DIRECTUS_DB_NAME
+            - name: TEMPORAL_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: TEMPORAL_DB_USER
+            - name: TEMPORAL_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: TEMPORAL_DB_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            # init-db.sql : kubectl create configmap postgres-init --from-file=init-db.sql -n urbanconnect
+            - name: init-db
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: init-db
+          configMap:
+            name: postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: "fast-ssd"  # Adapter selon le provider (gp3, standard-ssd…)
+        resources:
+          requests:
+            storage: 100Gi

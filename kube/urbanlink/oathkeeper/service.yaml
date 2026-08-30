@@ -1,0 +1,16 @@
+# Decision API interne — cible du Middleware forwardAuth de Traefik.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oathkeeper-api
+  namespace: urbanconnect
+  labels:
+    app: oathkeeper
+spec:
+  type: ClusterIP
+  selector:
+    app: oathkeeper
+  ports:
+    - port: 4456
+      targetPort: 4456
+      name: api

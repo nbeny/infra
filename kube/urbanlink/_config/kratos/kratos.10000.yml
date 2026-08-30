@@ -1,0 +1,171 @@
+version: v1.0.0
+
+dsn: env://DSN
+
+serve:
+  public:
+    base_url: http://localhost:10008/
+    cors:
+      enabled: true
+      allowed_origins:
+        - http://localhost:10013
+        - http://localhost:10012
+        - http://localhost:10008
+      allowed_methods:
+        - POST
+        - GET
+        - PUT
+        - PATCH
+        - DELETE
+      allowed_headers:
+        - Authorization
+        - Cookie
+        - Content-Type
+        - X-CSRF-Token
+      exposed_headers:
+        - Content-Type
+        - Set-Cookie
+      allow_credentials: true
+  admin:
+    base_url: http://kratos:4434/
+
+cookies:
+  # Use Lax for development - allows top-level navigation (like login redirects)
+  # In Kratos v1.0.0, 'secure' property is not allowed in config
+  path: /
+  same_site: Lax
+
+selfservice:
+  default_browser_return_url: http://localhost:10013/
+  allowed_return_urls:
+    - http://localhost:10013
+    - http://localhost:10013/auth/callback
+    - http://localhost:10013/profile/settings/two-factor
+
+  methods:
+    password:
+      enabled: true
+    totp:
+      enabled: true
+      config:
+        issuer: UrbanConnect
+    lookup_secret:
+      enabled: true
+    link:
+      enabled: true
+    code:
+      enabled: true
+    oidc:
+      enabled: true
+      config:
+        providers:
+          - id: google
+            provider: google
+            # Google OAuth Configuration
+            # ⚠️ PLACEHOLDER — le vrai client_secret ne doit JAMAIS être committé.
+            # Injecter le bloc `providers` via SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS
+            # (JSON base64) — voir kratos/CLAUDE.md.
+            client_id: 34451382977-1i85msqout39diap90olj9q8noftblc7.apps.googleusercontent.com
+            client_secret: GOCSPX-REPLACE_VIA_ENV
+            mapper_url: file:///etc/config/kratos/oidc.google.jsonnet
+            scope:
+              - email
+              - profile
+            requested_claims:
+              id_token:
+                email:
+                  essential: true
+                email_verified:
+                  essential: true
+                given_name:
+                  essential: true
+
+  flows:
+    error:
+      ui_url: http://localhost:10013/auth/error
+    recovery:
+      enabled: true
+      ui_url: http://localhost:10013/auth/recovery
+      use: code
+      after:
+        default_browser_return_url: http://localhost:10013/auth/resetPassword/success
+    verification:
+      enabled: true
+      ui_url: http://localhost:10013/auth/verificationEmail
+      use: code
+      after:
+        default_browser_return_url: http://localhost:10013/auth/verificationEmail/Sent/success
+    logout:
+      after:
+        default_browser_return_url: http://localhost:10013/auth/login
+    login:
+      ui_url: http://localhost:10013/auth/login
+      lifespan: 10m
+      after:
+        default_browser_return_url: http://localhost:10013/explore
+        oidc:
+          hooks:
+            - hook: revoke_active_sessions
+    registration:
+      lifespan: 30m
+      ui_url: http://localhost:10013/auth/register
+      after:
+        password:
+          hooks:
+            - hook: show_verification_ui
+            # - hook: web_hook
+            #   config:
+            #     url: http://host.docker.internal:4000/api/auth/webhook/kratos
+            #     method: POST
+            #     body: file:///etc/config/kratos/identity.schema.json
+            #     response:
+            #       ignore: true
+        oidc:
+          hooks:
+            - hook: show_verification_ui
+            # - hook: web_hook
+            #   config:
+            #     url: http://host.docker.internal:4000/api/auth/webhook/kratos
+            #     method: POST
+            #     body: file:///etc/config/kratos/identity.schema.json
+            #     response:
+            #       ignore: true
+    settings:
+      ui_url: http://localhost:10013/profile/settings/two-factor
+      privileged_session_max_age: 15m
+      required_aal: highest_available
+      # after:
+        # profile:
+          # hooks:
+            # - hook: web_hook
+            #   config:
+            #     url: http://host.docker.internal:4000/api/auth/webhook/kratos
+            #     method: POST
+            #     body: file:///etc/config/kratos/identity.schema.json
+            #     response:
+            #       ignore: true
+
+log:
+  level: debug
+  format: text
+  leak_sensitive_values: false
+
+ciphers:
+  algorithm: xchacha20-poly1305
+
+hashers:
+  algorithm: bcrypt
+  bcrypt:
+    cost: 8
+
+identity:
+  default_schema_id: default
+  schemas:
+    - id: default
+      url: file:///etc/config/kratos/identity.schema.json
+
+courier:
+  smtp:
+    connection_uri: smtp://mailslurper:1025/?skip_ssl_verify=true
+    from_address: noreply@urbanconnect.fr
+    from_name: UrbanConnect

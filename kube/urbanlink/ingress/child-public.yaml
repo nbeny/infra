@@ -1,0 +1,138 @@
+# ============================================================================
+# CHILD « public » — surface exposée aux utilisateurs finaux.
+# Référence la politique master (uc-edge / uc-edge-auth + uc-tls).
+# Domaines : frontend, api, kratos, nominatim, s3.
+# Extensible : ajouter une route ici, ou créer un nouveau child, sans toucher au master.
+# ============================================================================
+
+# ------------------------------------------------------------------- Frontend
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-public-frontend
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`urbanconnect.fr`) || Host(`www.urbanconnect.fr`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge
+      services:
+        - name: frontend
+          port: 3000
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls
+---
+# --------------------------------------------------- Backend API + GraphQL (auth)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-public-api
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    # `/metrics` et `/health*` sont exclus de la surface publique.
+    #
+    # La règle ne portait qu'un `Host(...)` : TOUT le backend était exposé, y
+    # compris l'exposition Prometheus (noms d'opérations GraphQL, tables
+    # Postgres, volumétrie, mémoire) et la readiness, dont les messages
+    # d'erreur nomment les dépendances internes. Rien de tout cela n'a de
+    # raison d'être joignable depuis Internet.
+    #
+    # Ces routes restent atteignables là où elles servent : kubelet interroge
+    # les sondes directement sur l'IP du pod, et un collecteur Prometheus vit
+    # dans le cluster — ni l'un ni l'autre ne passe par l'Ingress.
+    - match: Host(`api.urbanconnect.fr`) && !PathPrefix(`/metrics`) && !PathPrefix(`/health`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge-auth      # crowdsec + oathkeeper (session Kratos à l'edge)
+      services:
+        - name: backend
+          port: 4000
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls
+---
+# ---------------------------------------------------------------------- Kratos
+# Serveur d'auth : jamais derrière oathkeeper, mais protégé par crowdsec (uc-edge).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-public-kratos
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`kratos.urbanconnect.fr`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge
+      services:
+        - name: kratos
+          port: 4433
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls
+---
+# ------------------------------------------------------------------- Nominatim
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-public-nominatim
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`nominatim.urbanconnect.fr`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge
+      services:
+        - name: nominatim
+          port: 8080
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls
+---
+# ------------------------------------------------------------------- MinIO S3 API
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: child-public-s3
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`s3.urbanconnect.fr`)
+      kind: Rule
+      middlewares:
+        - name: uc-edge
+      services:
+        - name: minio
+          port: 9000
+  tls:
+    certResolver: letsencrypt
+    options:
+      name: uc-tls

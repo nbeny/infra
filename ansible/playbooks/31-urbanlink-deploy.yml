@@ -1,0 +1,148 @@
+---
+# Deploie le stack UrbanLink (kube/urbanlink/) sur le cluster de la VM cible.
+#
+# Prerequis :
+#   1. Le cluster existe, avec sa StorageClass et Traefik/CrowdSec
+#      -> ansible-playbook playbooks/20-debian-k8s.yml -l urbanlink
+#   2. Les trois images applicatives sont construites
+#      -> ansible-playbook playbooks/30-urbanlink-images.yml
+#
+#   ansible-playbook playbooks/31-urbanlink-deploy.yml
+#   ansible-playbook playbooks/31-urbanlink-deploy.yml -e urbanlink_wipe=true   # repart de zero
+
+- name: Deployer le stack UrbanLink
+  hosts: urbanlink
+  gather_facts: true
+  become: true
+
+  vars:
+    urbanlink_manifests_src: "{{ playbook_dir }}/../../kube/urbanlink"
+    urbanlink_manifests_dest: /opt/urbanlink-kube
+    urbanlink_namespace: urbanconnect
+    urbanlink_kubeconfig: /etc/kubernetes/admin.conf
+    urbanlink_wipe: false
+
+  tasks:
+
+    - name: Verifier que le cluster repond
+      ansible.builtin.command: "kubectl --kubeconfig {{ urbanlink_kubeconfig }} get --raw /healthz"
+      register: ul_health
+      changed_when: false
+      failed_when: ul_health.stdout != 'ok'
+
+    - name: Verifier qu'une StorageClass par defaut existe
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ urbanlink_kubeconfig }} get storageclass
+          -o jsonpath='{range .items[*]}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}'
+          | grep -c true
+        executable: /bin/bash
+      register: ul_sc
+      changed_when: false
+      failed_when: ul_sc.stdout | int < 1
+
+    # Sans les CRD Traefik, `kubectl apply -k` echoue en bloc sur les
+    # IngressRoute et Middleware.
+    - name: Verifier que les CRD Traefik sont presentes
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ urbanlink_kubeconfig }} get crd -o name
+          | grep -cE 'ingressroutes.traefik.io|middlewares.traefik.io'
+        executable: /bin/bash
+      register: ul_crd
+      changed_when: false
+      failed_when: ul_crd.stdout | int < 2
+
+    - name: Supprimer le namespace existant
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ urbanlink_kubeconfig }}
+        delete namespace {{ urbanlink_namespace }} --ignore-not-found --wait=true --timeout=300s
+      when: urbanlink_wipe | bool
+      changed_when: true
+
+    # rsync tourne en tant que ansible_user (cf. become: false ci-dessous) :
+    # le repertoire doit exister et lui appartenir, sinon mkdir echoue dans /opt.
+    - name: Creer le repertoire des manifests
+      ansible.builtin.file:
+        path: "{{ urbanlink_manifests_dest }}"
+        state: directory
+        owner: "{{ lab_admin_user }}"
+        group: "{{ lab_admin_user }}"
+        mode: "0755"
+
+    - name: Transferer les manifests sur la VM
+      become: false
+      ansible.posix.synchronize:
+        src: "{{ urbanlink_manifests_src }}/"
+        dest: "{{ urbanlink_manifests_dest }}/"
+        delete: true
+
+    - name: Creer le namespace
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ urbanlink_kubeconfig }}
+        apply -f {{ urbanlink_manifests_dest }}/namespace.yaml
+      changed_when: true
+
+    # `create ... --dry-run=client | apply -f -` rend l'operation idempotente :
+    # `kubectl create configmap` seul echouerait au deuxieme passage.
+    - name: Creer les ConfigMaps prerequises
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
+          create configmap {{ item.name }} --from-file={{ item.src }}
+          --dry-run=client -o yaml
+          | kubectl --kubeconfig {{ urbanlink_kubeconfig }} apply -f -
+        executable: /bin/bash
+      loop:
+        - { name: kratos-config, src: "{{ urbanlink_manifests_dest }}/_config/kratos/" }
+        - { name: postgres-init, src: "{{ urbanlink_manifests_dest }}/_config/postgres-init/" }
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+
+    - name: Appliquer le kustomize
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ urbanlink_kubeconfig }}
+        apply -k {{ urbanlink_manifests_dest }}
+      register: ul_apply
+      changed_when: true
+
+    - name: Resultat de l'application
+      ansible.builtin.debug:
+        msg: "{{ ul_apply.stdout_lines | length }} objets crees ou mis a jour"
+
+    # Les dependances entre composants font que plusieurs pods bouclent en
+    # CrashLoopBackOff pendant quelques minutes avant que leurs bases soient
+    # pretes : c'est attendu, on laisse converger avant de compter.
+    - name: Laisser le stack converger
+      ansible.builtin.pause:
+        seconds: "{{ urbanlink_settle_seconds | default(180) }}"
+
+    - name: Relever l'etat des pods
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
+          get pods --no-headers 2>/dev/null | awk '{print $3}' | sort | uniq -c | sort -rn
+        executable: /bin/bash
+      register: ul_status
+      changed_when: false
+
+    - name: Relever les PVC
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
+          get pvc --no-headers 2>/dev/null | awk '{print $2}' | sort | uniq -c
+        executable: /bin/bash
+      register: ul_pvc
+      changed_when: false
+
+    - name: Etat du deploiement
+      ansible.builtin.debug:
+        msg:
+          - "--- pods par etat ---"
+          - "{{ ul_status.stdout_lines }}"
+          - "--- PVC par etat ---"
+          - "{{ ul_pvc.stdout_lines }}"
+          - ""
+          - "Suivi :  kubectl -n {{ urbanlink_namespace }} get pods -w"
+          - "Detail d'un pod :  kubectl -n {{ urbanlink_namespace }} describe pod <nom>"

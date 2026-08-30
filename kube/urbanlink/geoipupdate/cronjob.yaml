@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: geoipupdate
+  namespace: urbanconnect
+  labels:
+    app: geoipupdate
+spec:
+  # Toutes les 72h (équivalent GEOIPUPDATE_FREQUENCY: 72)
+  schedule: "0 3 */3 * *"
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: geoipupdate
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: geoipupdate
+              image: maxmindinc/geoipupdate:latest
+              env:
+                - name: GEOIPUPDATE_ACCOUNT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: urbanconnect-secrets
+                      key: MAXMIND_ACCOUNT_ID
+                - name: GEOIPUPDATE_LICENSE_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: urbanconnect-secrets
+                      key: MAXMIND_LICENSE_KEY
+                - name: GEOIPUPDATE_EDITION_IDS
+                  value: GeoLite2-Country
+                - name: GEOIPUPDATE_FREQUENCY
+                  value: "0"  # Désactivé en interne, géré par le CronJob K8s
+              volumeMounts:
+                - name: geoip-data
+                  mountPath: /usr/share/GeoIP
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+          volumes:
+            - name: geoip-data
+              persistentVolumeClaim:
+                claimName: geoip-data

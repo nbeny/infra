@@ -1,0 +1,23 @@
+# Middleware Traefik forwardAuth → Oathkeeper Decision API.
+# apiVersion traefik.io/v1alpha1 = Traefik v3. Pour Traefik v2, remplacer par
+# traefik.containo.us/v1alpha1.
+#
+# Traefik envoie chaque requête entrante à `address` avec les en-têtes
+# X-Forwarded-Method/Proto/Host/Uri (trustForwardHeader). Oathkeeper reconstruit
+# l'URL d'origine, applique les access-rules et répond :
+#   200 → Traefik laisse passer et recopie authResponseHeaders vers l'upstream
+#   401/403 → Traefik bloque (redirection login gérée par le handler d'erreurs)
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: oathkeeper-auth
+  namespace: urbanconnect
+spec:
+  forwardAuth:
+    address: http://oathkeeper-api.urbanconnect.svc.cluster.local:4456/decisions
+    trustForwardHeader: true
+    authResponseHeaders:
+      - X-User-Id
+      - X-User-Email
+      # Décommenter si passage au mutator id_token (JWT à l'edge) :
+      # - Authorization

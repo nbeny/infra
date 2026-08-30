@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nominatim
+  namespace: urbanconnect
+  labels:
+    app: nominatim
+spec:
+  serviceName: nominatim
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nominatim
+  template:
+    metadata:
+      labels:
+        app: nominatim
+    spec:
+      # Nominatim a besoin de beaucoup de RAM pour l'import initial
+      # En prod : utiliser une image pré-construite avec les données déjà importées
+      # plutôt que de relancer l'import au démarrage (PBF_URL télécharge ~30Go)
+      containers:
+        - name: nominatim
+          image: mediagis/nominatim:5.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PBF_URL
+              value: "https://download.geofabrik.de/europe-latest.osm.pbf"
+            - name: REPLICATION_URL
+              value: "https://download.geofabrik.de/europe-updates/"
+            - name: IMPORT_WIKIPEDIA
+              value: "false"
+            - name: POSTGRES_HOST
+              value: postgres-nominatim
+            - name: POSTGRES_USER
+              value: nominatim
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: NOMINATIM_DB_PASSWORD
+            - name: POSTGRES_DB
+              value: nominatim
+          volumeMounts:
+            - name: nominatim-data
+              mountPath: /var/lib/postgresql/16/main
+            # Shared memory simulée en K8s (équivalent shm_size: 20gb)
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 4Gi
+            limits:
+              cpu: 4000m
+              memory: 16Gi  # Import initial très gourmand
+          readinessProbe:
+            httpGet:
+              path: /search?q=paris&format=json
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 10
+      volumes:
+        # Shared memory (équivalent de shm_size: 20gb dans docker-compose)
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 20Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: nominatim-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 200Gi  # Europe OSM + index PostgreSQL

@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elasticsearch-setup
+  namespace: urbanconnect
+  labels:
+    app: elasticsearch-setup
+spec:
+  # One-shot : fixe le mot de passe du compte interne `kibana_system`. Kibana
+  # refuse de se connecter avec le superuser `elastic`, il lui faut ce compte
+  # dédié. Mirroir du service `elasticsearch-setup` du docker-compose 10000.
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: elasticsearch-setup
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: elasticsearch-setup
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - |
+              until curl -s -u "elastic:$ELASTIC_PASSWORD" http://elasticsearch:9200/_cluster/health \
+                | grep -qE '"status":"(green|yellow)"'; do
+                echo "En attente d'Elasticsearch..."; sleep 5;
+              done
+              curl -s -u "elastic:$ELASTIC_PASSWORD" -X POST \
+                http://elasticsearch:9200/_security/user/kibana_system/_password \
+                -H "Content-Type: application/json" \
+                -d "{\"password\":\"$KIBANA_PASSWORD\"}"
+              echo "kibana_system password set"
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: ELASTICSEARCH_PASSWORD
+            - name: KIBANA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KIBANA_SYSTEM_PASSWORD

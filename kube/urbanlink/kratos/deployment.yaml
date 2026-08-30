@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kratos
+  namespace: urbanconnect
+  labels:
+    app: kratos
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kratos
+  template:
+    metadata:
+      labels:
+        app: kratos
+    spec:
+      containers:
+        - name: kratos
+          image: oryd/kratos:latest
+          command:
+            - kratos
+            - serve
+            - -c
+            - /etc/config/kratos/kratos.yml
+            - --watch-courier
+          ports:
+            - containerPort: 4433
+              name: public
+            - containerPort: 4434
+              name: admin
+          env:
+            - name: DSN
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_DSN
+            - name: LOG_LEVEL
+              value: info
+            - name: DEFAULT_NETWORK_ID
+              value: "00000000-0000-0000-0000-000000000000"
+            - name: COURIER_SMTP_CONNECTION_URI
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMTP_CONNECTION_URI
+            - name: COURIER_SMTP_FROM_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMTP_FROM_ADDRESS
+            - name: COURIER_SMTP_FROM_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMTP_FROM_NAME
+            - name: SECRETS_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_SECRET
+            - name: SECRETS_CIPHER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_SECRET
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_SECRET
+            - name: SELFSERVICE_DEFAULT_BROWSER_RETURN_URL
+              value: "https://urbanconnect.fr"
+            - name: SERVE_PUBLIC_BASE_URL
+              value: "https://kratos.urbanconnect.fr"
+            - name: COOKIES_DOMAIN
+              value: "urbanconnect.fr"
+            - name: COOKIES_SAME_SITE
+              value: "Lax"
+          volumeMounts:
+            - name: kratos-config
+              mountPath: /etc/config/kratos
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health/alive
+              port: 4433
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 4433
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        # Créer avec : kubectl create configmap kratos-config \
+        #   --from-file=./kratos/ -n urbanconnect
+        - name: kratos-config
+          configMap:
+            name: kratos-config

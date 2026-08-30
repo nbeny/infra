@@ -1,0 +1,15 @@
+# Volume partagé entre geoipupdate (écriture) et frontend (lecture)
+# Nécessite un StorageClass avec accessMode ReadWriteMany (ex: NFS, EFS, GlusterFS)
+# Si un seul nœud : ReadWriteOnce suffit
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: geoip-data
+  namespace: urbanconnect
+spec:
+  accessModes:
+    - ReadWriteMany  # Partagé entre geoipupdate et frontend
+  # storageClassName: "nfs"  # Adapter selon le provider
+  resources:
+    requests:
+      storage: 1Gi

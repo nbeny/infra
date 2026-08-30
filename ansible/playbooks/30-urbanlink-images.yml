@@ -1,0 +1,247 @@
+---
+# Construit les trois images applicatives UrbanLink sur la VM cible et les rend
+# visibles par kubelet.
+#
+# Elles n'existent dans aucun registre : le depot amont ne fournit que des
+# Dockerfiles. Sans elles, backend / frontend / temporal-worker restent en
+# ErrImageNeverPull.
+#
+# Prerequis -- deposer les sources sur le noeud de controle (depuis Windows) :
+#
+#   cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
+#   tar -czf - --exclude=node_modules --exclude=.next --exclude=dist \
+#              --exclude=.git --exclude=coverage backTs front \
+#     | ssh root@192.168.100.50 'mkdir -p /root/urbanlink-src && tar -xzf - -C /root/urbanlink-src'
+#
+# Puis :
+#   ansible-playbook playbooks/30-urbanlink-images.yml
+#
+# Compte 15 a 30 min : les deux `npm install` dominent le temps de build.
+
+- name: Construire les images applicatives UrbanLink
+  hosts: urbanlink
+  gather_facts: true
+  become: true
+
+  vars:
+    # Sources sur le NOEUD DE CONTROLE (le noeud Proxmox), pas sur la VM.
+    urbanlink_src_control: /root/urbanlink-src
+    # Destination sur la VM.
+    urbanlink_src_remote: /opt/urbanlink-src
+    urbanlink_build_dir: /opt/urbanlink-build
+    urbanlink_image_tag: prod
+
+    # Injectees dans le bundle Next.js au build : les changer impose un rebuild
+    # de l'image, elles ne sont pas lisibles a l'execution.
+    urbanlink_frontend_build_args:
+      NEXT_PUBLIC_API_URL: "http://backend:4000"
+      NEXT_PUBLIC_GRAPHQL_URL: "http://backend:4000/graphql"
+      NEXT_PUBLIC_GRAPHQL_WS_URL: "ws://backend:4000/graphql"
+      NEXT_PUBLIC_KRATOS_PUBLIC_URL: "http://kratos:4433"
+      NEXT_PUBLIC_MINIO_URL: "http://minio:9000"
+      NEXT_PUBLIC_SITE_URL: "http://urbanlink.lab"
+
+    # Le Dockerfile du backend utilise `npm ci`, qui echoue volontairement si le
+    # lockfile a derive du package.json. C'est le cas aujourd'hui dans le depot
+    # amont :
+    #
+    #   npm error `npm ci` can only install packages when your package.json and
+    #   package-lock.json [...] are in sync.
+    #   npm error Missing: react@19.2.8 from lock file
+    #   npm error Missing: react-dom@19.2.8 from lock file      (+3 autres)
+    #
+    # La vraie correction est cote depot applicatif : y lancer `npm install`
+    # et commiter le package-lock.json mis a jour. En attendant, cette bascule
+    # regenere le lockfile DANS LA COPIE de build (jamais dans ton depot), ce
+    # qui permet de valider la chaine de deploiement.
+    #
+    # A laisser a false en usage normal : regenerer un lockfile a la volee
+    # supprime exactement la garantie de reproductibilite qu'apporte `npm ci`.
+    urbanlink_backend_relock: false
+
+    urbanlink_images:
+      - name: urbanconnect-backend
+        context: backTs
+        dockerfile: Dockerfile
+        target: production
+      - name: urbanconnect-frontend
+        context: front
+        dockerfile: Dockerfile
+        target: production
+      - name: urbanconnect-temporal-worker
+        context: backTs
+        dockerfile: _build/Dockerfile.temporal-worker
+        target: ""
+
+  tasks:
+
+    - name: Verifier que les sources sont sur le noeud de controle
+      ansible.builtin.stat:
+        path: "{{ urbanlink_src_control }}/{{ item }}"
+      register: urbanlink_src_check
+      delegate_to: localhost
+      become: false
+      loop: [backTs, front]
+
+    - name: Echouer si les sources sont absentes
+      ansible.builtin.fail:
+        msg: >-
+          {{ urbanlink_src_control }} ne contient pas backTs/ et front/.
+          Depose-les d'abord (voir l'en-tete de ce playbook).
+      when: urbanlink_src_check.results | rejectattr('stat.exists') | list | length > 0
+
+    - name: Creer les repertoires de build sur la VM
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ lab_admin_user }}"
+        group: "{{ lab_admin_user }}"
+        mode: "0755"
+      loop:
+        - "{{ urbanlink_src_remote }}"
+        - "{{ urbanlink_build_dir }}"
+
+    # `synchronize` lance rsync par-dessus SSH en tant que ansible_user : le
+    # combiner avec become casse la commande distante. Le repertoire cible
+    # appartient deja a cet utilisateur (tache precedente).
+    - name: Transferer les sources sur la VM
+      become: false
+      ansible.posix.synchronize:
+        src: "{{ urbanlink_src_control }}/"
+        dest: "{{ urbanlink_src_remote }}/"
+        delete: false
+        rsync_opts:
+          - "--exclude=node_modules"
+          - "--exclude=.next"
+          - "--exclude=dist"
+          - "--exclude=.git"
+          - "--exclude=coverage"
+
+    # `copy` ne cree pas les repertoires intermediaires de la destination.
+    - name: Creer le repertoire du Dockerfile worker
+      ansible.builtin.file:
+        path: "{{ urbanlink_src_remote }}/backTs/_build"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # Le Dockerfile du worker vient de CE depot, pas du depot applicatif.
+    - name: Deposer le Dockerfile du worker temporal
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../kube/urbanlink/_build/Dockerfile.temporal-worker"
+        dest: "{{ urbanlink_src_remote }}/backTs/_build/Dockerfile.temporal-worker"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Resynchroniser le lockfile du backend (copie de build uniquement)
+      when: urbanlink_backend_relock | bool
+      block:
+
+        # Surtout PAS de --legacy-peer-deps ici : il change la resolution des
+        # dependances, si bien que le lockfile produit ne satisfait toujours
+        # pas le `npm ci` du Dockerfile, qui lui tourne sans ce drapeau. Le
+        # lockfile doit etre genere avec exactement les memes options que
+        # celles utilisees pour le consommer.
+        - name: Regenerer package-lock.json avec node:20-alpine
+          ansible.builtin.command: >-
+            docker run --rm
+              -v {{ urbanlink_src_remote }}/backTs:/app
+              -w /app
+              node:20-alpine
+              npm install --package-lock-only --no-audit --no-fund
+          changed_when: true
+          async: 1200
+          poll: 20
+
+        - name: Verifier que npm ci accepte desormais le lockfile
+          ansible.builtin.command: >-
+            docker run --rm
+              -v {{ urbanlink_src_remote }}/backTs:/app
+              -w /app
+              node:20-alpine
+              npm ci --dry-run
+          register: urbanlink_relock_check
+          changed_when: false
+          async: 900
+          poll: 20
+
+        - name: Avertir que le lockfile a ete regenere
+          ansible.builtin.debug:
+            msg: >-
+              package-lock.json a ete regenere dans la copie de build. Ton depot
+              UrbanConnct n'est pas modifie -- pense a y lancer `npm install`
+              dans backTs/ et a commiter le lockfile, sinon le probleme
+              reviendra a chaque build.
+
+    - name: Construire les images
+      ansible.builtin.command:
+        cmd: >-
+          docker build
+            -f {{ item.dockerfile }}
+            {{ '--target ' ~ item.target if item.target | length > 0 else '' }}
+            -t {{ item.name }}:{{ urbanlink_image_tag }}
+            {% if item.context == 'front' %}
+            {% for k, v in urbanlink_frontend_build_args.items() %}--build-arg {{ k }}={{ v }} {% endfor %}
+            {% endif %}
+            .
+        chdir: "{{ urbanlink_src_remote }}/{{ item.context }}"
+      loop: "{{ urbanlink_images }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: urbanlink_build
+      changed_when: true
+      async: 3600
+      poll: 30
+
+    # ---------------------------------------------------------------------
+    #  Rendre les images visibles par kubelet
+    # ---------------------------------------------------------------------
+    # Piege classique : `docker build` ecrit dans le magasin d'images de Docker,
+    # alors que kubelet interroge containerd dans le namespace `k8s.io`. Les
+    # deux ne se voient pas, meme si containerd est le runtime des deux. Il faut
+    # donc exporter puis reimporter dans le bon namespace.
+    - name: Importer les images dans containerd (namespace k8s.io)
+      ansible.builtin.shell:
+        cmd: >-
+          docker save {{ item.name }}:{{ urbanlink_image_tag }}
+          | ctr -n k8s.io images import --no-unpack=false -
+        executable: /bin/bash
+      loop: "{{ urbanlink_images }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+      async: 1800
+      poll: 20
+
+    # Verification via `ctr` et non `crictl` : ctr est fourni avec containerd,
+    # donc toujours present, alors que crictl vient du paquet cri-tools.
+    - name: Verifier que kubelet voit les images
+      ansible.builtin.shell:
+        cmd: "ctr -n k8s.io images ls -q | grep -c '{{ item.name }}:{{ urbanlink_image_tag }}'"
+        executable: /bin/bash
+      register: urbanlink_ctr
+      changed_when: false
+      failed_when: urbanlink_ctr.stdout | int < 1
+      loop: "{{ urbanlink_images }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Lister les images importees
+      ansible.builtin.shell:
+        cmd: "ctr -n k8s.io images ls -q | grep urbanconnect"
+        executable: /bin/bash
+      register: urbanlink_images_final
+      changed_when: false
+
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "{{ urbanlink_images_final.stdout_lines }}"
+          - ""
+          - >-
+            Images construites et importees dans containerd. Les Deployments les
+            trouveront localement : le tag :{{ urbanlink_image_tag }} n'etant pas
+            `latest`, imagePullPolicy vaut IfNotPresent par defaut et kubelet ne
+            tentera pas de les telecharger.

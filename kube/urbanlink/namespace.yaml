@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: urbanconnect
+  labels:
+    app: urbanconnect
+    env: production

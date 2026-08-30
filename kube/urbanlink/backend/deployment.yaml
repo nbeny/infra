@@ -1,0 +1,274 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: urbanconnect
+  labels:
+    app: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: urbanconnect-backend:prod
+          # En prod, remplacer par le registry : registry.urbanconnect.fr/backend:TAG
+          ports:
+            - containerPort: 4000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "4000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: DATABASE_URL
+            # MinIO / S3
+            - name: S3_ENDPOINT
+              value: http://minio:9000
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_USER
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_BUCKET_NAME
+            - name: S3_REGION
+              value: eu-west-3
+            - name: S3_FORCE_PATH_STYLE
+              value: "true"
+            # MinIO legacy
+            - name: MINIO_ENDPOINT
+              value: minio
+            - name: MINIO_PORT
+              value: "9000"
+            - name: MINIO_USE_SSL
+              value: "false"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_PASSWORD
+            # Kratos
+            - name: KRATOS_PUBLIC_URL
+              value: http://kratos:4433
+            - name: KRATOS_ADMIN_URL
+              value: http://kratos:4434
+            # Redis
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: REDIS_PASSWORD
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: REDIS_URL
+            # Nominatim
+            - name: NOMINATIM_INTERNAL_URL
+              value: http://nominatim:8080
+            # JWT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: JWT_SECRET
+            - name: JWT_EXPIRATION
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: JWT_EXPIRATION
+            # Jeton exigé par GET /metrics. `optional` pour ne pas empêcher un
+            # pod de démarrer sur un cluster où le secret n'a pas encore la
+            # clé : dans ce cas /metrics répond 403 en production (fermé par
+            # défaut), ce qui est le comportement voulu.
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: METRICS_TOKEN
+                  optional: true
+            # CORS
+            - name: CORS_ORIGIN
+              value: "https://urbanconnect.fr"
+            - name: FRONTEND_URL
+              value: "https://urbanconnect.fr"
+            # Stripe
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_SECRET_KEY
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_PUBLISHABLE_KEY
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_WEBHOOK_SECRET
+            - name: STRIPE_CONNECT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_CONNECT_WEBHOOK_SECRET
+            # SMS
+            - name: SMSAPI_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMSAPI_TOKEN
+            - name: SMSAPI_SENDER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMSAPI_SENDER
+            # Sendcloud
+            - name: SENDCLOUD_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_PUBLIC_KEY
+            - name: SENDCLOUD_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_SECRET_KEY
+            # Google OAuth
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_SECRET
+            # Elasticsearch (searchListings + 3 feeds + autocomplete + facettes ;
+            # fallback Postgres auto si indispo — kill-switch SEARCH_ENGINE=postgres)
+            - name: ELASTICSEARCH_URL
+              value: http://elasticsearch:9200
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: ELASTICSEARCH_PASSWORD
+            - name: SEARCH_ENGINE
+              value: elasticsearch
+            # Kafka (événementiel / fanout / logs métier)
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_CLIENT_ID
+              value: urbanconnect-backend
+            - name: KAFKAJS_NO_PARTITIONER_WARNING
+              value: "1"
+            # Temporal (workflows durables / timers / sagas)
+            - name: TEMPORAL_ADDRESS
+              value: temporal:7233
+            - name: TEMPORAL_NAMESPACE
+              value: default
+            - name: TEMPORAL_TASK_QUEUE
+              value: urbanconnect
+            # Backend des jobs planifiés (temporal | bullmq) — le worker dédié
+            # (deployment temporal-worker) doit tourner avec la même valeur.
+            - name: SCHEDULER_BACKEND
+              value: temporal
+            # Couche async des routes migrées (kafka | bullmq)
+            - name: ASYNC_BACKEND
+              value: kafka
+            # Kratos webhook (secret requis au boot même si le hook est off)
+            - name: KRATOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_WEBHOOK_SECRET
+            # Klipy (GIFs messagerie) — vide = mode mock
+            - name: KLIPY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KLIPY_API_KEY
+            # Appels WebRTC (coturn) — credentials TURN éphémères délivrés par le backend
+            - name: FEATURE_CALLS
+              value: "true"
+            - name: TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: TURN_SECRET
+            # URLs STUN/TURN publiques annoncées au navigateur (IP/FQDN public du
+            # nœud coturn — cf. kube/coturn/daemonset.yaml).
+            - name: TURN_URLS
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: TURN_URLS
+            - name: TURN_TTL_SECONDS
+              value: "3600"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          # Liveness : « le processus est-il vivant ? ». Reste sur /health, qui
+          # ne touche AUCUNE dépendance externe — délibérément. Une liveness qui
+          # dépendrait de Postgres ferait redémarrer tous les pods en boucle
+          # pendant une panne de base, transformant une panne de dépendance en
+          # panne totale.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          # Readiness : « peut-il servir du trafic ? ». Interroge réellement
+          # Postgres, Redis et Kafka (Elasticsearch est signalé mais non
+          # bloquant : la recherche a un fallback Postgres). Un échec retire le
+          # pod du Service sans le tuer — il se remettra à recevoir du trafic
+          # dès que la dépendance revient, sans redémarrage.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3

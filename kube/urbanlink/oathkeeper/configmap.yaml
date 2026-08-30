@@ -1,0 +1,136 @@
+# Configuration Ory Oathkeeper — Identity & Access Proxy en mode DECISION API.
+# Traefik (Middleware forwardAuth) interroge /decisions ; Oathkeeper valide la
+# session Kratos, applique la policy (access-rules.yaml) et injecte des headers
+# d'identité vers l'upstream. Oathkeeper n'est JAMAIS dans le chemin du trafic
+# réel — seul le sous-appel d'auth le traverse.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oathkeeper-config
+  namespace: urbanconnect
+  labels:
+    app: oathkeeper
+data:
+  oathkeeper.yaml: |
+    log:
+      level: info
+      format: json
+
+    serve:
+      api:
+        port: 4456        # Decision API + /health (appelé par Traefik)
+      proxy:
+        port: 4455        # inutilisé en mode decision (on ne proxifie pas)
+
+    access_rules:
+      matching_strategy: regexp
+      repositories:
+        - file:///etc/oathkeeper/access-rules.yaml
+
+    errors:
+      fallback:
+        - json
+      handlers:
+        json:
+          enabled: true
+        redirect:
+          enabled: true
+          config:
+            to: https://urbanconnect.fr/login
+            when:
+              - error: [401, 403]
+                request:
+                  header:
+                    accept:
+                      - text/html
+
+    authenticators:
+      # Session par cookie navigateur (ory_kratos_session) validée via Kratos whoami
+      cookie_session:
+        enabled: true
+        config:
+          check_session_url: http://kratos.urbanconnect.svc.cluster.local:4433/sessions/whoami
+          preserve_path: true
+          preserve_query: true
+          only:
+            - ory_kratos_session
+      # Session par token (apps mobiles / API) dans X-Session-Token
+      bearer_token:
+        enabled: true
+        config:
+          check_session_url: http://kratos.urbanconnect.svc.cluster.local:4433/sessions/whoami
+          token_from:
+            header: X-Session-Token
+      # Autorise le passage sans session (subject=guest) — l'authZ fine reste au backend
+      anonymous:
+        enabled: true
+        config:
+          subject: guest
+      noop:
+        enabled: true
+
+    authorizers:
+      allow:
+        enabled: true
+      deny:
+        enabled: true
+
+    mutators:
+      # Injecte l'identité en clair vers l'upstream (pas de gestion de clés).
+      header:
+        enabled: true
+        config:
+          headers:
+            X-User-Id: "{{ print .Subject }}"
+            X-User-Email: "{{ print .Extra.identity.traits.email }}"
+      noop:
+        enabled: true
+      # UPGRADE (JWT à l'edge) : activer id_token pour minter un JWT signé (RS256)
+      # que le backend vérifie via jwks_url. ⚠️ Nécessite un JWKS (secret monté) et
+      # de basculer le backend de HS256 (JWT_SECRET partagé) vers une vérif RS256.
+      # id_token:
+      #   enabled: true
+      #   config:
+      #     issuer_url: https://oathkeeper.urbanconnect.fr/
+      #     jwks_url: file:///etc/oathkeeper/jwks/jwks.json
+      #     claims: '{"sub":"{{ print .Subject }}","email":"{{ print .Extra.identity.traits.email }}"}'
+
+  access-rules.yaml: |
+    # L'URL matchée est l'URL PUBLIQUE d'origine, reconstruite par Oathkeeper depuis
+    # les en-têtes X-Forwarded-* envoyés par Traefik (trustForwardHeader: true).
+    #
+    # Seuls les routers Traefik portant le Middleware `oathkeeper-auth` arrivent ici.
+    # Les autres (front, kratos, nominatim, s3) ne passent pas par Oathkeeper.
+
+    # API GraphQL/REST : pass-through. Si connecté → session validée + headers
+    # d'identité injectés. Sinon → guest (le backend gère l'authZ via ses guards).
+    - id: "api:passthrough"
+      match:
+        url: "https://api.urbanconnect.fr/<.*>"
+        methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      authenticators:
+        - handler: cookie_session
+        - handler: bearer_token
+        - handler: anonymous
+      authorizer:
+        handler: allow
+      mutators:
+        - handler: header
+
+    # EXEMPLE d'endpoint réservé aux connectés (déblocage : retirer `anonymous`
+    # → 401/403 + redirection login pour les navigateurs). Adapter le préfixe.
+    # - id: "api:protected"
+    #   match:
+    #     url: "https://api.urbanconnect.fr/admin<.*>"
+    #     methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+    #   authenticators:
+    #     - handler: cookie_session
+    #     - handler: bearer_token
+    #   authorizer:
+    #     handler: allow
+    #   mutators:
+    #     - handler: header
+    #   errors:
+    #     - handler: redirect
+    #       config:
+    #         to: https://urbanconnect.fr/login

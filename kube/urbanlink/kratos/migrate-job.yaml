@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kratos-migrate
+  namespace: urbanconnect
+  labels:
+    app: kratos-migrate
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: kratos-migrate
+    spec:
+      restartPolicy: OnFailure
+      # Attendre que postgres soit prêt
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres 5432; do
+                echo "Attente de postgres..."
+                sleep 2
+              done
+      containers:
+        - name: kratos-migrate
+          image: oryd/kratos:latest
+          command:
+            - kratos
+            - -c
+            - /etc/config/kratos/kratos.yml
+            - migrate
+            - sql
+            - -e
+            - --yes
+          env:
+            - name: DSN
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_DSN
+          volumeMounts:
+            - name: kratos-config
+              mountPath: /etc/config/kratos
+              readOnly: true
+      volumes:
+        # Créer avec : kubectl create configmap kratos-config \
+        #   --from-file=./kratos/ -n urbanconnect
+        - name: kratos-config
+          configMap:
+            name: kratos-config

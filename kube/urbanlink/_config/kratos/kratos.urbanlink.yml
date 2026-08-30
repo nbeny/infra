@@ -1,0 +1,169 @@
+version: v1.0.0
+
+# ============================================================================
+# kratos.urbanlink.yml — configuration Kratos pour le déploiement VPS (Traefik)
+# ----------------------------------------------------------------------------
+# Copie de kratos.yml avec TOUTES les URLs pointant sur le domaine urbanlink.fr
+# (le navigateur est redirigé vers ces URLs pour les flows self-service ; les
+# surcharges via variables d'env du compose ne couvrent PAS les ui_url).
+#
+#   - Front public   : https://urbanlink.fr
+#   - Kratos public  : https://kratos.urbanlink.fr   (routé par Traefik → kratos:4433)
+#   - Kratos admin   : http://kratos:4434            (réseau Docker interne, jamais exposé)
+#
+# Chargé par le service `kratos` dans docker-compose.vps.yml :
+#   command: serve -c /etc/config/kratos/kratos.urbanlink.yml --watch-courier
+#
+# ⚠️ Google OAuth : l'URI de redirection à déclarer dans la Google Console est
+#   https://kratos.urbanlink.fr/self-service/methods/oidc/callback/google
+# ============================================================================
+
+dsn: env://DSN
+
+serve:
+  public:
+    base_url: https://kratos.urbanlink.fr/
+    cors:
+      enabled: true
+      allowed_origins:
+        - https://urbanlink.fr
+        - https://api.urbanlink.fr
+        - https://kratos.urbanlink.fr
+      allowed_methods:
+        - POST
+        - GET
+        - PUT
+        - PATCH
+        - DELETE
+      allowed_headers:
+        - Authorization
+        - Cookie
+        - Content-Type
+        - X-CSRF-Token
+      exposed_headers:
+        - Content-Type
+        - Set-Cookie
+      allow_credentials: true
+  admin:
+    base_url: http://kratos:4434/
+
+cookies:
+  path: /
+  same_site: Lax
+  # Cookies de session valables sur tous les sous-domaines urbanlink.fr
+  domain: urbanlink.fr
+
+selfservice:
+  default_browser_return_url: https://urbanlink.fr/
+  allowed_return_urls:
+    - https://urbanlink.fr
+    - https://urbanlink.fr/auth/callback
+    - https://urbanlink.fr/profile/settings/two-factor
+
+  methods:
+    password:
+      enabled: true
+    totp:
+      enabled: true
+      config:
+        issuer: UrbanConnect
+    lookup_secret:
+      enabled: true
+    link:
+      enabled: true
+    code:
+      enabled: true
+    oidc:
+      enabled: true
+      config:
+        providers:
+          # ⚠️ SECRET — NE JAMAIS committer le vrai client_secret ici.
+          # Kratos ne sait PAS lire une valeur env pour un champ imbriqué de
+          # provider oidc (env://GOOGLE_CLIENT_SECRET est un no-op). En prod, le
+          # bloc `providers` ENTIER doit être injecté via la variable d'env
+          # SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS (JSON base64) — voir
+          # kratos/CLAUDE.md. La valeur ci-dessous est un PLACEHOLDER inopérant.
+          - id: google
+            provider: google
+            client_id: 34451382977-1i85msqout39diap90olj9q8noftblc7.apps.googleusercontent.com
+            client_secret: GOCSPX-REPLACE_VIA_ENV
+            mapper_url: file:///etc/config/kratos/oidc.google.jsonnet
+            scope:
+              - email
+              - profile
+            requested_claims:
+              id_token:
+                email:
+                  essential: true
+                email_verified:
+                  essential: true
+                given_name:
+                  essential: true
+
+  flows:
+    error:
+      ui_url: https://urbanlink.fr/auth/error
+    recovery:
+      enabled: true
+      ui_url: https://urbanlink.fr/auth/recovery
+      use: code
+      after:
+        default_browser_return_url: https://urbanlink.fr/auth/resetPassword/success
+    verification:
+      enabled: true
+      ui_url: https://urbanlink.fr/auth/verificationEmail
+      use: code
+      after:
+        default_browser_return_url: https://urbanlink.fr/auth/verificationEmail/Sent/success
+    logout:
+      after:
+        default_browser_return_url: https://urbanlink.fr/auth/login
+    login:
+      ui_url: https://urbanlink.fr/auth/login
+      lifespan: 10m
+      after:
+        default_browser_return_url: https://urbanlink.fr/explore
+        oidc:
+          hooks:
+            - hook: revoke_active_sessions
+    registration:
+      lifespan: 30m
+      ui_url: https://urbanlink.fr/auth/register
+      after:
+        password:
+          hooks:
+            - hook: show_verification_ui
+        oidc:
+          hooks:
+            - hook: show_verification_ui
+    settings:
+      ui_url: https://urbanlink.fr/profile/settings/two-factor
+      privileged_session_max_age: 15m
+      required_aal: highest_available
+
+log:
+  level: info
+  format: text
+  leak_sensitive_values: false
+
+ciphers:
+  algorithm: xchacha20-poly1305
+
+hashers:
+  algorithm: bcrypt
+  bcrypt:
+    cost: 8
+
+identity:
+  default_schema_id: default
+  schemas:
+    - id: default
+      url: file:///etc/config/kratos/identity.schema.json
+
+courier:
+  # connection_uri / from_address / from_name sont surchargés par les variables
+  # d'env COURIER_SMTP_* du compose (SMTP Infomaniak). Valeurs par défaut ici.
+  smtp:
+    connection_uri: smtp://mailslurper:1025/?skip_ssl_verify=true
+    from_address: contact@urbanlink.fr
+    from_name: UrbanConnect

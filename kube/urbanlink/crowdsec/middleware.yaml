@@ -1,0 +1,98 @@
+# ============================================================================
+# CrowdSec — bouncer + AppSec (WAF) à l'edge Traefik.
+# ----------------------------------------------------------------------------
+# ⚠️ Périmètre : CrowdSec = IPS/WAF comportemental + réputation d'IP (scans,
+#    brute-force, flood HTTP L7, bad bots, SQLi/XSS via AppSec, blocklist
+#    communautaire). Ce N'EST PAS un anti-DDoS volumétrique L3/L4 — pour ça,
+#    prévoir une protection en amont (Cloudflare / DDoS du LB cloud).
+#
+# Architecture :
+#   requête ─► Traefik ─(plugin bouncer)─► LAPI CrowdSec  : IP bannie ? → 403
+#                        └(appsec)───────► AppSec CrowdSec : requête malveillante ? → 403
+#   Détection : l'agent CrowdSec lit les access-logs Traefik, applique les
+#   scénarios/collections, pousse les décisions dans la LAPI ; le plugin les
+#   applique à chaque requête (mode stream = cache local, faible latence).
+#
+# Ce fichier ne contient QUE le wiring côté Traefik (namespace urbanconnect).
+# CrowdSec lui-même (agent DaemonSet + LAPI + AppSec) s'installe via Helm.
+#
+# ------------------------------------------------------------------ 1) CrowdSec
+#   helm repo add crowdsec https://crowdsecurity.github.io/helm-charts
+#   helm install crowdsec crowdsec/crowdsec -n crowdsec --create-namespace \
+#     --set config.config\.yaml\.local='{"api":{"server":{"auto_registration":{"enabled":true}}}}' \
+#     --set agent.acquisition[0].namespace=traefik \
+#     --set agent.acquisition[0].podName='traefik-*' \
+#     --set agent.acquisition[0].program=traefik \
+#     --set-string 'config.collections=crowdsecurity/traefik crowdsecurity/base-http-scenarios crowdsecurity/http-cve crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules' \
+#     --set appsec.enabled=true       # expose le service AppSec (port 7422)
+#   → services attendus : crowdsec-service:8080 (LAPI), crowdsec-appsec-service:7422
+#     (adapter les noms au rendu réel du chart : `kubectl get svc -n crowdsec`).
+#
+# ------------------------------------------------------------------ 2) Clé bouncer
+#   POD=$(kubectl get pod -n crowdsec -l app.kubernetes.io/component=lapi -o name | head -1)
+#   kubectl exec -n crowdsec $POD -- cscli bouncers add traefik-bouncer -o raw
+#   → monter cette clé comme FICHIER dans le pod Traefik (namespace traefik),
+#     référencée par crowdsecLapiKeyFile ci-dessous. Via Helm Traefik :
+#     kubectl create secret generic crowdsec-bouncer-apikey -n traefik \
+#       --from-literal=lapi-key='<CLE>'
+#     puis (values Traefik) :
+#       deployment.additionalVolumes: [{name: crowdsec-key, secret: {secretName: crowdsec-bouncer-apikey}}]
+#       additionalVolumeMounts:       [{name: crowdsec-key, mountPath: /etc/traefik/crowdsec, readOnly: true}]
+#
+# ------------------------------------------------------- 3) Plugin bouncer Traefik
+#   Déclarer le plugin dans la config statique Traefik (values Helm) :
+#     experimental:
+#       plugins:
+#         crowdsec:
+#           moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+#           version: v1.4.2      # épingler la dernière release stable
+#   Provider CRD (pour référencer ce Middleware depuis un autre namespace si tu
+#   passes par un middleware d'entrypoint) :
+#     providers.kubernetesCRD.allowCrossNamespace: true
+#
+# ------------------------------------------------- 4) Application (déjà câblée)
+#   Ce Middleware `crowdsec` est encapsulé dans les chaînes master `uc-edge` /
+#   `uc-edge-auth` (cf. ingress/master.yaml), elles-mêmes référencées par les
+#   child IngressRoutes → il s'applique donc à toutes les routes, avant l'auth.
+#   Alternative « globale entrypoint » : ajouter `urbanconnect-crowdsec@kubernetescrd`
+#   à ports.websecure.middlewares (values Helm Traefik).
+#
+# --------------------------------- 5) Scaling (déploiement mono-instance actuel)
+#   Archi CrowdSec = master/children, elle scale sans toucher à ce Middleware :
+#     - LAPI (master : décisions + DB)  → HA = augmenter les réplicas + DB partagée
+#         (values Helm : lapi.replicas=2, config d'une DB externe type postgres).
+#     - agents (children, DaemonSet)    → déjà 1/nœud, scale avec le cluster.
+#     - AppSec/WAF (children, Deployment) → charge lourde = monter appsec.replicas
+#         (+ HPA) ; le Service crowdsec-appsec-service load-balance, le bouncer
+#         Traefik tape la VIP → aucune modif ici.
+#   Démarré en mono-instance ; passer les réplicas ci-dessus quand la charge monte.
+# ============================================================================
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: crowdsec
+  namespace: urbanconnect
+spec:
+  plugin:
+    crowdsec:
+      enabled: "true"
+      logLevel: "INFO"
+      # stream : le plugin tient un cache local des décisions (rafraîchi périodiquement)
+      # → une seule requête LAPI en tâche de fond, pas une par requête entrante.
+      crowdsecMode: "stream"
+      # --- LAPI (décisions IP) ---
+      crowdsecLapiScheme: "http"
+      crowdsecLapiHost: "crowdsec-service.crowdsec.svc.cluster.local:8080"
+      crowdsecLapiKeyFile: "/etc/traefik/crowdsec/lapi-key"
+      # --- AppSec (WAF L7) ---
+      crowdsecAppsecEnabled: "true"
+      crowdsecAppsecHost: "crowdsec-appsec-service.crowdsec.svc.cluster.local:7422"
+      # Bloquer si AppSec détecte une requête malveillante…
+      crowdsecAppsecFailureBlock: "true"
+      # …mais laisser passer si AppSec est injoignable (évite un self-DoS si le WAF tombe).
+      crowdsecAppsecUnreachableBlock: "false"
+      # --- Vraie IP client derrière le LB / hostNetwork (sinon on bannit le LB) ---
+      forwardedHeadersTrustedIPs:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
