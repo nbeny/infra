@@ -39,13 +39,35 @@
 
     # Injectees dans le bundle Next.js au build : les changer impose un rebuild
     # de l'image, elles ne sont pas lisibles a l'execution.
+    #
+    # ⚠️ **DEUX familles, deux points de vue — ne pas les melanger.**
+    #
+    #   NEXT_PUBLIC_*  part dans le bundle envoye au NAVIGATEUR. Elle doit donc
+    #                  porter une URL publique. Elles valaient ici des noms de
+    #                  services internes (`http://backend:4000`) : aucun
+    #                  navigateur ne resout `backend`.
+    #
+    #   *_PROXY_URL    est lue par `next.config.js` pour ses `rewrites`, donc
+    #                  par le SERVEUR Next, dans le cluster. Elle doit porter le
+    #                  nom de service interne.
+    #
+    # ⚠️ Et les `*_PROXY_URL` sont bien des arguments de BUILD, pas des
+    # variables d'execution : `next build` ecrit les destinations deja
+    # interpolees dans `.next/routes-manifest.json`, et `next start` les sert
+    # telles quelles. Elles manquaient ici, si bien que les quatre defauts de
+    # developpement (127.0.0.1:10006, :4433, :4000, :8081) se retrouvaient
+    # graves dans l'image — mesure sur le cluster : `/api/kratos/`,
+    # `/api/nominatim/` et `/api/minio/` repondaient tous 500.
     urbanlink_frontend_build_args:
-      NEXT_PUBLIC_API_URL: "http://backend:4000"
-      NEXT_PUBLIC_GRAPHQL_URL: "http://backend:4000/graphql"
-      NEXT_PUBLIC_GRAPHQL_WS_URL: "ws://backend:4000/graphql"
-      NEXT_PUBLIC_KRATOS_PUBLIC_URL: "http://kratos:4433"
-      NEXT_PUBLIC_MINIO_URL: "http://minio:9000"
-      NEXT_PUBLIC_SITE_URL: "http://urbanlink.lab"
+      NEXT_PUBLIC_API_URL: "https://api.urbanlink.fr"
+      NEXT_PUBLIC_GRAPHQL_URL: "https://api.urbanlink.fr/graphql"
+      NEXT_PUBLIC_GRAPHQL_WS_URL: "wss://api.urbanlink.fr/graphql"
+      NEXT_PUBLIC_KRATOS_PUBLIC_URL: "https://auth.urbanlink.fr"
+      NEXT_PUBLIC_SITE_URL: "https://urbanlink.fr"
+      MINIO_PROXY_URL: "http://minio:9000"
+      KRATOS_PROXY_URL: "http://kratos:4433"
+      BACKEND_PROXY_URL: "http://backend:4000"
+      NOMINATIM_PROXY_URL: "http://nominatim:8080"
 
     # Le Dockerfile du backend utilise `npm ci`, qui echoue volontairement si le
     # lockfile a derive du package.json. C'est le cas aujourd'hui dans le depot

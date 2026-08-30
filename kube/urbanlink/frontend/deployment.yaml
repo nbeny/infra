@@ -29,13 +29,38 @@ spec:
           env:
             - name: NODE_ENV
               value: production
-            # Proxy rewrites → services Docker internes (runtime Next.js)
+            # ⚠️⚠️ **CES QUATRE VARIABLES SONT INERTES ICI — elles se posent au
+            # BUILD.** Le commentaire d'origine annoncait « runtime Next.js » ;
+            # c'est faux, et ca a coute cher. `next build` resout
+            # `next.config.js` et ecrit les destinations DEJA INTERPOLEES dans
+            # `.next/routes-manifest.json` ; `next start` les sert telles
+            # quelles, sans jamais relire l'environnement.
+            #
+            # Mesure dans le pod : `MINIO_PROXY_URL=http://minio:9000` etait
+            # bien present, et le serveur proxifiait quand meme vers
+            # `http://127.0.0.1:10006` — le defaut fige a la construction d'une
+            # image batie sans ces arguments. Consequences en cluster :
+            # `/api/kratos/` 500 (ni connexion ni inscription),
+            # `/api/nominatim/` 500 (pas d'autocompletion d'adresse),
+            # `/api/minio/` 500 (aucune image).
+            #
+            # ⇒ Les valeurs qui comptent sont les `--build-arg` de
+            #   `front/Dockerfile` : voir `30-urbanlink-images.yml` et le job
+            #   `images` de la CI du depot applicatif.
+            #
+            # On les GARDE malgre tout, pour deux raisons : elles documentent
+            # sur place ce que l'image doit contenir, et elles redeviendront
+            # vivantes le jour ou ces `rewrites` seront remplacees par des route
+            # handlers (`app/api/<x>/[...path]/route.ts`), qui lisent
+            # `process.env` a chaque requete. Les retirer ferait perdre les deux.
             - name: NOMINATIM_PROXY_URL
               value: http://nominatim:8080
             - name: KRATOS_PROXY_URL
               value: http://kratos:4433
             - name: BACKEND_PROXY_URL
               value: http://backend:4000
+            - name: MINIO_PROXY_URL
+              value: http://minio:9000
             # MaxMind GeoIP
             - name: GEOIP_DB_PATH
               value: /usr/share/GeoIP/GeoLite2-Country.mmdb

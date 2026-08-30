@@ -75,6 +75,21 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: MINIO_ROOT_PASSWORD
+            # ⚠️ **L'adresse que le NAVIGATEUR devra joindre, pas celle du pod.**
+            # `StorageService.getFileUrl()` compose
+            # `${MINIO_PUBLIC_URL}/${bucket}/${chemin}`. Non renseignee, elle
+            # vaut `http://localhost:9000` — l'URL rendue a l'utilisateur
+            # designe alors SA propre machine.
+            #
+            # La valeur pointe le proxy same-origin et non `s3.urbanlink.fr`,
+            # parce que c'est le chemin que le produit a choisi : le
+            # rewrite `/api/minio/:path*` de Next relaie vers MinIO, et
+            # `getFileUrl` ajoutant deja `/<bucket>/`, on retombe exactement sur
+            # l'URL que `front/src/utils/image.ts` fabrique de son cote. Une URL
+            # `s3.` directe exigerait en plus une politique de bucket publique
+            # et du CORS, pour aucun gain.
+            - name: MINIO_PUBLIC_URL
+              value: https://urbanlink.fr/api/minio
             # Kratos
             - name: KRATOS_PUBLIC_URL
               value: http://kratos:4433
