@@ -1,0 +1,160 @@
+---
+# ---------------------------------------------------------------------------
+#  Prerequis noyau
+# ---------------------------------------------------------------------------
+# kubelet refuse de demarrer si le swap est actif (sauf a activer le support
+# swap en beta, inutile ici).
+- name: Desactiver le swap immediatement
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb | default(0) | int > 0
+  changed_when: true
+
+- name: Desactiver le swap de facon persistante dans /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\s+swap\s+.*)$'
+    replace: '# \1  # desactive par Ansible (kubelet)'
+
+- name: Charger les modules noyau requis au demarrage
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role kubernetes).
+      overlay
+      br_netfilter
+
+- name: Charger les modules noyau maintenant
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+# br_netfilter doit etre charge AVANT que ces sysctl existent.
+- name: Appliquer les sysctl reseau requis par Kubernetes
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { name: net.bridge.bridge-nf-call-iptables, value: "1" }
+    - { name: net.bridge.bridge-nf-call-ip6tables, value: "1" }
+    - { name: net.ipv4.ip_forward, value: "1" }
+
+# ---------------------------------------------------------------------------
+#  Depot pkgs.k8s.io
+# ---------------------------------------------------------------------------
+- name: Creer le repertoire des trousseaux APT
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Recuperer la cle du depot Kubernetes v{{ kubernetes_version }}
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes.asc
+    owner: root
+    group: root
+    mode: "0644"
+    force: true
+
+# Depot "flat" (Suites: /, aucun composant) : on ecrit le deb822 a la main,
+# c'est la forme publiee par pkgs.k8s.io.
+- name: Ajouter le depot Kubernetes
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/kubernetes.sources
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role kubernetes).
+      # Changer de mineure = changer kubernetes_version puis relancer ce role.
+      Types: deb
+      URIs: https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/
+      Suites: /
+      Signed-By: /etc/apt/keyrings/kubernetes.asc
+      Enabled: yes
+  register: k8s_repo
+
+- name: Mettre a jour le cache APT
+  ansible.builtin.apt:
+    update_cache: true
+  when: k8s_repo.changed
+
+# ---------------------------------------------------------------------------
+#  Paquets
+# ---------------------------------------------------------------------------
+# Les paquets sont "held" : une mise a jour de kubelet hors sequence kubeadm
+# casse le cluster. La montee de version se fait via `kubeadm upgrade`
+# (voir playbooks/90-update.yml).
+# Pas de "unhold" prealable : `allow_change_held_packages` autorise apt a faire
+# evoluer un paquet bloque. Enchainer unhold puis hold ferait de toute facon
+# apparaitre deux changements a chaque execution, meme quand rien ne bouge.
+- name: Installer kubelet, kubeadm et kubectl
+  ansible.builtin.apt:
+    name: >-
+      {{ ['kubelet', 'kubeadm', 'kubectl']
+         | map('regex_replace', '$', '=' ~ kubernetes_package_version)
+         | list
+         if kubernetes_package_version | length > 0
+         else ['kubelet', 'kubeadm', 'kubectl'] }}
+    state: present
+    allow_change_held_packages: true
+  retries: 3
+  delay: 10
+
+# `crictl` n'est PAS tire par kubeadm : sans cri-tools, /etc/crictl.yaml ci-
+# dessous configure un binaire absent, et le seul outil pour inspecter les
+# conteneurs vus par kubelet manque au moment ou on en a besoin.
+- name: Installer cri-tools (crictl)
+  ansible.builtin.apt:
+    name: cri-tools
+    state: present
+  retries: 3
+  delay: 10
+
+- name: Bloquer les paquets Kubernetes
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubeadm, kubectl]
+
+- name: Pointer crictl sur le socket containerd
+  ansible.builtin.copy:
+    dest: /etc/crictl.yaml
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role kubernetes).
+      runtime-endpoint: unix:///run/containerd/containerd.sock
+      image-endpoint: unix:///run/containerd/containerd.sock
+      timeout: 10
+      debug: false
+
+# kubelet boucle en erreur tant que `kubeadm init` n'a pas eu lieu : c'est
+# attendu, on l'active sans exiger qu'il soit demarre.
+- name: Activer kubelet
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true
+    daemon_reload: true
+
+- name: Relever la version de kubeadm installee
+  ansible.builtin.command: kubeadm version -o short
+  register: k8s_kubeadm_version
+  changed_when: false
+
+- name: Afficher la version de Kubernetes
+  ansible.builtin.debug:
+    msg: "kubeadm {{ k8s_kubeadm_version.stdout }} installe"

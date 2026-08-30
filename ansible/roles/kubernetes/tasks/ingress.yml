@@ -1,0 +1,198 @@
+---
+# ---------------------------------------------------------------------------
+#  Edge : CrowdSec puis Traefik
+# ---------------------------------------------------------------------------
+# L'ordre compte. Le plugin bouncer de Traefik a besoin d'une cle d'API emise
+# par la LAPI CrowdSec : CrowdSec doit donc exister avant que Traefik demarre,
+# sinon Traefik boucle en erreur au chargement du plugin.
+#
+# Traefik apporte aussi les CRD IngressRoute / Middleware / TLSOption, sans
+# lesquelles un `kubectl apply -k` sur des manifests Traefik echoue purement
+# et simplement.
+
+# ===========================================================================
+#  1) CrowdSec
+# ===========================================================================
+- name: Installer CrowdSec
+  when: k8s_crowdsec_enabled | bool
+  block:
+
+    - name: Ajouter le depot Helm de CrowdSec
+      ansible.builtin.command: helm repo add crowdsec https://crowdsecurity.github.io/helm-charts
+      register: k8s_crowdsec_repo
+      changed_when: "'has been added' in k8s_crowdsec_repo.stdout"
+      environment: &kubeenv
+        KUBECONFIG: /etc/kubernetes/admin.conf
+
+    - name: Mettre a jour les depots Helm
+      ansible.builtin.command: helm repo update
+      changed_when: false
+      environment: *kubeenv
+
+    - name: Deposer les valeurs Helm de CrowdSec
+      ansible.builtin.template:
+        src: crowdsec-values.yaml.j2
+        dest: /root/crowdsec-values.yaml
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Deployer CrowdSec
+      ansible.builtin.command: >-
+        helm upgrade --install crowdsec crowdsec/crowdsec
+          --namespace {{ k8s_crowdsec_namespace }} --create-namespace
+          --version {{ k8s_crowdsec_chart_version }}
+          --values /root/crowdsec-values.yaml
+          --wait --timeout 10m
+      register: k8s_crowdsec_deploy
+      changed_when: "'has been upgraded' in k8s_crowdsec_deploy.stdout or 'has been installed' in k8s_crowdsec_deploy.stdout"
+      environment: *kubeenv
+
+    # Le chart etiquette ses pods avec `type=lapi` / `k8s-app=crowdsec`, et non
+    # avec les labels app.kubernetes.io/* habituels.
+    - name: Identifier le pod LAPI de CrowdSec
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_crowdsec_namespace }}
+          get pod -l k8s-app=crowdsec,type=lapi
+          --field-selector=status.phase=Running -o name | head -1
+        executable: /bin/bash
+      register: k8s_crowdsec_lapi
+      changed_when: false
+      retries: 10
+      delay: 15
+      until: k8s_crowdsec_lapi.stdout | trim | length > 0
+      failed_when: k8s_crowdsec_lapi.stdout | trim | length == 0
+
+    - name: Creer le namespace de l'ingress
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf create namespace {{ k8s_ingress_namespace }}
+      register: k8s_ingress_ns
+      changed_when: k8s_ingress_ns.rc == 0
+      failed_when:
+        - k8s_ingress_ns.rc != 0
+        - "'already exists' not in k8s_ingress_ns.stderr"
+
+    - name: Verifier si le Secret de la cle bouncer existe
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_ingress_namespace }}
+        get secret crowdsec-bouncer-apikey
+      register: k8s_bouncer_secret
+      changed_when: false
+      failed_when: false
+
+    - name: Verifier si le bouncer est enregistre cote LAPI
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_crowdsec_namespace }}
+          exec {{ k8s_crowdsec_lapi.stdout | trim }} --
+          cscli bouncers list -o json 2>/dev/null | grep -c traefik-bouncer || true
+        executable: /bin/bash
+      register: k8s_bouncer_registered
+      changed_when: false
+
+    # Les deux cotes doivent etre coherents. Reinstaller CrowdSec repart d'une
+    # base vide : le Secret survit alors avec une cle que la LAPI ne connait
+    # plus, et Traefik se fait rejeter a chaque requete. On repart donc de zero
+    # des que l'un des deux manque.
+    - name: Retirer les restes incoherents de l'enregistrement precedent
+      when: (k8s_bouncer_secret.rc == 0) != (k8s_bouncer_registered.stdout | int > 0)
+      block:
+
+        - name: Supprimer le Secret obsolete
+          ansible.builtin.command: >-
+            kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_ingress_namespace }}
+            delete secret crowdsec-bouncer-apikey --ignore-not-found
+          changed_when: true
+
+        - name: Supprimer le bouncer obsolete
+          ansible.builtin.command: >-
+            kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_crowdsec_namespace }}
+            exec {{ k8s_crowdsec_lapi.stdout | trim }} --
+            cscli bouncers delete traefik-bouncer
+          changed_when: true
+          failed_when: false
+
+        - name: Repartir d'un enregistrement neuf
+          ansible.builtin.set_fact:
+            k8s_bouncer_needs_key: true
+
+    # La cle n'est affichee qu'a la creation : on la genere et on la stocke
+    # dans le Secret du meme mouvement.
+    - name: Enregistrer le bouncer Traefik aupres de la LAPI
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_crowdsec_namespace }}
+        exec {{ k8s_crowdsec_lapi.stdout | trim }} --
+        cscli bouncers add traefik-bouncer -o raw
+      register: k8s_bouncer_key
+      when: k8s_bouncer_secret.rc != 0 or (k8s_bouncer_needs_key | default(false))
+      changed_when: true
+      no_log: true
+
+    - name: Stocker la cle du bouncer pour Traefik
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_ingress_namespace }}
+        create secret generic crowdsec-bouncer-apikey
+        --from-literal=lapi-key={{ k8s_bouncer_key.stdout | trim }}
+      when: k8s_bouncer_key is not skipped
+      changed_when: true
+      no_log: true
+
+# ===========================================================================
+#  2) Traefik
+# ===========================================================================
+- name: Installer Traefik
+  when: k8s_ingress_controller == 'traefik'
+  block:
+
+    - name: Ajouter le depot Helm de Traefik
+      ansible.builtin.command: helm repo add traefik https://traefik.github.io/charts
+      register: k8s_traefik_repo
+      changed_when: "'has been added' in k8s_traefik_repo.stdout"
+      environment: *kubeenv
+
+    - name: Mettre a jour les depots Helm
+      ansible.builtin.command: helm repo update
+      changed_when: false
+      environment: *kubeenv
+
+    - name: Deposer les valeurs Helm de Traefik
+      ansible.builtin.template:
+        src: traefik-values.yaml.j2
+        dest: /root/traefik-values.yaml
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Deployer Traefik
+      ansible.builtin.command: >-
+        helm upgrade --install traefik traefik/traefik
+          --namespace {{ k8s_ingress_namespace }} --create-namespace
+          --version {{ k8s_traefik_chart_version }}
+          --values /root/traefik-values.yaml
+          --wait --timeout 10m
+      register: k8s_traefik_deploy
+      changed_when: "'has been upgraded' in k8s_traefik_deploy.stdout or 'has been installed' in k8s_traefik_deploy.stdout"
+      environment: *kubeenv
+
+    # Sans ces CRD, tout `kubectl apply` de manifests Traefik echoue.
+    - name: Verifier que les CRD Traefik sont enregistrees
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig /etc/kubernetes/admin.conf get crd -o name
+          | grep -cE 'ingressroutes.traefik.io|middlewares.traefik.io|tlsoptions.traefik.io'
+        executable: /bin/bash
+      register: k8s_traefik_crds
+      changed_when: false
+      failed_when: k8s_traefik_crds.stdout | int < 3
+
+    - name: Recapitulatif de l'edge
+      ansible.builtin.debug:
+        msg:
+          - "Traefik deploye dans le namespace {{ k8s_ingress_namespace }}"
+          - "HTTP  : http://{{ ansible_host | default(inventory_hostname) }}:{{ k8s_traefik_nodeport_http }}"
+          - "HTTPS : https://{{ ansible_host | default(inventory_hostname) }}:{{ k8s_traefik_nodeport_https }}"
+          - "CRD IngressRoute / Middleware / TLSOption disponibles"
+          - >-
+            CrowdSec : {{ 'actif (bouncer + AppSec)' if k8s_crowdsec_enabled
+                          else 'desactive -- les Middleware crowdsec resteront inertes' }}

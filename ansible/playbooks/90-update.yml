@@ -1,0 +1,73 @@
+---
+# Mise a jour de tout le lab : noeud Proxmox puis VMs invitees.
+# Ne touche PAS aux versions de Kubernetes (voir 91-k8s-upgrade.yml).
+#
+#   ansible-playbook playbooks/90-update.yml
+#   ansible-playbook playbooks/90-update.yml -l guests
+#   ansible-playbook playbooks/90-update.yml -e common_reboot_if_required=true
+
+- name: Mettre a jour le noeud Proxmox
+  hosts: proxmox
+  gather_facts: true
+  vars:
+    pve_do_upgrade: true
+    pve_install_iac_tools: true
+  tasks:
+    - name: Appliquer les mises a jour du noeud
+      ansible.builtin.include_role:
+        name: pve_host
+        tasks_from: upgrade.yml
+
+    - name: Mettre a jour Terraform et Packer
+      ansible.builtin.include_role:
+        name: pve_host
+        tasks_from: iac_tools.yml
+
+- name: Mettre a jour les VMs invitees
+  hosts: guests
+  gather_facts: true
+  become: true
+  serial: 1          # une VM a la fois : evite de tout casser d'un coup
+  vars:
+    common_do_upgrade: true
+  tasks:
+
+    - name: Verifier que la VM repond
+      ansible.builtin.ping:
+
+    - name: Mettre a jour le cache APT
+      ansible.builtin.apt:
+        update_cache: true
+      retries: 3
+      delay: 10
+
+    # kubelet, kubeadm et kubectl sont "held" : dist-upgrade ne les touche pas.
+    # Leur montee de version passe par 91-k8s-upgrade.yml.
+    - name: Appliquer les mises a jour
+      ansible.builtin.apt:
+        upgrade: dist
+        autoremove: true
+        autoclean: true
+      register: update_result
+      async: 3600
+      poll: 30
+
+    - name: Detecter si un redemarrage est requis
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: update_reboot
+
+    - name: Redemarrer la VM
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when:
+        - update_reboot.stat.exists
+        - common_reboot_if_required | default(false) | bool
+
+    - name: Etat apres mise a jour
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} mis a jour.
+          {{ 'Redemarrage requis (relance avec -e common_reboot_if_required=true).'
+             if update_reboot.stat.exists and not (common_reboot_if_required | default(false) | bool)
+             else 'Aucun redemarrage en attente.' }}

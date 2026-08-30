@@ -1,0 +1,48 @@
+---
+# Playbook execute PAR PACKER pendant le build du template 9100.
+# Ne pas lancer a la main : il cible l'hote temporaire fourni par Packer.
+#
+# Difference cle avec 20-debian-k8s.yml : k8s_install_only=true. Les binaires
+# sont installes mais aucun cluster n'est cree -- figer des certificats et un
+# nom de noeud dans une image la rendrait inclonable.
+
+- name: Construire l'image Debian docker + kubernetes
+  hosts: all
+  gather_facts: true
+  become: true
+
+  # all.yml ne definit aucune variable de connexion : l'inclure ne perturbe
+  # pas l'inventaire temporaire genere par Packer.
+  vars_files:
+    - ../inventory/group_vars/all.yml
+
+  vars:
+    common_unattended_upgrades: true
+    common_do_upgrade: true
+    common_reboot_if_required: false
+
+    docker_users: ["{{ lab_admin_user }}"]
+    docker_compose_plugin: true
+    docker_containerd_systemd_cgroup: true
+
+    kubernetes_version: "1.36"
+    kubernetes_package_version: ""
+    k8s_install_only: true
+    k8s_extra_tools:
+      helm: true
+      k9s: true
+
+  roles:
+    - role: common
+    - role: docker
+    - role: kubernetes
+    - role: image_cleanup
+
+  post_tasks:
+    - name: Image prete
+      ansible.builtin.debug:
+        msg: >-
+          Image Debian construite : docker, containerd (cgroup systemd),
+          kubeadm/kubelet/kubectl {{ kubernetes_version }}, helm et k9s.
+          Aucun cluster initialise -- c'est le role de 20-debian-k8s.yml
+          apres le deploiement Terraform.

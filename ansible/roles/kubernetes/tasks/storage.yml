@@ -1,0 +1,58 @@
+---
+# ---------------------------------------------------------------------------
+#  StorageClass par defaut
+# ---------------------------------------------------------------------------
+# Un cluster kubeadm n'a AUCUN provisionneur de volumes : tout PVC reste
+# indefiniment en Pending, et les StatefulSets ne demarrent jamais. Sur un
+# cluster mono-noeud, local-path-provisioner (Rancher) est la reponse la plus
+# simple : il taille un repertoire local par volume.
+#
+# Limite assumee : les volumes sont lies au noeud. Sur un cluster multi-noeuds
+# il faut un vrai stockage reseau (Longhorn, NFS, Ceph).
+
+- name: Verifier les StorageClass existantes
+  ansible.builtin.command: >-
+    kubectl --kubeconfig /etc/kubernetes/admin.conf get storageclass -o name
+  register: k8s_sc_existing
+  changed_when: false
+  failed_when: false
+
+- name: Installer local-path-provisioner {{ k8s_local_path_version }}
+  ansible.builtin.command: >-
+    kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f
+    https://raw.githubusercontent.com/rancher/local-path-provisioner/{{ k8s_local_path_version }}/deploy/local-path-storage.yaml
+  when: "'storageclass.storage.k8s.io/local-path' not in k8s_sc_existing.stdout"
+  changed_when: true
+
+- name: Attendre que local-path-provisioner soit pret
+  ansible.builtin.command: >-
+    kubectl --kubeconfig /etc/kubernetes/admin.conf -n local-path-storage
+    rollout status deployment/local-path-provisioner --timeout=180s
+  changed_when: false
+
+# Sans cette annotation, un PVC qui ne precise pas storageClassName n'est
+# rattache a rien. Les manifests UrbanLink comptent justement dessus : aucun
+# n'impose de StorageClass.
+- name: Definir local-path comme StorageClass par defaut
+  ansible.builtin.command: >-
+    kubectl --kubeconfig /etc/kubernetes/admin.conf patch storageclass local-path
+    -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+  register: k8s_sc_default
+  changed_when: "'patched' in k8s_sc_default.stdout and 'no change' not in k8s_sc_default.stdout"
+
+- name: Verifier qu'une StorageClass par defaut est bien active
+  ansible.builtin.shell:
+    cmd: >-
+      kubectl --kubeconfig /etc/kubernetes/admin.conf get storageclass
+      -o jsonpath='{range .items[*]}{.metadata.name}{"="}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}'
+      | grep -c '=true'
+    executable: /bin/bash
+  register: k8s_sc_default_count
+  changed_when: false
+  failed_when: k8s_sc_default_count.stdout | int != 1
+
+- name: StorageClass prete
+  ansible.builtin.debug:
+    msg: >-
+      local-path est la StorageClass par defaut. Les volumes sont crees sous
+      /opt/local-path-provisioner sur le noeud.

@@ -1,0 +1,33 @@
+---
+# Applique la configuration complete aux VMs Debian : socle, Docker, cluster
+# Kubernetes. S'utilise aussi bien sur une VM neuve creee par Terraform que
+# sur UrbanConnect (VM 100) une fois adoptee.
+#
+#   ansible-playbook playbooks/20-debian-k8s.yml
+#   ansible-playbook playbooks/20-debian-k8s.yml -l urbanconnect
+
+- name: Configurer les noeuds Debian (docker + kubernetes)
+  hosts: debian_nodes
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Verifier que la distribution est bien Debian
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} rapporte "{{ ansible_distribution }}".
+          Ce playbook cible Debian ; pour Kali utilise 21-kali.yml.
+      when: ansible_distribution != 'Debian'
+
+  roles:
+    - role: common
+    - role: docker
+    - role: kubernetes
+
+  post_tasks:
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }} ({{ ansible_host }}) pret"
+          - "Docker et containerd actifs, kubelet en {{ kubernetes_version }}"
+          - "kubectl utilisable en tant que {{ lab_admin_user }} : ssh {{ ansible_host }} -- kubectl get nodes"

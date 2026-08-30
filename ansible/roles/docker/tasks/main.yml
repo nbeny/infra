@@ -1,0 +1,131 @@
+---
+- name: Creer le repertoire des trousseaux APT
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Recuperer la cle GPG de Docker
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ajouter le depot Docker
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: https://download.docker.com/linux/debian
+    suites: "{{ ansible_distribution_release }}"
+    components: [stable]
+    architectures: [amd64]
+    signed_by: /etc/apt/keyrings/docker.asc
+    enabled: true
+    state: present
+  register: docker_repo
+
+- name: Installer Docker Engine et containerd
+  ansible.builtin.apt:
+    name: "{{ docker_packages + (['docker-compose-plugin'] if docker_compose_plugin | bool else []) }}"
+    state: present
+    update_cache: "{{ docker_repo.changed }}"
+  retries: 3
+  delay: 10
+
+- name: Ajouter les utilisateurs au groupe docker
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_users }}"
+
+# ---------------------------------------------------------------------------
+#  containerd : cgroup driver systemd
+# ---------------------------------------------------------------------------
+# kubelet tourne sous systemd depuis la v1.22. Si containerd utilise cgroupfs
+# alors que kubelet attend systemd, les deux se disputent les cgroups et le
+# noeud devient instable sous charge. C'est LE reglage a ne pas rater.
+- name: Configurer containerd
+  when: docker_containerd_systemd_cgroup | bool
+  block:
+
+    - name: Creer /etc/containerd
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Verifier si la configuration containerd existe
+      ansible.builtin.stat:
+        path: /etc/containerd/config.toml
+      register: containerd_config
+
+    - name: Lire la configuration containerd existante
+      ansible.builtin.slurp:
+        src: /etc/containerd/config.toml
+      register: containerd_config_raw
+      when: containerd_config.stat.exists
+
+    # Le paquet containerd.io livre un config.toml minimal contenant
+    # `disabled_plugins = ["cri"]`. Deux consequences : le plugin CRI est
+    # desactive (kubelet ne peut alors pas parler a containerd du tout), et le
+    # reglage SystemdCgroup n'existe nulle part. La configuration complete
+    # generee par containerd lui-meme corrige les deux.
+    - name: Generer la configuration containerd complete
+      ansible.builtin.shell:
+        cmd: containerd config default > /etc/containerd/config.toml
+        executable: /bin/bash
+      when: >-
+        not containerd_config.stat.exists
+        or 'SystemdCgroup' not in (containerd_config_raw.content | b64decode)
+      changed_when: true
+      notify: Redemarrer containerd
+
+    - name: Basculer containerd sur le cgroup driver systemd
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: '^(\s*)SystemdCgroup\s*=\s*false\s*$'
+        replace: '\1SystemdCgroup = true'
+      notify: Redemarrer containerd
+
+    - name: Verifier que SystemdCgroup est bien actif
+      ansible.builtin.command: grep -c 'SystemdCgroup = true' /etc/containerd/config.toml
+      register: containerd_cgroup_check
+      changed_when: false
+      failed_when: containerd_cgroup_check.stdout | int < 1
+
+    - name: Verifier que le plugin CRI n'est pas desactive
+      ansible.builtin.command: grep -E '^disabled_plugins' /etc/containerd/config.toml
+      register: containerd_disabled_plugins
+      changed_when: false
+      failed_when: "'cri' in containerd_disabled_plugins.stdout"
+
+# Les handlers ne se declenchent qu'en fin de play, or le role kubernetes
+# s'execute juste apres : containerd doit deja tourner avec la nouvelle
+# configuration quand kubeadm demarre.
+- name: Appliquer la configuration containerd maintenant
+  ansible.builtin.meta: flush_handlers
+
+- name: Activer et demarrer Docker
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - containerd
+    - docker
+
+- name: Verifier que Docker repond
+  ansible.builtin.command: docker version --format '{{ "{{" }}.Server.Version{{ "}}" }}'
+  register: docker_version
+  changed_when: false
+
+- name: Afficher la version de Docker
+  ansible.builtin.debug:
+    msg: "Docker Engine {{ docker_version.stdout }}"

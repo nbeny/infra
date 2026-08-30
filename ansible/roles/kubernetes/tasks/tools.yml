@@ -1,0 +1,97 @@
+---
+# ---------------------------------------------------------------------------
+#  Helm
+# ---------------------------------------------------------------------------
+- name: Installer Helm
+  when: k8s_extra_tools.helm | default(false) | bool
+  block:
+
+    - name: Relever la version de Helm installee
+      ansible.builtin.shell:
+        cmd: "helm version --short 2>/dev/null || echo absent"
+        executable: /bin/bash
+      register: helm_current
+      changed_when: false
+      check_mode: false
+
+    - name: Determiner la derniere version de Helm
+      ansible.builtin.uri:
+        url: https://get.helm.sh/helm-latest-version
+        return_content: true
+      register: helm_latest
+      when: k8s_helm_version | length == 0
+      changed_when: false
+
+    - name: Fixer la version de Helm a installer
+      ansible.builtin.set_fact:
+        helm_target_version: >-
+          {{ k8s_helm_version if k8s_helm_version | length > 0
+             else (helm_latest.content | trim) }}
+
+    - name: Installer Helm {{ helm_target_version }}
+      ansible.builtin.unarchive:
+        src: "https://get.helm.sh/helm-{{ helm_target_version }}-linux-amd64.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+        extra_opts: [--strip-components=1]
+        include: [linux-amd64/helm]
+      when: helm_target_version not in helm_current.stdout
+
+# ---------------------------------------------------------------------------
+#  k9s
+# ---------------------------------------------------------------------------
+- name: Installer k9s
+  when: k8s_extra_tools.k9s | default(false) | bool
+  block:
+
+    - name: Verifier si k9s est deja installe
+      ansible.builtin.stat:
+        path: /usr/bin/k9s
+      register: k9s_installed
+
+    # k9s n'est qu'un confort : une indisponibilite de GitHub ne doit pas faire
+    # echouer la construction d'une image ou d'un cluster.
+    - name: Installer k9s depuis le paquet .deb amont
+      ansible.builtin.apt:
+        deb: >-
+          https://github.com/derailed/k9s/releases/{{
+            'download/' ~ k8s_k9s_version if k8s_k9s_version | length > 0 else 'latest/download'
+          }}/k9s_linux_amd64.deb
+      when: not k9s_installed.stat.exists
+      register: k9s_install
+      failed_when: false
+
+    - name: Verifier le resultat de l'installation de k9s
+      ansible.builtin.stat:
+        path: /usr/bin/k9s
+      register: k9s_final
+
+    - name: Signaler que k9s n'a pas pu etre installe
+      ansible.builtin.debug:
+        msg: >-
+          k9s n'a pas pu etre installe :
+          {{ k9s_install.msg | default('cause inconnue') }}.
+          C'est un outil de confort, le reste du cluster fonctionne sans.
+      when: not k9s_final.stat.exists
+
+# ---------------------------------------------------------------------------
+#  Completion shell
+# ---------------------------------------------------------------------------
+- name: Activer la completion kubectl
+  ansible.builtin.shell:
+    cmd: kubectl completion bash > /etc/bash_completion.d/kubectl
+    creates: /etc/bash_completion.d/kubectl
+
+- name: Ajouter l'alias k -> kubectl
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubectl-alias.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role kubernetes).
+      alias k=kubectl
+      complete -o default -F __start_kubectl k 2>/dev/null || true

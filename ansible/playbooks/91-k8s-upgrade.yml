@@ -1,0 +1,103 @@
+---
+# Montee de version d'un cluster Kubernetes, une mineure a la fois.
+# kubeadm interdit de sauter une mineure : 1.36 -> 1.38 se fait en deux passes.
+#
+#   ansible-playbook playbooks/91-k8s-upgrade.yml -e kubernetes_version=1.37
+#
+# Sur un cluster mono-noeud, l'API server est indisponible quelques minutes.
+
+- name: Mettre a jour Kubernetes
+  hosts: debian_nodes
+  gather_facts: true
+  become: true
+  serial: 1
+
+  tasks:
+
+    - name: Relever la version actuelle
+      ansible.builtin.command: kubeadm version -o short
+      register: k8s_before
+      changed_when: false
+
+    - name: Confirmer la cible
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} : {{ k8s_before.stdout }} -> v{{ kubernetes_version }}.
+          kubeadm refuse de sauter une mineure ; procede par paliers.
+
+    - name: Pointer le depot sur la version cible
+      ansible.builtin.include_role:
+        name: kubernetes
+        tasks_from: install.yml
+      vars:
+        k8s_install_only: true
+
+    - name: Verifier le plan de mise a jour
+      ansible.builtin.command: kubeadm upgrade plan
+      register: k8s_plan
+      changed_when: false
+      when: k8s_role == 'control_plane'
+
+    - name: Afficher le plan
+      ansible.builtin.debug:
+        msg: "{{ k8s_plan.stdout_lines }}"
+      when: k8s_role == 'control_plane'
+
+    - name: Appliquer la mise a jour du plan de controle
+      ansible.builtin.command: >-
+        kubeadm upgrade apply -y v{{ k8s_target_patch }}
+      when: k8s_role == 'control_plane'
+      vars:
+        k8s_target_patch: >-
+          {{ k8s_plan.stdout | regex_search('v(' ~ kubernetes_version | regex_escape ~ '\.\d+)', '\1') | first }}
+      changed_when: true
+
+    - name: Appliquer la mise a jour d'un worker
+      ansible.builtin.command: kubeadm upgrade node
+      when: k8s_role == 'worker'
+      changed_when: true
+
+    - name: Vider le noeud avant de redemarrer kubelet
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf drain {{ inventory_hostname }}
+        --ignore-daemonsets --delete-emptydir-data --force --timeout=300s
+      when:
+        - k8s_role == 'control_plane'
+        - not (k8s_single_node | bool)
+      changed_when: true
+
+    - name: Redemarrer kubelet
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    - name: Remettre le noeud en service
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf uncordon {{ inventory_hostname }}
+      when:
+        - k8s_role == 'control_plane'
+        - not (k8s_single_node | bool)
+      changed_when: true
+
+    - name: Attendre que le noeud soit Ready
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf get node {{ inventory_hostname }}
+        -o jsonpath={.status.conditions[?(@.type=="Ready")].status}
+      register: k8s_ready
+      until: k8s_ready.stdout == 'True'
+      retries: 30
+      delay: 10
+      changed_when: false
+      when: k8s_role == 'control_plane'
+
+    - name: Version apres mise a jour
+      ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o wide
+      register: k8s_after
+      changed_when: false
+      when: k8s_role == 'control_plane'
+
+    - name: Etat final
+      ansible.builtin.debug:
+        msg: "{{ k8s_after.stdout_lines }}"
+      when: k8s_role == 'control_plane'

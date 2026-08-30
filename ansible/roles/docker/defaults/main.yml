@@ -1,0 +1,10 @@
+---
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+
+docker_users: []
+docker_compose_plugin: true
+docker_containerd_systemd_cgroup: true

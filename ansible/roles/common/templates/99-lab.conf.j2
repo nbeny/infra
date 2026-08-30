@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+# Charge par l'`Include /etc/ssh/sshd_config.d/*.conf` de sshd_config.
+# Les directives lues en premier gagnent : ce fichier prime sur sshd_config.
+
+PermitRootLogin {{ common_ssh_permit_root_login }}
+PasswordAuthentication {{ 'yes' if common_ssh_password_authentication else 'no' }}
+PubkeyAuthentication {{ 'yes' if common_ssh_pubkey_authentication else 'no' }}
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+
+# Coupe les sessions mortes des tunnels ProxyJump
+ClientAliveInterval 60
+ClientAliveCountMax 3
+
+X11Forwarding no
+AllowAgentForwarding yes
+AllowTcpForwarding yes
+PrintMotd no

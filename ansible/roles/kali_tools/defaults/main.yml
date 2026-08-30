@@ -1,0 +1,8 @@
+---
+kali_metapackage: kali-linux-large
+kali_extra_packages: []
+kali_install_gui: false
+kali_gui_metapackage: kali-desktop-xfce
+# Duree max de l'installation du metapackage, en secondes.
+# kali-linux-large ~ 40 min, kali-linux-everything peut depasser 3 h.
+kali_install_timeout: 14400

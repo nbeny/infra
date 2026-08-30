@@ -1,0 +1,113 @@
+---
+# Kali se declare "Kali GNU/Linux" dans ansible_distribution, pas "Kali" :
+# une comparaison stricte rejetterait une vraie Kali.
+- name: Verifier que la cible est bien une Kali
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} rapporte la distribution
+      "{{ ansible_distribution }}" et non Kali. Ce role installe des
+      metapackages qui n'existent que sur les depots Kali.
+  when: "'kali' not in ansible_distribution | lower"
+
+- name: Mettre a jour le cache APT
+  ansible.builtin.apt:
+    update_cache: true
+  retries: 3
+  delay: 10
+
+# Kali est une rolling release : installer un metapackage sur une base non
+# mise a jour provoque des conflits de dependances.
+- name: Mettre a jour le systeme avant l'installation des outils
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+  async: "{{ kali_install_timeout }}"
+  poll: 30
+
+# ---------------------------------------------------------------------------
+#  Metapackage principal
+# ---------------------------------------------------------------------------
+# Tres long (~15 Go pour kali-linux-large, 100+ Go pour -everything) : la tache
+# tourne en asynchrone sur la cible pour survivre a une coupure SSH.
+- name: Installer {{ kali_metapackage }} (long, plusieurs dizaines de minutes)
+  ansible.builtin.apt:
+    name: "{{ kali_metapackage }}"
+    state: present
+    install_recommends: true
+  async: "{{ kali_install_timeout }}"
+  poll: 60
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Installer les outils complementaires
+  ansible.builtin.apt:
+    name: "{{ kali_extra_packages }}"
+    state: present
+  when: kali_extra_packages | length > 0
+  async: 3600
+  poll: 30
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+# ---------------------------------------------------------------------------
+#  Interface graphique (optionnelle, accessible en RDP via un tunnel SSH)
+# ---------------------------------------------------------------------------
+- name: Installer le bureau graphique et xrdp
+  when: kali_install_gui | bool
+  block:
+
+    - name: Installer {{ kali_gui_metapackage }} et xrdp
+      ansible.builtin.apt:
+        name:
+          - "{{ kali_gui_metapackage }}"
+          - xrdp
+          - xorgxrdp
+        state: present
+      async: "{{ kali_install_timeout }}"
+      poll: 60
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Activer xrdp
+      ansible.builtin.systemd_service:
+        name: xrdp
+        enabled: true
+        state: started
+
+    # xrdp n'ecoute que sur la boucle locale : la seule facon d'y acceder est
+    # un tunnel SSH via le noeud Proxmox (voir ssh/config.example).
+    - name: Restreindre xrdp a la boucle locale
+      ansible.builtin.lineinfile:
+        path: /etc/xrdp/xrdp.ini
+        regexp: '^#?address='
+        line: 'address=127.0.0.1'
+        insertafter: '^port='
+      notify: Redemarrer xrdp
+
+    - name: Definir la session XFCE par defaut
+      ansible.builtin.copy:
+        content: "startxfce4\n"
+        dest: "/home/{{ lab_admin_user }}/.xsession"
+        owner: "{{ lab_admin_user }}"
+        group: "{{ lab_admin_user }}"
+        mode: "0644"
+
+# ---------------------------------------------------------------------------
+#  Confort
+# ---------------------------------------------------------------------------
+# Le shell du compte admin est pose par le role `common`, a partir de
+# lab_admin_shell (/usr/bin/zsh pour les Kali, voir group_vars/kali_nodes.yml).
+# Le redefinir ici ferait alterner bash et zsh a chaque execution.
+
+- name: Compter les outils installes
+  ansible.builtin.shell:
+    cmd: "dpkg-query -W -f='${binary:Package}\n' | wc -l"
+    executable: /bin/bash
+  register: kali_pkg_count
+  changed_when: false
+
+- name: Recapitulatif
+  ansible.builtin.debug:
+    msg: >-
+      {{ kali_metapackage }} installe -- {{ kali_pkg_count.stdout | trim }}
+      paquets presents sur {{ inventory_hostname }}.

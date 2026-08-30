@@ -1,0 +1,210 @@
+---
+# Socle applique a toutes les VMs invitees, Debian comme Kali.
+
+# ---------------------------------------------------------------------------
+#  Resolution DNS -- EN PREMIER, apt en depend
+# ---------------------------------------------------------------------------
+# Sur les images ou systemd-resolved est actif (Kali notamment), cloud-init
+# ecrit les `dns-nameservers` de Proxmox dans /etc/network/interfaces.d, mais
+# systemd-resolved ne les lit pas : /etc/resolv.conf pointe sur le stub
+# 127.0.0.53 qui n'a alors aucun resolveur amont. Le reseau fonctionne, la
+# resolution non -- et apt echoue.
+
+- name: Verifier si systemd-resolved gere la resolution
+  ansible.builtin.command: systemctl is-active systemd-resolved
+  register: common_resolved
+  changed_when: false
+  failed_when: false
+
+- name: Configurer systemd-resolved
+  when: common_resolved.stdout | trim == 'active'
+  block:
+
+    - name: Creer le repertoire de configuration de systemd-resolved
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Declarer les resolveurs du lab a systemd-resolved
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/99-lab.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Gere par Ansible (role common).
+          [Resolve]
+          DNS={{ lab_dns_servers | join(' ') }}
+          Domains={{ lab_search_domain }}
+      register: common_resolved_conf
+
+    - name: Redemarrer systemd-resolved
+      ansible.builtin.systemd_service:
+        name: systemd-resolved
+        state: restarted
+      when: common_resolved_conf.changed
+
+- name: Verifier que la resolution DNS fonctionne
+  ansible.builtin.command: "getent hosts {{ common_dns_check_host }}"
+  register: common_dns_check
+  changed_when: false
+  failed_when: false
+  retries: 5
+  delay: 3
+  until: common_dns_check.rc == 0
+
+- name: Echouer si la resolution DNS est cassee
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} ne resout pas {{ common_dns_check_host }}.
+      Le reste du role (apt, depots, telechargements) ne peut pas fonctionner.
+      Verifie les resolveurs pousses par cloud-init : `resolvectl status` si
+      systemd-resolved est actif, sinon /etc/resolv.conf.
+  when: common_dns_check.rc != 0
+
+- name: Mettre a jour le cache APT
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  register: common_apt_cache
+  retries: 3
+  delay: 10
+  until: common_apt_cache is succeeded
+
+- name: Installer les paquets de base
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+  retries: 3
+  delay: 10
+
+# Sans l'agent QEMU, Proxmox et Terraform ne peuvent pas lire l'IP de la VM
+# ni l'arreter proprement.
+- name: Activer l'agent invite QEMU
+  ansible.builtin.systemd_service:
+    name: qemu-guest-agent
+    enabled: true
+    state: started
+
+- name: Definir le fuseau horaire
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+
+- name: Installer le paquet locales
+  ansible.builtin.apt:
+    name: locales
+    state: present
+
+- name: Generer la locale {{ common_locale }}
+  community.general.locale_gen:
+    name: "{{ common_locale }}"
+    state: present
+
+# ---------------------------------------------------------------------------
+#  Compte administrateur
+# ---------------------------------------------------------------------------
+# Le shell voulu peut ne pas exister sur toutes les images (zsh sur Kali,
+# bash ailleurs) : l'affecter sans verifier rendrait le compte inutilisable.
+- name: Verifier la presence du shell {{ lab_admin_shell }}
+  ansible.builtin.stat:
+    path: "{{ lab_admin_shell }}"
+  register: common_shell
+
+- name: Creer le compte administrateur {{ lab_admin_user }}
+  ansible.builtin.user:
+    name: "{{ lab_admin_user }}"
+    shell: "{{ lab_admin_shell if common_shell.stat.exists else '/bin/bash' }}"
+    groups: sudo
+    append: true
+    create_home: true
+    state: present
+
+- name: Autoriser les cles publiques sur {{ lab_admin_user }}
+  ansible.posix.authorized_key:
+    user: "{{ lab_admin_user }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ lab_ssh_public_keys }}"
+  loop_control:
+    label: "{{ item.split(' ')[2] | default('cle') }}"
+
+- name: Accorder sudo sans mot de passe a {{ lab_admin_user }}
+  ansible.builtin.copy:
+    content: "{{ lab_admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/90-{{ lab_admin_user }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+# ---------------------------------------------------------------------------
+#  Durcissement SSH
+# ---------------------------------------------------------------------------
+# Les VMs ne sont joignables que via le noeud Proxmox (ProxyJump) : pas
+# d'exposition sur le LAN. On coupe quand meme l'auth par mot de passe.
+- name: Deposer la configuration SSH du lab
+  ansible.builtin.template:
+    src: 99-lab.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-lab.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "/usr/sbin/sshd -t -f %s"
+  notify: Redemarrer SSH
+
+# ---------------------------------------------------------------------------
+#  Mises a jour
+# ---------------------------------------------------------------------------
+- name: Installer unattended-upgrades
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+  when: common_unattended_upgrades | bool
+
+- name: Activer les mises a jour de securite automatiques
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Gere par Ansible (role common).
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+  when: common_unattended_upgrades | bool
+
+- name: Appliquer les mises a jour complètes
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+    autoclean: true
+  when: common_do_upgrade | bool
+  retries: 2
+  delay: 15
+
+- name: Detecter si un redemarrage est requis
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: common_reboot_required
+
+- name: Redemarrer la VM
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+  when:
+    - common_reboot_required.stat.exists
+    - common_reboot_if_required | bool
+
+- name: Signaler qu'un redemarrage est en attente
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} attend un redemarrage. Relance avec
+      -e common_reboot_if_required=true, ou redemarre quand tu veux.
+  when:
+    - common_reboot_required.stat.exists
+    - not (common_reboot_if_required | bool)

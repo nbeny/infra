@@ -1,0 +1,107 @@
+---
+# Derniere etape d'un build Packer, juste avant la conversion en template.
+# Sans ce nettoyage, tous les clones partagent le meme machine-id (donc la
+# meme adresse DHCP et la meme identite systemd) et cloud-init ne se
+# reexecute pas sur les nouvelles VMs.
+
+# Les handlers des roles precedents (redemarrage de SSH, de containerd...) ne
+# se declenchent qu'en fin de play, donc APRES ce role. Or on s'apprete a
+# supprimer les cles d'hote SSH : un `systemctl restart ssh` differe echouerait
+# alors, puisque sshd refuse de demarrer sans elles. On vide donc la file des
+# handlers pendant que le systeme est encore intact.
+#
+# Rien ne doit s'executer apres ce role.
+- name: Executer les handlers en attente avant de nettoyer
+  ansible.builtin.meta: flush_handlers
+
+- name: Purger le cache APT
+  ansible.builtin.apt:
+    autoremove: true
+    autoclean: true
+    clean: true
+
+- name: Reinitialiser l'etat de cloud-init
+  ansible.builtin.command: cloud-init clean --logs --seed
+  changed_when: true
+  failed_when: false
+
+- name: Supprimer les artefacts d'identite de la machine
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/cloud/instances
+    - /var/lib/dbus/machine-id
+    - /etc/netplan/50-cloud-init.yaml
+    - /root/.bash_history
+    - "/home/{{ lab_admin_user }}/.bash_history"
+    - "/home/{{ lab_admin_user }}/.zsh_history"
+
+# Un fichier VIDE (et non absent) : systemd regenere alors un machine-id
+# unique au premier demarrage. Si le fichier manque completement, certaines
+# unites systemd echouent au boot.
+- name: Vider /etc/machine-id
+  ansible.builtin.copy:
+    content: ""
+    dest: /etc/machine-id
+    owner: root
+    group: root
+    mode: "0444"
+
+- name: Supprimer les cles d'hote SSH
+  ansible.builtin.shell:
+    cmd: rm -f /etc/ssh/ssh_host_*
+    executable: /bin/bash
+  changed_when: true
+
+# Les cles d'hote sont regenerees au premier demarrage du clone.
+- name: Garantir la regeneration des cles d'hote SSH au premier boot
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/regenerate-ssh-host-keys.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role image_cleanup).
+      [Unit]
+      Description=Regenere les cles d'hote SSH au premier demarrage
+      ConditionPathExistsGlob=!/etc/ssh/ssh_host_*_key
+      Before=ssh.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/ssh-keygen -A
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Activer la regeneration des cles d'hote SSH
+  ansible.builtin.systemd_service:
+    name: regenerate-ssh-host-keys
+    enabled: true
+    daemon_reload: true
+
+- name: Vider les journaux
+  ansible.builtin.shell:
+    cmd: |
+      journalctl --rotate --quiet || true
+      journalctl --vacuum-time=1s --quiet || true
+      find /var/log -type f -exec truncate -s 0 {} \; || true
+    executable: /bin/bash
+  changed_when: true
+
+- name: Remplir de zeros l'espace libre pour ameliorer la compression
+  ansible.builtin.shell:
+    cmd: |
+      dd if=/dev/zero of=/EMPTY bs=1M 2>/dev/null || true
+      rm -f /EMPTY
+      sync
+    executable: /bin/bash
+  when: image_cleanup_zerofill | bool
+  changed_when: true
+
+- name: Image nettoyee
+  ansible.builtin.debug:
+    msg: >-
+      Nettoyage termine. La VM peut etre arretee puis convertie en template.

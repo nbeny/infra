@@ -1,0 +1,40 @@
+---
+- name: Installer les binaires Kubernetes
+  ansible.builtin.import_tasks: install.yml
+  tags: [k8s-install]
+
+# Pendant un build Packer on s'arrete ici : figer l'etat d'un cluster dans une
+# image la rend inclonable (certificats, token et nom de noeud sont uniques).
+- name: Ne pas initialiser de cluster (mode image)
+  ansible.builtin.debug:
+    msg: >-
+      k8s_install_only=true : kubeadm/kubelet/kubectl sont installes, aucun
+      cluster n'est cree. C'est le mode attendu pour un build d'image Packer.
+  when: k8s_install_only | bool
+
+- name: Initialiser le cluster
+  ansible.builtin.import_tasks: cluster.yml
+  when: not (k8s_install_only | bool)
+  tags: [k8s-cluster]
+
+- name: Installer les outils annexes
+  ansible.builtin.import_tasks: tools.yml
+  tags: [k8s-tools]
+
+# Les deux blocs suivants ne concernent que le plan de controle et supposent un
+# cluster deja initialise. Helm, installe par tools.yml, est requis par l'edge.
+- name: Provisionner le stockage
+  ansible.builtin.import_tasks: storage.yml
+  when:
+    - not (k8s_install_only | bool)
+    - k8s_role == 'control_plane'
+    - k8s_storage_provisioner != 'none'
+  tags: [k8s-storage]
+
+- name: Deployer l'edge (ingress et securite)
+  ansible.builtin.import_tasks: ingress.yml
+  when:
+    - not (k8s_install_only | bool)
+    - k8s_role == 'control_plane'
+    - k8s_ingress_controller != 'none'
+  tags: [k8s-ingress]

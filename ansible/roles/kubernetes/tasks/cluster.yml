@@ -1,0 +1,197 @@
+---
+- name: Verifier si le noeud fait deja partie d'un cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: k8s_joined
+
+# ---------------------------------------------------------------------------
+#  Plan de controle
+# ---------------------------------------------------------------------------
+- name: Initialiser le plan de controle
+  when:
+    - k8s_role == 'control_plane'
+    - not k8s_joined.stat.exists
+  block:
+
+    - name: Pre-telecharger les images du plan de controle
+      ansible.builtin.command: kubeadm config images pull
+      changed_when: true
+
+    - name: Lancer kubeadm init
+      ansible.builtin.command: >-
+        kubeadm init
+          --pod-network-cidr={{ k8s_pod_cidr }}
+          --service-cidr={{ k8s_service_cidr }}
+          --apiserver-advertise-address={{ k8s_apiserver_advertise_address }}
+          --cri-socket=unix:///run/containerd/containerd.sock
+          --node-name={{ inventory_hostname }}
+      register: k8s_init
+      changed_when: true
+
+    - name: Enregistrer la sortie de kubeadm init
+      ansible.builtin.copy:
+        content: "{{ k8s_init.stdout }}\n"
+        dest: /root/kubeadm-init.log
+        owner: root
+        group: root
+        mode: "0600"
+
+- name: Configurer l'acces kubectl
+  when: k8s_role == 'control_plane'
+  block:
+
+    - name: Creer les repertoires .kube
+      ansible.builtin.file:
+        path: "{{ item.home }}/.kube"
+        state: directory
+        owner: "{{ item.user }}"
+        group: "{{ item.user }}"
+        mode: "0700"
+      loop:
+        - { user: root, home: /root }
+        - { user: "{{ lab_admin_user }}", home: "/home/{{ lab_admin_user }}" }
+      loop_control:
+        label: "{{ item.user }}"
+
+    - name: Installer le kubeconfig admin
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ item.home }}/.kube/config"
+        remote_src: true
+        owner: "{{ item.user }}"
+        group: "{{ item.user }}"
+        mode: "0600"
+      loop:
+        - { user: root, home: /root }
+        - { user: "{{ lab_admin_user }}", home: "/home/{{ lab_admin_user }}" }
+      loop_control:
+        label: "{{ item.user }}"
+
+    - name: Attendre que l'API server reponde
+      ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw /healthz
+      register: k8s_healthz
+      until: k8s_healthz.stdout == 'ok'
+      retries: 30
+      delay: 10
+      changed_when: false
+
+# ---------------------------------------------------------------------------
+#  CNI
+# ---------------------------------------------------------------------------
+- name: Installer le CNI
+  when:
+    - k8s_role == 'control_plane'
+    - k8s_cni != 'none'
+  block:
+
+    # Recherche sur TOUS les namespaces : Flannel deploie son DaemonSet dans
+    # `kube-flannel`, pas dans `kube-system`. Chercher au mauvais endroit
+    # ferait reappliquer le manifeste a chaque execution.
+    - name: Verifier si un CNI est deja deploye
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig /etc/kubernetes/admin.conf
+          get daemonset -A -o name 2>/dev/null | grep -E 'flannel|cilium' || true
+        executable: /bin/bash
+      register: k8s_cni_present
+      changed_when: false
+
+    - name: Deployer Flannel
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f
+        https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      when:
+        - k8s_cni == 'flannel'
+        - k8s_cni_present.stdout | trim | length == 0
+      changed_when: true
+
+    - name: Deployer Cilium via Helm
+      when:
+        - k8s_cni == 'cilium'
+        - k8s_cni_present.stdout | trim | length == 0
+      block:
+
+        - name: Ajouter le depot Helm de Cilium
+          ansible.builtin.command: helm repo add cilium https://helm.cilium.io/
+          changed_when: true
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+
+        - name: Installer Cilium
+          ansible.builtin.command: >-
+            helm upgrade --install cilium cilium/cilium
+              --namespace kube-system
+              --set ipam.mode=kubernetes
+              --set k8sServiceHost={{ k8s_apiserver_advertise_address }}
+              --set k8sServicePort=6443
+          changed_when: true
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+
+# ---------------------------------------------------------------------------
+#  Noeud unique
+# ---------------------------------------------------------------------------
+# Par defaut kubeadm pose un taint NoSchedule sur le plan de controle. Sur un
+# cluster mono-noeud, ce taint empeche tout pod applicatif de demarrer.
+- name: Retirer le taint du plan de controle (cluster mono-noeud)
+  ansible.builtin.command: >-
+    kubectl --kubeconfig /etc/kubernetes/admin.conf taint nodes --all
+    node-role.kubernetes.io/control-plane:NoSchedule-
+  when:
+    - k8s_role == 'control_plane'
+    - k8s_single_node | bool
+  register: k8s_untaint
+  changed_when: "'untainted' in k8s_untaint.stdout"
+  failed_when:
+    - k8s_untaint.rc != 0
+    - "'not found' not in k8s_untaint.stderr"
+
+# ---------------------------------------------------------------------------
+#  Noeuds workers
+# ---------------------------------------------------------------------------
+- name: Rattacher un worker au cluster
+  when:
+    - k8s_role == 'worker'
+    - not k8s_joined.stat.exists
+  block:
+
+    # Definis k8s_control_plane_host dans host_vars/<worker>.yml : c'est le
+    # nom d'inventaire du noeud qui porte le plan de controle.
+    - name: Exiger que le plan de controle soit designe
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} est declare worker mais
+          k8s_control_plane_host est vide. Renseigne le nom d'inventaire du
+          plan de controle pour permettre la jointure.
+      when: k8s_control_plane_host | default('') | length == 0
+
+    # Ansible resout `delegate_to` a la preparation de la tache, AVANT
+    # d'evaluer les conditions : sans valeur de repli, le simple fait que
+    # cette tache existe fait echouer tout play ou k8s_control_plane_host
+    # n'est pas defini, meme quand elle doit etre sautee.
+    # Le second argument de `default` est indispensable : sans lui le filtre ne
+    # remplace que les valeurs indefinies, et la valeur par defaut du role
+    # (chaine vide) produirait un delegate_to vide.
+    - name: Generer une commande de jointure depuis {{ k8s_control_plane_host | default('?', true) }}
+      ansible.builtin.command: kubeadm token create --print-join-command
+      delegate_to: "{{ k8s_control_plane_host | default(inventory_hostname, true) }}"
+      register: k8s_join_command
+      changed_when: false
+
+    - name: Joindre le cluster
+      ansible.builtin.command: >-
+        {{ k8s_join_command.stdout }}
+          --cri-socket=unix:///run/containerd/containerd.sock
+          --node-name={{ inventory_hostname }}
+      changed_when: true
+
+- name: Afficher l'etat des noeuds
+  ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o wide
+  register: k8s_nodes
+  changed_when: false
+  when: k8s_role == 'control_plane'
+
+- name: Etat du cluster
+  ansible.builtin.debug:
+    msg: "{{ k8s_nodes.stdout_lines }}"
+  when: k8s_role == 'control_plane'

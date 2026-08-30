@@ -1,0 +1,18 @@
+---
+common_packages:
+  - qemu-guest-agent
+  - ca-certificates
+  - curl
+  - gnupg
+  - sudo
+  - vim
+common_timezone: Europe/Paris
+common_locale: en_US.UTF-8
+common_ssh_permit_root_login: prohibit-password
+common_ssh_password_authentication: false
+common_ssh_pubkey_authentication: true
+common_unattended_upgrades: true
+common_do_upgrade: false
+common_reboot_if_required: false
+# Nom resolu pour verifier que le DNS de la VM fonctionne avant tout apt.
+common_dns_check_host: deb.debian.org

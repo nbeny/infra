@@ -1,0 +1,82 @@
+# {{ ansible_managed }}
+# Valeurs Helm de CrowdSec -- role kubernetes.
+#
+# Perimetre : IPS/WAF comportemental (scans, brute-force, flood L7, bad bots,
+# SQLi/XSS via AppSec) et reputation d'IP. Ce n'est PAS un anti-DDoS
+# volumetrique L3/L4 -- pour ca il faut une protection en amont.
+#
+# Deux pieges du chart, appris a la dure :
+#
+#  1. NE PAS definir `config.config.yaml.local`. Le chart y ecrit lui-meme le
+#     bloc api.server.auto_registration AVEC le token qu'il genere
+#     (lapi.secrets.registrationToken). Le surcharger sans token fait planter
+#     la LAPI au demarrage :
+#       "cscli machines add: failed to load Local API:
+#        missing token value for api.server.auto_register"
+#
+#  2. Il n'existe pas de valeur `config.collections`. Les collections
+#     s'installent via la variable d'environnement COLLECTIONS des conteneurs,
+#     en liste separee par des espaces.
+
+container_runtime: containerd
+
+# --- LAPI : decisions et base ----------------------------------------------
+lapi:
+  persistentVolume:
+    data:
+      enabled: true
+      size: {{ k8s_crowdsec_lapi_data_size }}
+    config:
+      enabled: true
+      size: 100Mi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# --- Agents : lisent les access-logs de Traefik -----------------------------
+# Sans `acquisition`, CrowdSec tourne mais ne detecte rien : c'est la lecture
+# des logs Traefik qui alimente les scenarios. D'ou aussi `logs.access.enabled`
+# cote Traefik.
+agent:
+  acquisition:
+    - namespace: {{ k8s_ingress_namespace }}
+      podName: traefik-*
+      program: traefik
+  env:
+    - name: COLLECTIONS
+      value: "{{ k8s_crowdsec_collections | join(' ') }}"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# --- AppSec (WAF L7) --------------------------------------------------------
+appsec:
+  enabled: {{ k8s_crowdsec_appsec | lower }}
+  replicas: 1
+  # Troisieme piege : le conteneur AppSec est un crowdsec a part entiere, il lui
+  # faut sa PROPRE source de donnees. Sans `acquisitions`, il charge toutes les
+  # regles puis s'arrete net sur
+  #   "crowdsec init: while loading acquisition config: no datasource enabled".
+  # Ici la source est le listener HTTP que le plugin bouncer Traefik interroge.
+  acquisitions:
+    - source: appsec
+      listen_addr: "0.0.0.0:7422"
+      path: /
+      appsec_config: {{ k8s_crowdsec_appsec_config }}
+      labels:
+        type: appsec
+  env:
+    - name: COLLECTIONS
+      value: "{{ k8s_crowdsec_appsec_collections | join(' ') }}"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi

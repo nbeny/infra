@@ -1,0 +1,48 @@
+---
+# Playbook execute PAR PACKER pendant le build du template 9101.
+# Ne pas lancer a la main.
+#
+# Le metapackage est surchargeable depuis Packer :
+#   packer build -var kali_metapackage=kali-linux-everything .
+
+- name: Construire l'image Kali outillee
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars_files:
+    - ../inventory/group_vars/all.yml
+
+  vars:
+    common_unattended_upgrades: false
+    common_do_upgrade: true
+    common_reboot_if_required: false
+
+    # Meme valeur que group_vars/kali_nodes.yml : le shell doit etre identique
+    # dans l'image et lors des executions de jour 2, sinon il alterne.
+    lab_admin_shell: /usr/bin/zsh
+
+    kali_metapackage: "{{ packer_kali_metapackage | default('kali-linux-large') }}"
+    kali_install_gui: "{{ packer_kali_gui | default(false) }}"
+    kali_extra_packages:
+      - seclists
+      - golang
+      - python3-pip
+      - python3-venv
+      - pipx
+      - tmux
+      - zsh
+      - ripgrep
+      - fzf
+
+  roles:
+    - role: common
+    - role: kali_tools
+    - role: image_cleanup
+
+  post_tasks:
+    - name: Image prete
+      ansible.builtin.debug:
+        msg: >-
+          Image Kali construite avec {{ kali_metapackage }}
+          (interface graphique : {{ 'oui' if kali_install_gui else 'non' }}).

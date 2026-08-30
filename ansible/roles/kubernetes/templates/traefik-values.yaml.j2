@@ -1,0 +1,85 @@
+# {{ ansible_managed }}
+# Valeurs Helm de Traefik -- role kubernetes.
+#
+# Le chart valide ses valeurs contre un JSON Schema : une cle inconnue fait
+# echouer `helm upgrade` avant meme le deploiement. Les noms ci-dessous sont
+# ceux du chart {{ k8s_traefik_chart_version }} :
+#   - `log` et `accessLog` au SINGULIER et a la racine (pas `logs.general` /
+#     `logs.access`)
+#   - pas de `ports.websecure.tls` : TLS est actif d'office sur cet entrypoint
+
+deployment:
+  replicas: 1
+{% if k8s_crowdsec_enabled %}
+  # Le plugin bouncer lit la cle LAPI dans un FICHIER, pas une variable
+  # d'environnement : d'ou le montage du Secret.
+  additionalVolumes:
+    - name: crowdsec-key
+      secret:
+        secretName: crowdsec-bouncer-apikey
+{% endif %}
+
+{% if k8s_crowdsec_enabled %}
+additionalVolumeMounts:
+  - name: crowdsec-key
+    mountPath: /etc/traefik/crowdsec
+    readOnly: true
+
+experimental:
+  plugins:
+    crowdsec:
+      moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+      version: {{ k8s_crowdsec_plugin_version }}
+{% endif %}
+
+providers:
+  kubernetesCRD:
+    enabled: true
+    # Les Middleware vivent dans le namespace applicatif (urbanconnect) alors
+    # que Traefik tourne dans le sien : sans cette option, les references
+    # inter-namespaces sont refusees.
+    allowCrossNamespace: true
+    allowExternalNameServices: true
+  kubernetesIngress:
+    enabled: true
+
+log:
+  level: {{ k8s_traefik_log_level }}
+
+# Desactives par defaut dans le chart. Or les access-logs sont la SOURCE de
+# detection de CrowdSec : sans eux l'agent tourne mais ne voit jamais rien.
+accessLog:
+  enabled: true
+
+# Pas de LoadBalancer sur du bare-metal : on expose en NodePort sur des ports
+# fixes, joignables depuis le noeud Proxmox (et via un tunnel SSH depuis le
+# poste client).
+service:
+  type: NodePort
+
+ports:
+  web:
+    nodePort: {{ k8s_traefik_nodeport_http }}
+{% if k8s_traefik_redirect_https %}
+    redirections:
+      entryPoint:
+        to: websecure
+        scheme: https
+        permanent: true
+{% endif %}
+  websecure:
+    nodePort: {{ k8s_traefik_nodeport_https }}
+
+# Le dashboard n'est PAS expose : il se consulte par port-forward.
+#   kubectl -n {{ k8s_ingress_namespace }} port-forward deploy/traefik 9000:9000
+#   puis http://localhost:9000/dashboard/
+ingressRoute:
+  dashboard:
+    enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

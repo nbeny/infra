@@ -1,0 +1,24 @@
+---
+# Applique la configuration complete aux VMs Kali : socle + metapackage
+# d'outils offensifs.
+#
+#   ansible-playbook playbooks/21-kali.yml
+#   ansible-playbook playbooks/21-kali.yml -e kali_metapackage=kali-linux-everything
+#   ansible-playbook playbooks/21-kali.yml -e kali_install_gui=true
+
+- name: Configurer les noeuds Kali
+  hosts: kali_nodes
+  gather_facts: true
+  become: true
+
+  roles:
+    - role: common
+    - role: kali_tools
+
+  post_tasks:
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }} ({{ ansible_host }}) pret"
+          - "Metapackage : {{ kali_metapackage }}"
+          - "Interface graphique : {{ 'xrdp actif sur 127.0.0.1:3389' if kali_install_gui else 'non installee' }}"

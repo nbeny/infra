@@ -1,0 +1,19 @@
+---
+# Playbook complet : noeud Proxmox, templates de base, puis toutes les VMs.
+#
+#   ansible-playbook playbooks/site.yml
+#
+# Ne cree aucune VM : c'est le role de Terraform. Ce playbook configure ce qui
+# existe deja dans l'inventaire.
+
+- name: Importer la configuration du noeud Proxmox
+  ansible.builtin.import_playbook: 00-proxmox-host.yml
+
+- name: Importer la construction des templates de base
+  ansible.builtin.import_playbook: 10-templates.yml
+
+- name: Importer la configuration des noeuds Debian
+  ansible.builtin.import_playbook: 20-debian-k8s.yml
+
+- name: Importer la configuration des noeuds Kali
+  ansible.builtin.import_playbook: 21-kali.yml

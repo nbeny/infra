@@ -1,0 +1,5 @@
+---
+# Remplir l'espace libre de zeros aide la compression et le thin provisioning,
+# mais gonfle temporairement le disque a 100 %. Inutile sur ZFS avec
+# compression activee : desactive par defaut.
+image_cleanup_zerofill: false
