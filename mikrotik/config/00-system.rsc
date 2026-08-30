@@ -9,14 +9,19 @@
 # --- Services de gestion ---------------------------------------------------
 # Regle : rien n'ecoute sans restriction d'adresse.
 #
-# Ce fichier decrit l'etat RELEVE le 30/08/2026. Deux lignes changent plus
-# loin dans la mise en oeuvre, chacune avec sa verification :
-#   - `www` est active et restreint au noeud (tache 4, M1), pour que nginx
-#     puisse publier le webfig sous router.urbanlink.fr ;
-#   - `api` est desactive (tache 5, M5) au profit d'api-ssl.
 /ip service set telnet   disabled=yes
 /ip service set ftp      disabled=yes
-/ip service set www      disabled=yes
+
+# Webfig en clair, restreint a la SEULE adresse du noeud Proxmox : c'est nginx
+# qui le publie sous router.urbanlink.fr, apres terminaison TLS et filtrage sur
+# l'adresse source. Aucun autre client n'a a l'atteindre -- et surtout pas
+# depuis ether1.
+#
+# Le saut noeud -> routeur est en clair, sur un segment a deux machines.
+# L'alternative serait www-ssl avec un certificat auto-signe, que nginx devrait
+# alors accepter sans le verifier : du chiffrement sans authentification, qui
+# ne protegerait de rien de plus ici.
+/ip service set www      address=192.168.100.50 disabled=no
 /ip service set www-ssl  disabled=yes
 /ip service set ssh      address=192.168.100.0/24,192.168.1.0/24 disabled=no
 /ip service set winbox   address=192.168.100.0/24,192.168.1.0/24 disabled=no

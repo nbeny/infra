@@ -166,20 +166,13 @@
 ==============================================================================
 ## /ip/firewall/nat/print
 ==============================================================================
-  chain=srcnat action=masquerade out-interface=ether1 out-interface-list=WAN invalid=false dynamic=false disabled=false
-  chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
-  chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
-  chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
-  chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
-  chain=srcnat action=masquerade src-address=10.0.0.0/24 out-interface=ether1 invalid=false dynamic=false comment=Proxmox NAT
-  chain=srcnat action=masquerade src-address=10.0.0.0/24 out-interface=ether1 invalid=false dynamic=false comment=NAT Proxmox LAN
-  chain=srcnat action=masquerade src-address=10.0.0.0/24 out-interface=ether1 invalid=false dynamic=false comment=NAT Proxmox LAN
-  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=443 protocol=tcp in-interface=ether1 dst-port=443 log=false log-prefix= invalid=false dynamic=false disabled=false
-  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=22 protocol=tcp in-interface=ether1 dst-port=22 log=false log-prefix= invalid=false dynamic=false disabled=false
-  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=80 protocol=tcp in-interface=ether1 dst-port=80 log=false log-prefix= invalid=false dynamic=false disabled=false
-  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=4242 protocol=tcp in-interface=ether1 dst-port=4242 log=false log-prefix= invalid=false dynamic=false disabled=false
   chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=41641 protocol=udp dst-address=192.168.1.50 in-interface=ether1 dst-port=52534 invalid=false dynamic=true disabled=false comment=upnp 192.168.100.50: tailscale-portmap
   chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=41641 protocol=udp dst-address=192.168.1.50 in-interface=ether1 dst-port=32872 invalid=false dynamic=true disabled=false comment=upnp 192.168.100.50: tailscale-portmap
+  chain=srcnat action=masquerade out-interface-list=WAN invalid=false dynamic=false comment=sortie Internet du lab
+  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=80 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=80 invalid=false dynamic=false comment=HTTP -> openresty du noeud
+  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=443 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=443 invalid=false dynamic=false comment=HTTPS -> openresty du noeud
+  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=22 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=22 invalid=false dynamic=false comment=SSH -> noeud
+  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=4242 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=4242 invalid=false dynamic=false comment=SSH VM 102
 
 ==============================================================================
 ## /ip/firewall/mangle/print
@@ -198,7 +191,7 @@
 ==============================================================================
   name=telnet port=23 address= invalid=true disabled=true
   name=ftp port=21 address= invalid=true disabled=true
-  name=www port=80 address= invalid=true disabled=true
+  name=www port=80 address=192.168.100.50/32 invalid=false disabled=false
   name=ssh port=22 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
   name=www-ssl port=443 address= certificate=none tls-version=any invalid=true disabled=true
   name=api port=8728 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
