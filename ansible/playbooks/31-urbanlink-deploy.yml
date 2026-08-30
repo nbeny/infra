@@ -237,7 +237,7 @@
     - name: Appliquer la politique d'autorisation de la passerelle
       ansible.builtin.command: >-
         kubectl --kubeconfig {{ urbanlink_kubeconfig }}
-        apply -f {{ urbanlink_manifests_dest }}/ingress-istio/authorization.yaml
+        apply -f {{ urbanlink_manifests_dest }}/ingress/authorization.yaml
       register: ul_authz
       changed_when: "'created' in ul_authz.stdout or 'configured' in ul_authz.stdout"
 

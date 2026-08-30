@@ -149,11 +149,27 @@ Pas besoin d'installer Terraform, Packer ni Ansible localement.
 Depuis `C:\Users\nbeny\Documents\GitHub\infra`, dans Git Bash :
 
 ```bash
-tar -czf - --exclude=.git . | ssh root@192.168.100.50 'mkdir -p /root/infra && tar -xzf - -C /root/infra'
+ssh root@192.168.100.50 'rm -rf /root/infra/kube /root/infra/mikrotik /root/infra/scripts /root/infra/docs'
+tar -czf - --exclude=.git --exclude=mikrotik/secrets.env .   | ssh root@192.168.100.50 'mkdir -p /root/infra && tar -xzf - -C /root/infra'
 ```
 
-À refaire après chaque modification du repo. (Alternative : pousser sur un
-remote git et faire `git pull` sur le nœud.)
+À refaire après chaque modification du repo.
+
+> **Le `rm -rf` n'est pas décoratif.** `tar` ajoute et écrase, il n'efface
+> **jamais**. Un fichier supprimé du dépôt survit indéfiniment sur le nœud, et
+> `31-urbanlink-deploy.yml` le resynchronise ensuite sur la VM. C'est
+> exactement ce qui s'est produit en supprimant les manifests Traefik : ils
+> sont revenus sur la VM après avoir disparu du dépôt.
+>
+> Les quatre répertoires listés sont **entièrement gérés par git**. `ansible/`
+> et `terraform/` en sont volontairement absents : ils contiennent des
+> fichiers qui n'existent que sur le nœud — `inventory/20-terraform.yml`,
+> généré par Terraform, et les deux fichiers de secrets. Les effacer casserait
+> l'inventaire et obligerait à recréer le token API.
+
+Alternative plus propre, maintenant que le dépôt a un remote : `git pull` sur
+le nœud, qui gère les suppressions nativement. Il faut lui donner un accès en
+lecture au dépôt privé (clé de déploiement).
 
 ### 2. Configurer le nœud
 

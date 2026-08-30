@@ -52,7 +52,7 @@
 #
 # ------------------------------------------------- 4) Application (déjà câblée)
 #   Ce Middleware `crowdsec` est encapsulé dans les chaînes master `uc-edge` /
-#   `uc-edge-auth` (cf. ingress/master.yaml), elles-mêmes référencées par les
+#   `uc-edge-auth` (manifest supprime avec le reste de l'ingress Traefik),
 #   child IngressRoutes → il s'applique donc à toutes les routes, avant l'auth.
 #   Alternative « globale entrypoint » : ajouter `urbanconnect-crowdsec@kubernetescrd`
 #   à ports.websecure.middlewares (values Helm Traefik).

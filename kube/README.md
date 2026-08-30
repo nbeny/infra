@@ -70,8 +70,11 @@ L'ingress est passé de Traefik à Istio. La correspondance :
 | `certResolver: letsencrypt` (ACME natif) | Secret TLS — **cert-manager requis en production** |
 | plugin bouncer CrowdSec | *rien* — voir ci-dessous |
 
-Les manifests d'origine restent dans `ingress/` à titre de référence ; ils ne
-sont plus appliqués. Les nouveaux sont dans `ingress-istio/`.
+Les manifests Traefik ont été supprimés : ils n'étaient plus appliqués depuis
+la bascule, et leurs CRD ne sont même plus installées sur le cluster — les
+garder ne documentait plus rien qu'on puisse relire utilement. Le tableau
+ci-dessus conserve la correspondance, c'est ce qui avait de la valeur.
+`ingress/` contient désormais les manifests Istio.
 
 **Mode ambient, et ce n'est pas un choix de confort.** Le mode sidecar injecte
 un conteneur dans chaque pod, ce qui casse deux choses dans ce stack : les

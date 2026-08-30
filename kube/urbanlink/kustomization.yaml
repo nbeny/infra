@@ -1,14 +1,21 @@
-# Déploiement complet : kubectl apply -k kube/
-# Prérequis :
-#   1. kubectl create configmap kratos-config --from-file=./kratos/ -n urbanconnect
-#   2. kubectl create configmap postgres-init --from-file=init-db.sql --from-file=postgres-init/create-databases.sh -n urbanconnect
-#   3. Remplir kube/secrets.yaml avec les vraies valeurs (ou utiliser Sealed Secrets)
-#   4. Ingress = Traefik (CRD IngressRoute/Middleware) avec ACME natif — installer
-#      Traefik + ses CRDs via Helm AVANT `apply -k` (cf. ingress/ingressroute.yaml).
-#      cert-manager n'est plus requis pour le TLS ingress.
-#   5. Edge security = CrowdSec (agent + LAPI + AppSec) via Helm + plugin bouncer
-#      déclaré dans Traefik (cf. crowdsec/middleware.yaml). Clé bouncer à monter
-#      dans le pod Traefik. La Middleware `crowdsec` est chaînée avant l'auth.
+# Ne pas appliquer ce kustomize à la main : playbooks/31-urbanlink-deploy.yml
+# le fait, et il fait aussi les trois choses que `apply -k` ne peut pas faire.
+#
+#   ansible-playbook playbooks/31-urbanlink-deploy.yml
+#
+# Ce que le playbook ajoute, et pourquoi :
+#   1. ConfigMap kratos-config, construite depuis config/common/kratos/ ET
+#      config/<env>/kratos/ — kustomize ne sait pas fusionner deux répertoires.
+#   2. ConfigMap postgres-init, depuis config/common/postgres-init/.
+#   3. Secret urbanconnect-secrets, depuis un secrets.env NON VERSIONNÉ.
+#      Voir secrets.env.example. Le playbook refuse un fichier contenant
+#      encore des CHANGE_ME.
+#   4. ingress/authorization.yaml, qui doit vivre dans le namespace
+#      istio-ingress alors que ce fichier force `namespace: urbanconnect`.
+#
+# Ingress = Istio en mode ambient. Le TLS n'est PAS terminé par la passerelle
+# mais par l'openresty du nœud Proxmox, avec un certificat wildcard
+# *.urbanlink.fr — voir ansible/roles/edge_urbanlink.
 #
 # Ordre de déploiement recommandé :
 #   1. namespace → secrets
@@ -24,8 +31,8 @@
 #   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
 #   9. frontend (après backend)
 #  10. coturn (DaemonSet hostNetwork sur nœuds publics), geoipupdate, pgadmin
-#  11. ingress Traefik — master (chaînes uc-edge/uc-edge-auth + TLSOption) puis
-#      children (child-public, child-internal) qui référencent le master
+#  11. ingress Istio — Gateway (les 14 hosts) puis VirtualServices, et
+#      l'AuthorizationPolicy appliquée à part dans istio-ingress
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -84,7 +91,7 @@ resources:
 
   # Access proxy — Oathkeeper (forward-auth Kratos à l'edge)
   # oathkeeper/middleware.yaml retiré : c'était un Middleware Traefik.
-  # Son équivalent est l'AuthorizationPolicy de ingress-istio/authorization.yaml.
+  # Son équivalent est l'AuthorizationPolicy de ingress/authorization.yaml.
   - oathkeeper/configmap.yaml
   - oathkeeper/deployment.yaml
   - oathkeeper/service.yaml
@@ -122,7 +129,7 @@ resources:
   #   bouncer de Traefik, qui n'a pas d'équivalent portable sur Istio.
   #   CrowdSec reste actif sur le nginx du nœud Proxmox — la vraie porte
   #   d'entrée Internet. Détail et justification dans
-  #   ingress-istio/authorization.yaml.
+  #   ingress/authorization.yaml.
 
   # Ingress — Istio (Gateway + VirtualService + AuthorizationPolicy)
   #   Remplace le pattern master/children de Traefik :
@@ -130,14 +137,15 @@ resources:
   #     VirtualService      <- IngressRoute (routage seul)
   #     AuthorizationPolicy <- Middleware (politique seule)
   #
-  #   Les anciens manifests Traefik restent dans ingress/ à titre de
-  #   référence ; ils ne sont plus appliqués.
+  #   Les manifests Traefik (master.yaml, child-public.yaml,
+  #   child-internal.yaml) ont ete supprimes : ils n'etaient plus appliques
+  #   et leurs CRD ne sont meme plus installees sur le cluster.
   #
-  #   ingress-istio/authorization.yaml n'est PAS liste ici : le champ
+  #   ingress/authorization.yaml n'est PAS liste ici : le champ
   #   `namespace: urbanconnect` en tete de ce fichier s'applique a toutes les
   #   ressources, or l'AuthorizationPolicy doit vivre dans `istio-ingress`,
   #   aupres des pods de la passerelle -- c'est le seul endroit ou l'ext_authz
   #   L7 s'applique en mode ambient (ztunnel ne fait que du L4). Elle est
   #   appliquee separement par playbooks/31-urbanlink-deploy.yml.
-  - ingress-istio/gateway.yaml
-  - ingress-istio/virtualservices.yaml
+  - ingress/gateway.yaml
+  - ingress/virtualservices.yaml

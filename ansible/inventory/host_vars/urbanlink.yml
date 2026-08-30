@@ -32,7 +32,7 @@ k8s_istio_observability: true
 #
 # Ce que la bascule fait perdre : le bouncer CrowdSec, qui etait un plugin Go
 # du binaire Traefik. Aucun portage utilisable n'existe cote Envoy (voir
-# kube/urbanlink/ingress-istio/authorization.yaml pour le detail). CrowdSec
+# kube/urbanlink/ingress/authorization.yaml pour le detail). CrowdSec
 # reste actif sur le nginx du noeud Proxmox, la vraie porte d'entree Internet.
 k8s_ingress_controller: none
 k8s_istio_gateway: true

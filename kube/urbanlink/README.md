@@ -61,20 +61,25 @@ Compose actif (`docker-compose.yml`) vers Kubernetes, avec durcissement edge
 
 ---
 
-## 2. Pattern Ingress « master / children »
+## 2. Ingress — Istio
 
-Traefik n'a pas le master/minion nginx. Équivalent natif ici :
+Le pattern master/children de Traefik a disparu avec lui. Istio sépare
+nativement ce que l'`IngressRoute` mêlait :
 
-- **Master** (`ingress/master.yaml`) — politique edge partagée :
-  - `Middleware uc-edge` (chain) → `crowdsec` : appliqué à **toutes** les routes.
-  - `Middleware uc-edge-auth` (chain) → `crowdsec` + `oathkeeper-auth` : pour l'**API**.
-  - `TLSOption uc-tls` : TLS 1.2 min, `sniStrict`.
-- **Children** — IngressRoutes par tier, référencent le master, **extensibles** :
-  - `ingress/child-public.yaml` : frontend, api, kratos, nominatim, s3.
-  - `ingress/child-internal.yaml` : directus, minio-console, pgadmin.
+- `ingress/gateway.yaml` — les 14 hosts servis, et le TLS de la passerelle.
+- `ingress/virtualservices.yaml` — un VirtualService par host, routage seul.
+- `ingress/authorization.yaml` — la politique, séparée du routage. Elle vit
+  dans le namespace `istio-ingress`, auprès des pods de la passerelle : c'est
+  le seul endroit où l'ext_authz L7 s'applique en mode ambient, `ztunnel` ne
+  faisant que du L4. Elle est donc appliquée **hors kustomize**, par le
+  playbook.
 
-Ajouter un domaine = éditer un child (ou créer `child-xxx.yaml` + 1 ligne kustomize),
-**sans toucher au master**. Modifier la sécurité globale = éditer `uc-edge` une fois.
+Ajouter un outil = un VirtualService et une ligne dans les `hosts` du Gateway.
+
+L'étiquette `uc.ingress/tier` (`public` / `internal`) est portée par chaque
+VirtualService. Elle n'a aujourd'hui **aucun effet technique** : tout est déjà
+restreint au LAN par nginx. Elle existe pour que publier l'applicatif un jour
+soit une ligne à écrire, et non un audit à refaire.
 
 ---
 
@@ -314,8 +319,10 @@ Tests fonctionnels :
   mots de passe dans `urbanconnect-secrets`. Le Job `elasticsearch-setup` fixe le
   mdp `kibana_system` une fois ES prêt (Kibana refuse le superuser `elastic`).
   Pas d'Ingress pour Kibana → `port-forward` (cf. §4).
-- **child-internal** (directus, minio-console, pgadmin) : consoles d'admin —
-  restreindre par IP (`ipWhiteList`) ou auth basic edge (exemple dans le manifest).
+- **Consoles d'administration** (directus, minio, pgadmin, kafka, temporal,
+  kibana, kiali, prometheus) : restreintes au LAN par le bloc `allow`/`deny`
+  des vhosts nginx, et par des enregistrements A publics qui pointent sur une
+  IP privée. Deux barrières indépendantes.
 - **JWT à l'edge** (optionnel) : Oathkeeper peut minter un JWT signé (mutator
   `id_token`) pour décharger le backend — nécessite JWKS + passage HS256→RS256.
   Laissé désactivé (voir `oathkeeper/configmap.yaml`).
