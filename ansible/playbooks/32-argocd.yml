@@ -85,12 +85,24 @@
           passer -e argocd_ssh_key="$(cat <cle_privee>)".
       when: argocd_ssh_key | length == 0
 
-    - name: Exiger le jeton de tirage GHCR
-      ansible.builtin.fail:
+    # ⚠️ Le jeton GHCR n'est PAS exige, et ce n'est pas un relachement.
+    # Reconcilier le depot et savoir tirer les images sont deux problemes
+    # independants : tant que les manifestes referencent des images locales
+    # (`urbanconnect-*:prod`, construites par 30-urbanlink-images.yml et
+    # importees dans containerd), aucun registre n'est interroge et Argo CD
+    # fonctionne tres bien sans identifiants. Le jeton devient necessaire au
+    # moment ou la CI epingle un tag `ghcr.io/...` -- pas avant.
+    #
+    # L'exiger d'office rendrait ce playbook injouable aujourd'hui, alors que
+    # la moitie qu'il installe est deja utile.
+    - name: Avertir de l'absence de jeton GHCR
+      ansible.builtin.debug:
         msg: >-
-          ghcr_token est vide. Les images sont publiees sur ghcr.io sous un
-          depot PRIVE : sans jeton (portee read:packages), les pods restent en
-          ImagePullBackOff. Passer -e ghcr_token=...
+          ghcr_token n'est pas fourni : aucun secret de tirage ne sera cree.
+          Argo CD reconciliera les manifestes tels quels, ce qui convient tant
+          qu'ils referencent des images LOCALES. Des que la CI y epinglera un
+          tag ghcr.io, les pods partiront en ImagePullBackOff -- rejouer alors
+          ce playbook avec -e ghcr_token=<jeton portee read:packages>.
       when: ghcr_token | length == 0
 
     - name: Verifier que le cluster repond
@@ -192,6 +204,7 @@
     # l'environnement, pas avec l'application), et un composant ajoute demain
     # tirera sans qu'on ait pense a lui.
     - name: Creer le secret de tirage GHCR
+      when: ghcr_token | length > 0
       ansible.builtin.shell:
         cmd: >-
           kubectl --kubeconfig {{ kubeconfig }} -n {{ urbanlink_namespace }}
@@ -206,6 +219,7 @@
       no_log: true
 
     - name: Rattacher le secret de tirage au ServiceAccount par defaut
+      when: ghcr_token | length > 0
       ansible.builtin.command: >-
         kubectl --kubeconfig {{ kubeconfig }} -n {{ urbanlink_namespace }}
         patch serviceaccount default
