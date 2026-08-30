@@ -1,44 +1,49 @@
-# ============================================================================
-#  Fins de ligne
-# ----------------------------------------------------------------------------
-#  Le depot est edite sous Windows et execute sous Linux. Un fichier livre en
-#  CRLF a un interpreteur POSIX echoue de maniere deroutante : le \r final est
-#  vu comme faisant partie du dernier mot.
+# Le depot est edite depuis Windows mais tout son contenu s'execute sous Linux.
+# Sans cette normalisation, git rend les fichiers en CRLF a la copie de travail
+# et un script shell parti vers un invite echoue sur un `\r` invisible :
+#   /bin/bash^M: bad interpreter
 #
-#  Cas reellement rencontre : create-databases.sh en CRLF donnait
-#      set: pipefail: invalid option name
-#  parce que bash lisait `pipefail\r`. Le script mourait a la ligne 5, les
-#  bases kratos, directus et temporal n'etaient jamais creees, et Kratos
-#  tournait en boucle sans que le lien soit visible.
-# ============================================================================
+# `text eol=lf` force LF dans le depot ET dans la copie de travail.
 
-# Par defaut, git normalise a la detection.
-*           text=auto
+*                 text=auto eol=lf
 
-# Scripts et configurations interpretes sous Linux : LF impose.
-*.sh        text eol=lf
-*.bash      text eol=lf
-*.sql       text eol=lf
-*.py        text eol=lf
-*.yml       text eol=lf
-*.yaml      text eol=lf
-*.jsonnet   text eol=lf
-*.j2        text eol=lf
+*.sh              text eol=lf
+*.j2              text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf
+*.tf              text eol=lf
+*.tfvars          text eol=lf
+*.hcl             text eol=lf
+*.cfg             text eol=lf
+*.md              text eol=lf
+Dockerfile*       text eol=lf
+.gitignore        text eol=lf
+.gitattributes    text eol=lf
 
-# Scripts RouterOS : appliques via l'API, meme exigence.
-*.rsc       text eol=lf
+# Binaires : jamais de conversion.
+*.png             binary
+*.jpg             binary
+*.pdf             binary
+*.zst             binary
+*.qcow2           binary
 
-# Fichiers sans extension executes sous Linux.
-Dockerfile* text eol=lf
+# --- Ajouts -----------------------------------------------------------------
+# Cas reellement rencontre : create-databases.sh etait en CRLF et bash lisait
+# `pipefail`. Le script mourait ligne 5, les bases kratos, directus et
+# temporal n'etaient jamais creees, et Kratos tournait en boucle sans que le
+# lien soit visible. Le fichier datait d'avant ce .gitattributes et n'avait
+# jamais ete renormalise : `git add --renormalize .` corrige l'existant.
+*.sql             text eol=lf
+*.py              text eol=lf
+*.jsonnet         text eol=lf
+*.json            text eol=lf
 
-# Scripts Windows : CRLF assume.
-*.ps1       text eol=crlf
-*.cmd       text eol=crlf
-*.bat       text eol=crlf
+# Scripts RouterOS : appliques via l'API au MikroTik, meme exigence.
+*.rsc             text eol=lf
 
-# Binaires : jamais touches.
-*.png       binary
-*.jpg       binary
-*.pdf       binary
-*.gz        binary
-*.qcow2     binary
+# Scripts Windows : CRLF assume, ils ne quittent jamais le poste.
+*.ps1             text eol=crlf
+*.cmd             text eol=crlf
+*.bat             text eol=crlf
+
+*.gz              binary
