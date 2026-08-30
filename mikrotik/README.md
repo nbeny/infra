@@ -218,6 +218,30 @@ Relevés sur le matériel, pas déduits de la documentation.
 |---|---|---|
 | **M1** | Les quatre règles `dstnat` (22, 80, 443, 4242) portaient `in-interface=ether1` sans aucun `dst-address`. Toute requête du LAN vers **n'importe quelle** IP du segment lab sur ces ports était détournée vers `192.168.100.50` — le webfig du routeur lui-même était inatteignable. | **corrigé** — `30-nat.rsc` |
 | **M2** | Les chaînes `input` et `forward` ne contenaient que des `accept`, aucun `drop` final. La politique par défaut de RouterOS étant `accept`, le routeur n'avait pas de pare-feu. | **corrigé** — `40-firewall.rsc` |
+
+### M2 — vérification du pare-feu
+
+Un pare-feu qu'on n'a pas vu bloquer n'est pas prouvé. Le `drop` de la chaîne
+`input` a été testé activement : une connexion depuis le poste (`192.168.1.89`,
+donc côté WAN) vers `192.168.100.1:8728`, port absent de la liste
+d'administration, expire — et le compteur de la règle passe de 0 à 3 paquets.
+Un `drop`, pas un `reject` : la connexion expire au lieu d'être refusée, ce qui
+ne renseigne pas un scanneur sur l'existence de l'hôte.
+
+Les compteurs relevés juste après la pose confirment que le trafic légitime
+emprunte bien les règles prévues :
+
+| Chaîne | Règle | Paquets |
+|---|---|---|
+| `input` | administration depuis le LAN maison | 3 |
+| `input` | segment lab | 1 |
+| `forward` | LAN maison → segment lab | 56 |
+| `forward` | lab → Internet | 15 |
+| `input` | **drop WAN** | 3 (au test) |
+
+Le `drop` de la chaîne `forward` reste à zéro, et c'est attendu : la box FAI ne
+redirige vers le routeur que les ports 22, 80, 443 et 4242, tous couverts par
+une règle `dstnat`. Rien d'autre n'atteint le routeur depuis Internet.
 | **M3** | `/tool/mac-server` et `/tool/mac-server/mac-winbox` étaient sur `allowed-interface-list=all`. MAC-telnet et MAC-Winbox opèrent en couche 2 : aucune règle de pare-feu ne les arrête. | **corrigé** — `05-hardening.rsc` |
 | **M4** | La chaîne de blocage CrowdSec → MikroTik ne fonctionne pas. Détail ci-dessous. | **documenté, non corrigé** |
 | **M5** | Pool DHCP `192.168.100.0-200`, incluant l'adresse réseau **et la passerelle**. Entrée réseau fantôme `192.0.0.0/8`. API en clair (8728) activée. Scheduler orphelin. | **corrigé** — `20-addressing.rsc`, `05-hardening.rsc`, `00-system.rsc` |

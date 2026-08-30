@@ -30,7 +30,7 @@
 ==============================================================================
 ## /system/ntp/client/print
 ==============================================================================
-  enabled=true primary-ntp=162.159.200.1 secondary-ntp=162.159.200.123 server-dns-names= mode=unicast poll-interval=1m4s active-server=162.159.200.1 last-update-from=162.159.200.1 last-update-before=27s680ms last-adjustment=-137us
+  enabled=true primary-ntp=162.159.200.1 secondary-ntp=162.159.200.123 server-dns-names= mode=unicast poll-interval=4m16s active-server=162.159.200.1 last-update-from=162.159.200.1 last-update-before=1m46s680ms last-adjustment=349us
 
 ==============================================================================
 ## /system/scheduler/print
@@ -154,12 +154,23 @@
 ## /ip/firewall/filter/print
 ==============================================================================
   chain=forward action=passthrough dynamic=true comment=special dummy rule to show fasttrack counters
-  chain=input action=accept protocol=tcp src-address=192.168.100.50 dst-port=179 invalid=false dynamic=false
-  chain=output action=accept protocol=tcp dst-address=192.168.100.50 dst-port=179 invalid=false dynamic=false
-  chain=input action=accept src-address=10.0.0.0/24 invalid=false dynamic=false comment=Allow internal LAN to access router
-  chain=forward action=accept src-address=10.0.0.0/24 invalid=false dynamic=false comment=Allow Proxmox internal LAN
-  chain=input action=accept protocol=icmp invalid=false dynamic=false comment=Allow ICMP ping
-  chain=forward action=fasttrack-connection connection-state=established,related invalid=false dynamic=false
+  chain=input action=accept connection-state=established,related,untracked invalid=false dynamic=false comment=retour de trafic deja autorise
+  chain=input action=drop connection-state=invalid invalid=false dynamic=false comment=paquets hors connexion
+  chain=input action=accept protocol=icmp invalid=false dynamic=false comment=ping et decouverte de MTU -- ne pas retirer
+  chain=input action=accept in-interface-list=LAN invalid=false dynamic=false comment=segment lab 192.168.100.0/24
+  chain=input action=accept src-address=10.0.0.0/24 invalid=false dynamic=false comment=VMs derriere le noeud Proxmox
+  chain=input action=accept protocol=tcp src-address=192.168.100.50 dst-port=179 invalid=false dynamic=false comment=BGP CrowdSec depuis le noeud
+  chain=input action=accept protocol=tcp src-address=192.168.1.0/24 dst-port=22,8291,8729 invalid=false dynamic=false comment=administration depuis le LAN maison -- SANS CETTE REGLE, LOCKOUT
+  chain=input action=drop in-interface-list=WAN invalid=false dynamic=false comment=M2 -- tout le reste arrivant par ether1
+  chain=forward action=fasttrack-connection connection-state=established,related invalid=false dynamic=false comment=deleste le CPU des flux etablis
+  chain=forward action=accept connection-state=established,related,untracked invalid=false dynamic=false comment=retour de trafic deja autorise
+  chain=forward action=drop connection-state=invalid invalid=false dynamic=false comment=paquets hors connexion
+  chain=forward action=accept src-address=10.0.0.0/24 invalid=false dynamic=false comment=VMs du lab -> partout
+  chain=forward action=accept src-address=192.168.1.0/24 dst-address=192.168.100.0/24 invalid=false dynamic=false comment=LAN maison -> segment lab (le poste de travail passe par ici)
+  chain=forward action=accept src-address=192.168.1.0/24 dst-address=10.0.0.0/24 invalid=false dynamic=false comment=LAN maison -> VMs du lab
+  chain=forward action=accept in-interface-list=LAN out-interface-list=WAN invalid=false dynamic=false comment=lab -> Internet
+  chain=forward action=drop connection-state=new connection-nat-state=!dstnat in-interface-list=WAN invalid=false dynamic=false comment=M2 -- entrant non publie. Les dstnat de 30-nat.rsc passent.
+  chain=output action=accept protocol=tcp dst-address=192.168.100.50 dst-port=179 invalid=false dynamic=false comment=BGP CrowdSec vers le noeud
 
 ==============================================================================
 ## /ip/firewall/nat/print

@@ -1177,20 +1177,23 @@ from ros_api import connect_from_env
 r = connect_from_env()
 r.talk(['/system/backup/save', '=name=pre-firewall'])
 r.talk(['/system/scheduler/add', '=name=rollback-firewall', '=interval=5m',
-        '=on-event=/system backup load name=pre-firewall'])
-print('filet arme -- restauration automatique dans 5 minutes')
+        '=on-event=/ip firewall filter remove [find where dynamic=no]'])
+print('filet arme -- toutes les regles de filtrage sautent dans 5 minutes')
 print('scheduler:', [s.get('name') for s in r.talk(['/system/scheduler/print'])])
 "
 ```
 
 Attendu : `filet arme` et `['rollback-firewall']`.
 
-Le backup est pris **après** M1, M3 et M5 : une restauration ne perd que le
-travail de cette tâche. Le scheduler n'étant pas dans le backup, une
-restauration le supprime — pas de boucle de redémarrage.
+**Le filet retire les règles, il ne recharge pas la sauvegarde.** Un
+`/system backup load` redémarrerait le routeur — coupure Internet du foyer, et
+rien ne garantit que la restauration aboutisse. Supprimer toutes les règles de
+filtrage rend la main instantanément et de façon certaine : sans règle, la
+politique par défaut de RouterOS est `accept`. La sauvegarde `pre-firewall` est
+prise malgré tout, comme second recours manuel.
 
 > **À partir d'ici, les étapes 2 à 5 doivent s'enchaîner en moins de cinq
-> minutes.** Si le délai est dépassé sans incident, le routeur redémarre : ce
+> minutes.** Si le délai est dépassé sans incident, les règles sautent : ce
 > n'est pas grave, il suffit de reprendre à l'étape 1.
 
 - [ ] **Étape 2 : écrire `40-firewall.rsc`**
@@ -1280,9 +1283,9 @@ echo "5. Publication   :" && curl -s -o /dev/null -w "   nbeny.fr %{http_code}\n
 
 Attendu : les cinq répondent `OK` ou un code HTTP valide.
 
-**Si l'un échoue, ne pas insister : attendre les cinq minutes.** Le routeur
-redémarre et restaure `pre-firewall`. Corriger `40-firewall.rsc` et reprendre à
-l'étape 1.
+**Si l'un échoue, ne pas insister : attendre les cinq minutes.** Le scheduler
+retire toutes les règles et l'accès revient. Corriger `40-firewall.rsc` et
+reprendre à l'étape 1.
 
 - [ ] **Étape 5 : désarmer le filet**
 
