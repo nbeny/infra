@@ -15,6 +15,19 @@ spec:
       labels:
         app: temporal-ui
     spec:
+      # ⚠️ **Kubernetes injecte des variables qui écrasent celles de l'image.**
+      # Pour chaque Service du namespace, kubelet pose `<NOM>_PORT=tcp://<ip>:<port>`
+      # dans tous les pods — un héritage de l'ère pré-DNS. Le Service de cette
+      # UI s'appelant `temporal-ui`, le pod recevait
+      # `TEMPORAL_UI_PORT=tcp://10.x.x.x:8080` là où l'application attend un
+      # entier, et mourait au chargement de sa config :
+      #   `config file corrupted: cannot unmarshal !!str 'tcp://1...' into int`
+      #
+      # Le nom de la variable est dérivé du nom du Service : le conflit vient de
+      # la collision entre `temporal-ui` et le préfixe attendu par l'UI. Couper
+      # l'injection est le remède ciblé — le pod n'a besoin d'aucune de ces
+      # variables, il joint Temporal par DNS via `TEMPORAL_ADDRESS` ci-dessous.
+      enableServiceLinks: false
       containers:
         - name: temporal-ui
           image: temporalio/ui:2.31.2

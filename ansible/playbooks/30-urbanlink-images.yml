@@ -76,7 +76,7 @@
         target: production
       - name: urbanconnect-temporal-worker
         context: backTs
-        dockerfile: _build/Dockerfile.temporal-worker
+        dockerfile: Dockerfile.temporal-worker
         target: ""
 
   tasks:
@@ -123,23 +123,12 @@
           - "--exclude=.git"
           - "--exclude=coverage"
 
-    # `copy` ne cree pas les repertoires intermediaires de la destination.
-    - name: Creer le repertoire du Dockerfile worker
-      ansible.builtin.file:
-        path: "{{ urbanlink_src_remote }}/backTs/_build"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-
-    # Le Dockerfile du worker vient de CE depot, pas du depot applicatif.
-    - name: Deposer le Dockerfile du worker temporal
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../kube/urbanlink/_build/Dockerfile.temporal-worker"
-        dest: "{{ urbanlink_src_remote }}/backTs/_build/Dockerfile.temporal-worker"
-        owner: root
-        group: root
-        mode: "0644"
+    # Le Dockerfile du worker arrive desormais par le rsync ci-dessus : il vit
+    # dans le depot applicatif (`backTs/Dockerfile.temporal-worker`), aupres du
+    # code qu'il empaquette. Les deux taches qui le deposaient depuis ce depot
+    # ont ete retirees -- il en existait alors DEUX exemplaires, et c'est celui
+    # d'ici qui gagnait, donc une correction faite cote applicatif n'avait
+    # aucun effet sur l'image construite.
 
     - name: Resynchroniser le lockfile du backend (copie de build uniquement)
       when: urbanlink_backend_relock | bool

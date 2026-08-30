@@ -70,10 +70,32 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 10
             failureThreshold: 10
+          # ⚠️ **Une sonde HTTP nue ne peut PAS interroger un ES sécurisé.**
+          # C'était `httpGet: / :9200`, et `xpack.security.enabled` vaut "true"
+          # deux lignes plus haut : un GET non authentifié reçoit **401**, que
+          # Kubernetes compte comme un échec au même titre qu'un port fermé.
+          # Kubelet tuait donc le conteneur toutes les deux minutes — 168 échecs
+          # relevés sur la VM `urbanlink` — sans que rien ne soit en panne : ES
+          # démarrait, passait `GREEN`, puis recevait SIGTERM.
+          #
+          # `httpGet` n'a pas de moyen de s'authentifier depuis un Secret (ses
+          # `httpHeaders` sont des littéraux : il faudrait écrire le base64 du
+          # mot de passe en clair dans le manifeste). On passe donc en `exec`,
+          # qui lit `$ELASTIC_PASSWORD` de l'environnement — exactement ce que
+          # fait déjà la sonde de disponibilité juste au-dessus.
+          #
+          # ⚠️ La vivacité vise `/` et non `_cluster/health` : elle répond à
+          # « le processus est-il vivant ? », pas « le cluster est-il sain ? ».
+          # Un ES qui passe `RED` doit sortir du Service, pas être redémarré —
+          # c'est le rôle de la disponibilité, et les redémarrer aggraverait le
+          # cas au lieu de le réparer.
           livenessProbe:
-            httpGet:
-              path: /
-              port: 9200
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  curl -sf -u elastic:$ELASTIC_PASSWORD http://localhost:9200/ >/dev/null
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10

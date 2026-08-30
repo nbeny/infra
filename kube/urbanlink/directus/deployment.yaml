@@ -89,15 +89,26 @@ spec:
             limits:
               cpu: 1000m
               memory: 1Gi
+          # ⚠️ **`/server/health` est un point d'ADMINISTRATION, pas de santé.**
+          # Il repond 403 a une requete non authentifiee -- mesure sur la VM
+          # `urbanlink` : `GET /server/health 403 16ms` dans le journal de
+          # Directus, alors que le serveur venait d'annoncer « Server started at
+          # http://0.0.0.0:8055 ». Le service allait bien ; c'est la sonde qui
+          # demandait un detail reserve a un administrateur. Kubelet comptait le
+          # 403 comme un echec et redemarrait le pod -- 45 fois.
+          #
+          # Une sonde ne doit jamais avoir besoin d'identifiants : `/server/ping`
+          # est le point public prevu par Directus pour cet usage, il repond
+          # `pong` en 200 sans authentification.
           livenessProbe:
             httpGet:
-              path: /server/health
+              path: /server/ping
               port: 8055
             initialDelaySeconds: 30
             periodSeconds: 30
           readinessProbe:
             httpGet:
-              path: /server/health
+              path: /server/ping
               port: 8055
             initialDelaySeconds: 10
             periodSeconds: 10

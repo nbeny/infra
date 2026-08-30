@@ -63,12 +63,26 @@ spec:
             limits:
               cpu: 1000m
               memory: 1Gi
+          # ⚠️ **Une sonde vise `localhost`, JAMAIS son propre Service.**
+          # Les deux sondes interrogeaient `temporal:7233`, c'est-à-dire le
+          # Service qui pointe sur ce pod même. Un Service ne route que vers des
+          # endpoints **prêts** : tant que la disponibilité n'a pas réussi une
+          # fois, il n'en a aucun, la connexion tombe (`error reading server
+          # preface: EOF`), donc la disponibilité échoue — et rien ne peut la
+          # faire réussir. La vivacité, adossée à la même adresse, tuait le
+          # conteneur au bout de 60 s. **Blocage circulaire** : 532 échecs et 37
+          # redémarrages relevés sur la VM `urbanlink`, pour un serveur qui
+          # démarrait correctement à chaque fois (« All services are stopped »
+          # dans les journaux est la conséquence du SIGTERM, pas une panne).
+          #
+          # `localhost` interroge le conteneur directement, sans passer par le
+          # routage du Service ni par sa condition de disponibilité.
           livenessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - temporal operator cluster health --address temporal:7233
+                - temporal operator cluster health --address localhost:7233
             initialDelaySeconds: 60
             periodSeconds: 20
             timeoutSeconds: 10
@@ -78,7 +92,7 @@ spec:
               command:
                 - sh
                 - -c
-                - temporal operator cluster health --address temporal:7233
+                - temporal operator cluster health --address localhost:7233
             initialDelaySeconds: 40
             periodSeconds: 15
             timeoutSeconds: 10
