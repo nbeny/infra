@@ -61,9 +61,17 @@
     argocd_repo_revision: master
     argocd_repo_path: kube/urbanlink
 
-    # Cle de deploiement LECTURE SEULE du depot infra. Passee en -e, jamais
-    # ecrite ici : ce fichier est versionne.
-    argocd_ssh_key: ""
+    # ⚠️ **Un CHEMIN, pas le contenu de la cle.**
+    # `ansible-playbook -e cle=valeur` decoupe la valeur sur les ESPACES
+    # (`parse_kv` fait une tokenisation facon shell). Passer une cle privee
+    # ainsi la reduit a son premier mot : mesure, le Secret contenait
+    # `-----BEGIN` — 11 caracteres, 2 lignes — et Argo CD repondait
+    # « ssh: no key found » sans dire pourquoi. La forme JSON
+    # (`-e '{"cle": "..."}'`) fonctionnerait, mais elle oblige a echapper
+    # chaque saut de ligne : un chemin supprime la classe de probleme entiere.
+    #
+    # Le fichier est lu sur le NOEUD DE CONTROLE (celui qui lance ansible).
+    argocd_ssh_key_file: /root/argocd_infra.key
 
     # Identifiants de tirage GHCR. Les paquets suivent la visibilite du depot,
     # qui est PRIVE -- sans ce secret, kubelet recoit un 401 sur les trois
@@ -78,12 +86,21 @@
     #  Prerequis -- echouer tot et en nommant ce qui manque
     # ----------------------------------------------------------------------
 
+    - name: Verifier que la cle SSH de lecture est presente
+      ansible.builtin.stat:
+        path: "{{ argocd_ssh_key_file }}"
+      register: ul_key
+      delegate_to: localhost
+      become: false
+
     - name: Exiger la cle SSH de lecture du depot
       ansible.builtin.fail:
         msg: >-
-          argocd_ssh_key est vide. Argo CD doit cloner un depot PRIVE :
-          passer -e argocd_ssh_key="$(cat <cle_privee>)".
-      when: argocd_ssh_key | length == 0
+          {{ argocd_ssh_key_file }} est introuvable sur le noeud de controle.
+          Argo CD doit cloner un depot PRIVE : y deposer la cle privee de
+          deploiement (lecture seule) creee sur nbeny/infra, ou passer
+          -e argocd_ssh_key_file=<chemin>.
+      when: not ul_key.stat.exists
 
     # ⚠️ Le jeton GHCR n'est PAS exige, et ce n'est pas un relachement.
     # Reconcilier le depot et savoir tirer les images sont deux problemes
@@ -115,11 +132,18 @@
     # manquent, il synchronisera un stack qui ne peut pas demarrer, et le
     # diagnostic partira sur une fausse piste -- « Synced » en vert, pods en
     # CrashLoopBackOff.
+    # ⚠️ La forme `type/nom` est OBLIGATOIRE pour interroger plusieurs types a
+    # la fois. `get secret A configmap B C` ne demande PAS un secret puis des
+    # ConfigMaps : kubectl lit le premier mot comme le type et tout le reste
+    # comme des NOMS -- il cherche donc un secret litteralement nomme
+    # « configmap ». Avec `2>/dev/null`, l'erreur disparait et le compte tombe
+    # a 1 sans rien dire. Mesure : cette verification echouait sur un cluster
+    # ou les trois objets etaient bel et bien presents.
     - name: Verifier que l'amorcage par 31-urbanlink-deploy.yml a eu lieu
       ansible.builtin.shell:
         cmd: >-
           kubectl --kubeconfig {{ kubeconfig }} -n {{ urbanlink_namespace }}
-          get secret urbanconnect-secrets configmap kratos-config postgres-init
+          get secret/urbanconnect-secrets configmap/kratos-config configmap/postgres-init
           -o name 2>/dev/null | wc -l
         executable: /bin/bash
       register: ul_bootstrap
@@ -188,11 +212,26 @@
             namespace: {{ argocd_namespace }}
             labels:
               argocd.argoproj.io/secret-type: repository
-          stringData:
-            type: git
-            url: {{ argocd_repo_url }}
-            sshPrivateKey: |
-          {{ argocd_ssh_key | indent(6, true) }}
+          # ⚠️ `data:` + base64, et NON `stringData:` + bloc `|` indente.
+          # Un bloc litteral impose que chaque ligne de la cle soit indentee
+          # d'exactement le bon nombre d'espaces ; une cle de 7 lignes rend
+          # cette indentation dependante du rendu Jinja, et une erreur d'un
+          # espace produit un YAML valide mais une cle inutilisable. Le base64
+          # est une chaine d'une seule ligne : il n'y a plus rien a indenter.
+          #
+          # ⚠️ `rstrip=False` — et surtout PAS une concatenation manuelle.
+          # `lookup('file')` retire le saut de ligne terminal par defaut, et
+          # OpenSSH refuse une cle privee qui n'en a pas. La correction
+          # « evidente » (`lookup(...) + '\n'`) NE MARCHE PAS ici : dans un bloc
+          # litteral YAML, Jinja recoit les deux caracteres `\` et `n` et les
+          # recopie tels quels. Mesure : le Secret se terminait par un
+          # antislash suivi d'un « n », et `ssh-keygen -y` repondait
+          # « error in libcrypto » — un message qui n'evoque rien du probleme.
+          # L'option du lookup fait la meme chose sans passer par une chaine.
+          data:
+            type: {{ 'git' | b64encode }}
+            url: {{ argocd_repo_url | b64encode }}
+            sshPrivateKey: {{ lookup('file', argocd_ssh_key_file, rstrip=False) | b64encode }}
           YAML
         executable: /bin/bash
       changed_when: true
