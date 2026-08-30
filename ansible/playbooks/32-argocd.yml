@@ -1,0 +1,305 @@
+---
+# Installe Argo CD sur la VM cible et lui confie la reconciliation du stack
+# UrbanLink depuis ce depot.
+#
+#   ansible-playbook playbooks/32-argocd.yml \
+#     -e argocd_ssh_key="$(cat ~/.ssh/argocd_infra_ed25519)" \
+#     -e ghcr_token=ghp_xxx
+#
+# Prerequis : le stack a deja ete deploye au moins une fois par
+# playbooks/31-urbanlink-deploy.yml. Ce n'est pas une commodite, c'est une
+# NECESSITE -- voir « Ce qu'Argo CD ne peut PAS reprendre » ci-dessous.
+#
+# ============================================================================
+#  Ce qu'Argo CD ne peut PAS reprendre, et pourquoi
+# ============================================================================
+#
+# Argo CD applique la sortie de `kustomize build`. Trois choses que fait
+# 31-urbanlink-deploy.yml lui sont donc structurellement inaccessibles :
+#
+#   1. **Les quatre ConfigMaps de configuration.** Leur contenu vit dans
+#      `config/` du depot APPLICATIF, pas ici, et chacune fusionne DEUX
+#      repertoires (`common/<x>` + `<env>/<x>`) -- ce que kustomize ne sait pas
+#      faire. Une source multiple d'Argo CD ne resoudrait que la moitie du
+#      probleme : elle sait cloner un second depot, pas fusionner deux dossiers
+#      dans une meme ConfigMap.
+#   2. **Le Secret `urbanconnect-secrets`**, construit depuis un `secrets.env`
+#      deliberement NON versionne. Un GitOps qui lirait les secrets depuis git
+#      supposerait qu'ils y soient -- exactement ce qu'on refuse.
+#   3. **L'AuthorizationPolicy de la passerelle**, qui doit vivre dans
+#      `istio-ingress` alors que le kustomization force `namespace:
+#      urbanconnect`.
+#
+# ⇒ **Le partage des roles est donc explicite** : ansible amorce (ConfigMaps,
+#   Secret, politique de passerelle), Argo CD reconcilie ensuite les charges de
+#   travail -- c'est-a-dire la seule partie qui bouge a chaque livraison
+#   applicative, le tag des trois images.
+#
+# ⚠️ **Consequence a connaitre** : un changement dans `config/` du depot
+#   applicatif ne se propage PAS tout seul. Il faut rejouer 31 (ou sa seule
+#   section ConfigMaps) puis redemarrer les pods concernes. Argo CD affichera
+#   « Synced » malgre tout, puisque de son point de vue rien n'a change.
+#
+# ============================================================================
+
+- name: Installer Argo CD et declarer l'Application UrbanLink
+  hosts: urbanlink
+  gather_facts: true
+  become: true
+
+  vars:
+    kubeconfig: /etc/kubernetes/admin.conf
+    argocd_namespace: argocd
+    # Version EPINGLEE, jamais `stable` : `stable` est une reference mouvante,
+    # et un outil de reconciliation qui change de version tout seul est
+    # exactement ce que le GitOps cherche a supprimer.
+    argocd_version: v2.13.2
+    urbanlink_namespace: urbanconnect
+
+    argocd_app_name: urbanlink
+    argocd_repo_url: git@github.com:nbeny/infra.git
+    argocd_repo_revision: master
+    argocd_repo_path: kube/urbanlink
+
+    # Cle de deploiement LECTURE SEULE du depot infra. Passee en -e, jamais
+    # ecrite ici : ce fichier est versionne.
+    argocd_ssh_key: ""
+
+    # Identifiants de tirage GHCR. Les paquets suivent la visibilite du depot,
+    # qui est PRIVE -- sans ce secret, kubelet recoit un 401 sur les trois
+    # images applicatives et rien ne demarre.
+    ghcr_registry: ghcr.io
+    ghcr_username: nbeny
+    ghcr_token: ""
+
+  tasks:
+
+    # ----------------------------------------------------------------------
+    #  Prerequis -- echouer tot et en nommant ce qui manque
+    # ----------------------------------------------------------------------
+
+    - name: Exiger la cle SSH de lecture du depot
+      ansible.builtin.fail:
+        msg: >-
+          argocd_ssh_key est vide. Argo CD doit cloner un depot PRIVE :
+          passer -e argocd_ssh_key="$(cat <cle_privee>)".
+      when: argocd_ssh_key | length == 0
+
+    - name: Exiger le jeton de tirage GHCR
+      ansible.builtin.fail:
+        msg: >-
+          ghcr_token est vide. Les images sont publiees sur ghcr.io sous un
+          depot PRIVE : sans jeton (portee read:packages), les pods restent en
+          ImagePullBackOff. Passer -e ghcr_token=...
+      when: ghcr_token | length == 0
+
+    - name: Verifier que le cluster repond
+      ansible.builtin.command: "kubectl --kubeconfig {{ kubeconfig }} get --raw /healthz"
+      register: ul_health
+      changed_when: false
+      failed_when: ul_health.stdout != 'ok'
+
+    # Argo CD ne cree ni les ConfigMaps ni le Secret (cf. en-tete). S'ils
+    # manquent, il synchronisera un stack qui ne peut pas demarrer, et le
+    # diagnostic partira sur une fausse piste -- « Synced » en vert, pods en
+    # CrashLoopBackOff.
+    - name: Verifier que l'amorcage par 31-urbanlink-deploy.yml a eu lieu
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ kubeconfig }} -n {{ urbanlink_namespace }}
+          get secret urbanconnect-secrets configmap kratos-config postgres-init
+          -o name 2>/dev/null | wc -l
+        executable: /bin/bash
+      register: ul_bootstrap
+      changed_when: false
+      failed_when: ul_bootstrap.stdout | int < 3
+
+    - name: Rappeler l'amorcage manquant
+      ansible.builtin.debug:
+        msg: >-
+          Secret et ConfigMaps presents. Argo CD ne les gere pas : il reconcilie
+          les charges de travail par-dessus.
+
+    # ----------------------------------------------------------------------
+    #  Installation
+    # ----------------------------------------------------------------------
+
+    - name: Creer le namespace argocd
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ kubeconfig }} create namespace {{ argocd_namespace }}
+        --dry-run=client -o yaml
+      register: ul_ns_yaml
+      changed_when: false
+
+    - name: Appliquer le namespace argocd
+      ansible.builtin.shell:
+        cmd: "echo '{{ ul_ns_yaml.stdout }}' | kubectl --kubeconfig {{ kubeconfig }} apply -f -"
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Installer Argo CD
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+        apply -f https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml
+      register: ul_argo_install
+      changed_when: true
+      async: 600
+      poll: 10
+
+    - name: Attendre que le serveur Argo CD soit pret
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+        rollout status deploy/argocd-server --timeout=600s
+      changed_when: false
+
+    - name: Attendre que le controleur applicatif soit pret
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+        rollout status statefulset/argocd-application-controller --timeout=600s
+      changed_when: false
+
+    # ----------------------------------------------------------------------
+    #  Identifiants
+    # ----------------------------------------------------------------------
+
+    # Le label `argocd.argoproj.io/secret-type: repository` est ce qui fait
+    # qu'Argo CD ramasse ce Secret : sans lui il reste un Secret ordinaire et le
+    # clonage echoue en « repository not accessible », sans indiquer pourquoi.
+    - name: Declarer le depot d'infrastructure aupres d'Argo CD
+      ansible.builtin.shell:
+        cmd: |
+          cat <<'YAML' | kubectl --kubeconfig {{ kubeconfig }} apply -f -
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: infra-repo
+            namespace: {{ argocd_namespace }}
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: {{ argocd_repo_url }}
+            sshPrivateKey: |
+          {{ argocd_ssh_key | indent(6, true) }}
+          YAML
+        executable: /bin/bash
+      changed_when: true
+      no_log: true
+
+    # ⚠️ Le secret de tirage est pose sur le ServiceAccount `default` du
+    # namespace applicatif, et non sur chacun des trois Deployments. Deux
+    # raisons : aucun manifeste n'a a connaitre le registre (il change avec
+    # l'environnement, pas avec l'application), et un composant ajoute demain
+    # tirera sans qu'on ait pense a lui.
+    - name: Creer le secret de tirage GHCR
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ kubeconfig }} -n {{ urbanlink_namespace }}
+          create secret docker-registry ghcr-pull
+          --docker-server={{ ghcr_registry }}
+          --docker-username={{ ghcr_username }}
+          --docker-password={{ ghcr_token }}
+          --dry-run=client -o yaml
+          | kubectl --kubeconfig {{ kubeconfig }} apply -f -
+        executable: /bin/bash
+      changed_when: true
+      no_log: true
+
+    - name: Rattacher le secret de tirage au ServiceAccount par defaut
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ kubeconfig }} -n {{ urbanlink_namespace }}
+        patch serviceaccount default
+        -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
+      changed_when: true
+
+    # ----------------------------------------------------------------------
+    #  L'Application
+    # ----------------------------------------------------------------------
+
+    # ⚠️ `prune: false` est un choix, pas un oubli. Une suppression dans git
+    # deviendrait sinon une suppression dans le cluster sans qu'un humain la
+    # voie passer -- y compris si le chemin surveille se vide par accident
+    # (renommage, branche mal ciblee). `selfHeal: true` en revanche est acquis :
+    # il annule une modification faite a la main sur le cluster, ce qui est tout
+    # l'interet de la manoeuvre.
+    #
+    # Pour activer l'elagage plus tard, une fois la chaine eprouvee :
+    #   kubectl -n argocd patch application urbanlink --type merge \
+    #     -p '{"spec":{"syncPolicy":{"automated":{"prune":true}}}}'
+    - name: Declarer l'Application UrbanLink
+      ansible.builtin.shell:
+        cmd: |
+          cat <<'YAML' | kubectl --kubeconfig {{ kubeconfig }} apply -f -
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: {{ argocd_app_name }}
+            namespace: {{ argocd_namespace }}
+          spec:
+            project: default
+            source:
+              repoURL: {{ argocd_repo_url }}
+              targetRevision: {{ argocd_repo_revision }}
+              path: {{ argocd_repo_path }}
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: {{ urbanlink_namespace }}
+            syncPolicy:
+              automated:
+                prune: false
+                selfHeal: true
+              syncOptions:
+                # Le namespace est cree par 31-urbanlink-deploy.yml, avec ses
+                # eventuels labels de maillage. Le laisser a Argo CD le
+                # recreerait nu.
+                - CreateNamespace=false
+                # Les Jobs (kratos-migrate, minio-init, elasticsearch-setup) ont
+                # des champs immuables : sans ce reglage, toute resynchronisation
+                # echoue sur « field is immutable » des qu'un Job existe deja.
+                - Replace=false
+                - ApplyOutOfSyncOnly=true
+          YAML
+        executable: /bin/bash
+      changed_when: true
+
+    # ----------------------------------------------------------------------
+    #  Compte rendu
+    # ----------------------------------------------------------------------
+
+    - name: Relever le mot de passe initial de l'administrateur
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+          get secret argocd-initial-admin-secret
+          -o jsonpath='{.data.password}' 2>/dev/null | base64 -d
+        executable: /bin/bash
+      register: ul_argo_pwd
+      changed_when: false
+      failed_when: false
+
+    - name: Etat de l'Application
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+          get application {{ argocd_app_name }}
+          -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null
+        executable: /bin/bash
+      register: ul_argo_app
+      changed_when: false
+      failed_when: false
+      retries: 12
+      delay: 10
+      until: ul_argo_app.stdout is search('/')
+
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "Application {{ argocd_app_name }} : {{ ul_argo_app.stdout | default('(pas encore evaluee)') }}"
+          - ""
+          - "Interface (pas d'Ingress -- volontairement) :"
+          - "  kubectl -n {{ argocd_namespace }} port-forward svc/argocd-server 8081:443"
+          - "  https://localhost:8081   utilisateur: admin"
+          - "  mot de passe initial : {{ ul_argo_pwd.stdout | default('(secret deja supprime)') }}"
+          - ""
+          - "Suivi :  kubectl -n {{ argocd_namespace }} get application -w"
+          - "Forcer :  kubectl -n {{ argocd_namespace }} patch application {{ argocd_app_name }} --type merge -p '{\"operation\":{\"sync\":{}}}'"
