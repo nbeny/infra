@@ -1,28 +1,44 @@
-# Le depot est edite depuis Windows mais tout son contenu s'execute sous Linux.
-# Sans cette normalisation, git rend les fichiers en CRLF a la copie de travail
-# et un script shell parti vers un invite echoue sur un `\r` invisible :
-#   /bin/bash^M: bad interpreter
+# ============================================================================
+#  Fins de ligne
+# ----------------------------------------------------------------------------
+#  Le depot est edite sous Windows et execute sous Linux. Un fichier livre en
+#  CRLF a un interpreteur POSIX echoue de maniere deroutante : le \r final est
+#  vu comme faisant partie du dernier mot.
 #
-# `text eol=lf` force LF dans le depot ET dans la copie de travail.
+#  Cas reellement rencontre : create-databases.sh en CRLF donnait
+#      set: pipefail: invalid option name
+#  parce que bash lisait `pipefail\r`. Le script mourait a la ligne 5, les
+#  bases kratos, directus et temporal n'etaient jamais creees, et Kratos
+#  tournait en boucle sans que le lien soit visible.
+# ============================================================================
 
-*                 text=auto eol=lf
+# Par defaut, git normalise a la detection.
+*           text=auto
 
-*.sh              text eol=lf
-*.j2              text eol=lf
-*.yml             text eol=lf
-*.yaml            text eol=lf
-*.tf              text eol=lf
-*.tfvars          text eol=lf
-*.hcl             text eol=lf
-*.cfg             text eol=lf
-*.md              text eol=lf
-Dockerfile*       text eol=lf
-.gitignore        text eol=lf
-.gitattributes    text eol=lf
+# Scripts et configurations interpretes sous Linux : LF impose.
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.sql       text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.jsonnet   text eol=lf
+*.j2        text eol=lf
 
-# Binaires : jamais de conversion.
-*.png             binary
-*.jpg             binary
-*.pdf             binary
-*.zst             binary
-*.qcow2           binary
+# Scripts RouterOS : appliques via l'API, meme exigence.
+*.rsc       text eol=lf
+
+# Fichiers sans extension executes sous Linux.
+Dockerfile* text eol=lf
+
+# Scripts Windows : CRLF assume.
+*.ps1       text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# Binaires : jamais touches.
+*.png       binary
+*.jpg       binary
+*.pdf       binary
+*.gz        binary
+*.qcow2     binary

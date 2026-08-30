@@ -129,6 +129,63 @@
       changed_when: true
 
     # ---------------------------------------------------------------------
+    #  Secret applicatif
+    # ---------------------------------------------------------------------
+    # Il n'y a plus de manifest secrets.yaml : le Secret est construit ici,
+    # depuis un fichier d'environnement non versionne. L'ancien manifest ne
+    # contenait que des CHANGE_ME -- c'est ce qui empechait kratos, backend,
+    # minio et kafka de demarrer.
+    #
+    # La source de verite est GitHub Secrets. secrets.env en est la copie
+    # locale, la seule lisible : l'API GitHub ne permet pas de RELIRE un
+    # secret, seulement de l'ecrire.
+    #
+    #   scripts/secrets/bootstrap.sh     genere les valeurs aleatoires
+    #   scripts/secrets/github-sync.sh   les pousse dans GitHub Secrets
+
+    - name: Verifier que le fichier de secrets est present
+      ansible.builtin.stat:
+        path: "{{ urbanlink_manifests_dest }}/secrets.env"
+      register: ul_secrets
+
+    - name: Exiger le fichier de secrets
+      ansible.builtin.assert:
+        that: ul_secrets.stat.exists
+        fail_msg: >-
+          {{ urbanlink_manifests_dest }}/secrets.env est absent. Le creer
+          depuis kube/urbanlink/secrets.env.example, ou lancer
+          scripts/secrets/bootstrap.sh puis repousser le depot sur le noeud.
+
+    # Refuser explicitement les placeholders : sans ce garde-fou, le Secret
+    # serait cree avec des CHANGE_ME et les pods repartiraient en
+    # CrashLoopBackOff sans que rien ne le signale.
+    - name: Refuser les placeholders restants
+      ansible.builtin.shell:
+        cmd: "grep -cE '=.*CHANGE_ME' {{ urbanlink_manifests_dest }}/secrets.env || true"
+        executable: /bin/bash
+      register: ul_placeholders
+      changed_when: false
+
+    - name: Echouer si des placeholders subsistent
+      ansible.builtin.assert:
+        that: ul_placeholders.stdout | trim | int == 0
+        fail_msg: >-
+          secrets.env contient encore {{ ul_placeholders.stdout | trim }}
+          valeur(s) CHANGE_ME. Lancer scripts/secrets/bootstrap.sh.
+
+    - name: Creer le Secret applicatif
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
+          create secret generic urbanconnect-secrets
+          --from-env-file={{ urbanlink_manifests_dest }}/secrets.env
+          --dry-run=client -o yaml
+          | kubectl --kubeconfig {{ urbanlink_kubeconfig }} apply -f -
+        executable: /bin/bash
+      no_log: true
+      changed_when: true
+
+    # ---------------------------------------------------------------------
     #  TLS de la passerelle
     # ---------------------------------------------------------------------
     # Traefik obtenait ses certificats seul via ACME. Istio ne fait pas d'ACME :

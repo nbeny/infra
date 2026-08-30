@@ -34,7 +34,12 @@ namespace: urbanconnect
 resources:
   # Foundation
   - namespace.yaml
-  - secrets.yaml
+  # secrets.yaml a ete retire : un Secret en clair dans un depot est une bombe
+  # a retardement, et .gitignore ne couvrait que `secrets.yml` -- une lettre
+  # d'ecart suffisait a le laisser passer. Le Secret `urbanconnect-secrets`
+  # est desormais cree par playbooks/31-urbanlink-deploy.yml avec
+  # `kubectl create secret generic --from-env-file`, depuis un secrets.env
+  # non versionne. Voir kube/urbanlink/secrets.env.example.
 
   # Databases
   - postgres/statefulset.yaml

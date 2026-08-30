@@ -29,7 +29,11 @@ ansible/collections/
 
 # --- Secrets ---
 .env
+# `secrets.yml` seul laissait passer `secrets.yaml` -- une lettre d'ecart.
 secrets.yml
+secrets.yaml
+secrets.env
+mikrotik/secrets.rsc
 vault-password*
 *.pem
 *.key
