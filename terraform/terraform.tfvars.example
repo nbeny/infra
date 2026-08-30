@@ -1,0 +1,104 @@
+# Copie ce fichier en `terraform.tfvars` (ignore par git) puis adapte-le.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+# ---------------------------------------------------------------------------
+#  Acces API
+# ---------------------------------------------------------------------------
+# Valeur affichee une seule fois, a la creation du token :
+#   ansible-playbook playbooks/00-proxmox-host.yml -t token -e pve_create_api_token=true
+pve_api_token = "terraform@pve!provider=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# pve_endpoint = "https://192.168.100.50:8006/"
+# pve_insecure = true
+
+# ---------------------------------------------------------------------------
+#  Machines
+# ---------------------------------------------------------------------------
+# Convention du lab : le dernier octet de l'IP est egal au VMID.
+# Deja pris : 100 UrbanConnect, 101 Alesio, 102 Other, 103 Kali.
+# Reserve   : 9000-9999 (templates et VMs de build Packer).
+
+vms = {
+
+  # --- VM de validation de la chaine complete -------------------------------
+  "test-k8s" = {
+    profile     = "debian-k8s"
+    vm_id       = 190
+    ip          = "10.0.0.190"
+    cores       = 4
+    sockets     = 1
+    memory      = 8192
+    disk_size   = 64
+    on_boot     = false
+    tags        = ["test"]
+    description = "VM jetable de validation. Supprimable sans consequence."
+  }
+
+  # --- Poste offensif Kali --------------------------------------------------
+  "kali-test" = {
+    profile     = "kali"
+    vm_id       = 120
+    ip          = "10.0.0.120"
+    cores       = 4
+    memory      = 8192
+    disk_size   = 100        # >= 64 : le template fait deja 64 Go
+    on_boot     = false
+    tags        = ["test", "offsec"]
+    description = "VM Kali de validation. Supprimable sans consequence."
+  }
+
+  # --- Stack applicatif UrbanLink -------------------------------------------
+  # Dimensionne pour les manifests de kube/urbanlink : ~54 Gio de requests
+  # memoire et ~548 Gio de volumes une fois tous les composants demarres.
+  #
+  # BUDGET MEMOIRE DU NOEUD -- 110 Go utilisables au total.
+  # Le ballooning est desactive (balloon: 0) : chaque VM prend et garde son
+  # allocation complete, elle ne rend rien a l'hote. Le total des VM DEMARREES
+  # doit donc rester sous ~104 Go pour laisser vivre PVE et l'ARC ZFS.
+  #
+  #   urbanlink   96 Go
+  #   test-k8s     8 Go
+  #   kali-test    8 Go
+  #   Other        4 Go
+  #   -------------------
+  #   total      116 Go  -> deja au-dessus du physique
+  #
+  # Ca ne tient que parce qu'UrbanConnect (VM 100, 96 Go) est ARRETEE.
+  # La redemarrer avec urbanlink a 96 Go donnerait 212 Go demandes sur 110 Go
+  # physiques : l'OOM killer tuerait des VM, sans choisir laquelle.
+  # Avant de rallumer la 100 : arreter les deux VM de test (16 Go) et
+  # redescendre urbanlink, ou repartir la charge autrement.
+  "urbanlink" = {
+    profile     = "debian-k8s"
+    vm_id       = 111
+    ip          = "10.0.0.111"
+    cores       = 8
+    sockets     = 2          # 16 vCPU
+    memory      = 98304      # 96 Go
+    disk_size   = 700
+    on_boot     = true
+    tags        = ["app", "urbanlink"]
+    description = "Cluster Kubernetes hebergeant le stack UrbanLink."
+  }
+
+  # --- Reconstruction du host principal -------------------------------------
+  # Reprend le dimensionnement exact de UrbanConnect (VM 100) mais sous un
+  # nouveau VMID : la VM 100 existante n'est JAMAIS touchee par Terraform.
+  # Deploie celle-ci, migre les donnees, puis retire l'ancienne quand tu es
+  # sur de toi.
+  #
+  # "urbanconnect" = {
+  #   profile     = "debian-k8s"
+  #   vm_id       = 110
+  #   ip          = "10.0.0.110"
+  #   cores       = 12
+  #   sockets     = 2
+  #   memory      = 96000
+  #   disk_size   = 1000
+  #   datastore   = "pool1"    # la 100 est sur pool1 ; pool2 a plus de place
+  #   on_boot     = true
+  #   tags        = ["prod"]
+  #   description = "Host principal reconstruit depuis le template golden."
+  # }
+}
