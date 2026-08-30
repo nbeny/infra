@@ -1,0 +1,81 @@
+---
+# ============================================================================
+#  Correctifs de l'audit -- docs/audit-securite.md
+# ============================================================================
+# TOUT est desactive par defaut. Le noeud heberge de la production : chaque
+# correctif s'active explicitement, apres lecture.
+#
+#   ansible-playbook playbooks/95-hardening.yml -e pve_hardening_backup=true
+#   ansible-playbook playbooks/95-hardening.yml -e pve_hardening_all=true
+
+pve_hardening_all: false
+
+# --- Constat 1 : aucune sauvegarde (CRITIQUE) ------------------------------
+pve_hardening_backup: false
+pve_hardening_backup_storage: pool2-backup
+pve_hardening_backup_schedule: "02:00"
+# VM 100 n'a JAMAIS ete sauvegardee : c'est elle qui compte en premier.
+# "all" est possible, mais lire l'avertissement de volumetrie dans le role.
+pve_hardening_backup_vmids: "100"
+pve_hardening_backup_mode: snapshot
+pve_hardening_backup_compress: zstd
+# Retention volontairement courte : un vzdump est une image COMPLETE a chaque
+# fois, sans deduplication. Deux copies de la VM 100 remplissent deja ~1,2 To.
+pve_hardening_backup_retention: "keep-last=2,keep-monthly=1"
+# Marge libre exigee sur le stockage avant de creer le job, en Gio.
+pve_hardening_backup_min_free_gb: 800
+
+# --- Constat 2 : origine joignable en direct (CRITIQUE) --------------------
+# Restreint 80/443 aux plages Cloudflare. N'active QUE si tous tes domaines
+# sont proxifies : sinon les sites deviennent injoignables.
+pve_hardening_cloudflare_only: false
+
+# --- Constat 4 : pare-feu Proxmox jamais active ----------------------------
+# SENSIBLE : une erreur coupe l'acces au noeud. Le role garde SSH et 8006
+# ouverts depuis le LAN, et sauvegarde la configuration avant ecriture.
+pve_hardening_firewall: false
+pve_hardening_firewall_mgmt_cidr: "192.168.100.0/24"
+
+# --- Constat 5 : SSH root par mot de passe ---------------------------------
+# Les 4 cles publiques de lab_ssh_public_keys sont deja dans authorized_keys :
+# couper les mots de passe ne coupe pas ton acces.
+pve_hardening_ssh: false
+
+# --- Constat 5 bis : CrowdSec ne parse ni auth.log ni pveproxy -------------
+pve_hardening_crowdsec_acquis: false
+
+# --- Constats 7 et 9 : services exposes inutilises -------------------------
+pve_hardening_disable_unused: false
+pve_hardening_disable_services: [iperf3, rpcbind]
+# `restrict` = snmpd n'ecoute plus que sur 127.0.0.1 ; `disable` = arrete.
+pve_hardening_snmp_action: restrict
+
+# --- Constat 8 : aucun scrub ZFS depuis 6 mois -----------------------------
+pve_hardening_zfs_scrub: false
+pve_hardening_zfs_scrub_schedule: "Sun *-*-08..14 03:00:00"   # 2e dimanche
+pve_hardening_zfs_scrub_max_age_days: 35
+
+# --- Constat 10 : pas de mises a jour automatiques -------------------------
+# Securite uniquement : jamais de montee de version PVE automatique.
+pve_hardening_unattended: false
+
+# --- Constat 11 : regles ufw obsoletes -------------------------------------
+pve_hardening_ufw_cleanup: false
+pve_hardening_ufw_drop_rules:
+  - "5201"          # iperf3
+  - "179/tcp"       # BGP, aucun demon
+  - "443/udp"       # QUIC non utilise
+  - "8006/udp"      # 8006 est du TCP uniquement
+# La redirection 4242 -> SSH de la VM 102 est un choix d'usage, pas une faille :
+# elle n'est retiree que sur demande explicite (le ProxyJump la remplace).
+pve_hardening_drop_dnat_4242: false
+
+# --- Constat 14 : sysctl ---------------------------------------------------
+pve_hardening_sysctl: false
+pve_hardening_sysctl_values:
+  kernel.kptr_restrict: "1"
+  net.ipv4.conf.all.rp_filter: "1"
+  net.ipv4.conf.all.accept_redirects: "0"
+  net.ipv4.conf.all.send_redirects: "0"
+  net.ipv4.conf.all.accept_source_route: "0"
+  net.ipv4.conf.all.log_martians: "1"

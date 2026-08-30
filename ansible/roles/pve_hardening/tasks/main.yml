@@ -1,0 +1,83 @@
+---
+- name: Verifier que la cible est bien un noeud Proxmox
+  ansible.builtin.stat:
+    path: /usr/bin/pveversion
+  register: pve_hardening_check
+
+- name: Echouer si ce n'est pas un noeud Proxmox
+  ansible.builtin.fail:
+    msg: "{{ inventory_hostname }} n'est pas un noeud Proxmox VE."
+  when: not pve_hardening_check.stat.exists
+
+- name: Resoudre les bascules
+  ansible.builtin.set_fact:
+    h_backup: "{{ pve_hardening_backup or pve_hardening_all }}"
+    h_cloudflare: "{{ pve_hardening_cloudflare_only or pve_hardening_all }}"
+    h_firewall: "{{ pve_hardening_firewall or pve_hardening_all }}"
+    h_ssh: "{{ pve_hardening_ssh or pve_hardening_all }}"
+    h_crowdsec: "{{ pve_hardening_crowdsec_acquis or pve_hardening_all }}"
+    h_services: "{{ pve_hardening_disable_unused or pve_hardening_all }}"
+    h_zfs: "{{ pve_hardening_zfs_scrub or pve_hardening_all }}"
+    h_unattended: "{{ pve_hardening_unattended or pve_hardening_all }}"
+    h_ufw: "{{ pve_hardening_ufw_cleanup or pve_hardening_all }}"
+    h_sysctl: "{{ pve_hardening_sysctl or pve_hardening_all }}"
+
+- name: Rien n'est active
+  ansible.builtin.debug:
+    msg: >-
+      Aucun correctif n'est active. Lis docs/audit-securite.md puis relance avec
+      les bascules voulues, par exemple -e pve_hardening_backup=true.
+  when: not (h_backup or h_cloudflare or h_firewall or h_ssh or h_crowdsec
+             or h_services or h_zfs or h_unattended or h_ufw or h_sysctl)
+
+- name: "Constat 1 -- sauvegardes"
+  ansible.builtin.import_tasks: backup.yml
+  when: h_backup | bool
+  tags: [backup]
+
+- name: "Constat 5 -- SSH"
+  ansible.builtin.import_tasks: ssh.yml
+  when: h_ssh | bool
+  tags: [ssh]
+
+- name: "Constat 5 bis -- acquisitions CrowdSec"
+  ansible.builtin.import_tasks: crowdsec.yml
+  when: h_crowdsec | bool
+  tags: [crowdsec]
+
+- name: "Constats 7 et 9 -- services inutilises"
+  ansible.builtin.import_tasks: services.yml
+  when: h_services | bool
+  tags: [services]
+
+- name: "Constat 11 -- nettoyage ufw"
+  ansible.builtin.import_tasks: ufw.yml
+  when: h_ufw | bool
+  tags: [ufw]
+
+- name: "Constat 14 -- sysctl"
+  ansible.builtin.import_tasks: sysctl.yml
+  when: h_sysctl | bool
+  tags: [sysctl]
+
+- name: "Constat 8 -- scrub ZFS"
+  ansible.builtin.import_tasks: zfs.yml
+  when: h_zfs | bool
+  tags: [zfs]
+
+- name: "Constat 10 -- mises a jour de securite"
+  ansible.builtin.import_tasks: unattended.yml
+  when: h_unattended | bool
+  tags: [unattended]
+
+# Les deux plus risques en dernier : si l'un coupe l'acces, tout le reste a
+# deja ete applique.
+- name: "Constat 2 -- verrouiller l'origine sur Cloudflare"
+  ansible.builtin.import_tasks: cloudflare.yml
+  when: h_cloudflare | bool
+  tags: [cloudflare]
+
+- name: "Constat 4 -- pare-feu Proxmox"
+  ansible.builtin.import_tasks: firewall.yml
+  when: h_firewall | bool
+  tags: [firewall]

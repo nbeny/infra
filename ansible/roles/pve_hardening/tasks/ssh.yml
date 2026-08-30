@@ -1,0 +1,75 @@
+---
+# Constat 5 : PermitRootLogin yes + PasswordAuthentication yes.
+#
+# Le port 22 n'est pas joignable depuis Internet (verifie), mais root reste
+# accessible par mot de passe depuis tout le LAN et depuis chaque VM du lab --
+# y compris la Kali.
+
+- name: Verifier que des cles publiques sont bien en place pour root
+  ansible.builtin.shell:
+    cmd: "grep -cE '^(ssh|ecdsa)-' /root/.ssh/authorized_keys 2>/dev/null || echo 0"
+    executable: /bin/bash
+  register: h_ssh_keys
+  changed_when: false
+
+# Couper les mots de passe sans cle valide, c'est se verrouiller dehors.
+- name: Refuser de durcir SSH sans cle publique
+  ansible.builtin.fail:
+    msg: >-
+      /root/.ssh/authorized_keys ne contient aucune cle publique. Couper
+      l'authentification par mot de passe rendrait le noeud inaccessible.
+      Depose d'abord ta cle (ssh-copy-id root@{{ pve_lan_ip }}).
+  when: h_ssh_keys.stdout | int < 1
+
+- name: Deposer la configuration SSH durcie
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "/usr/sbin/sshd -t -f %s"
+    content: |
+      # Gere par Ansible (role pve_hardening) -- constat 5 de l'audit.
+      # Les directives lues en premier gagnent : ce fichier prime sur
+      # sshd_config, sans avoir a le modifier.
+
+      # root reste utilisable par cle (Ansible et Terraform en dependent),
+      # mais plus par mot de passe.
+      PermitRootLogin prohibit-password
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+
+      MaxAuthTries 3
+      LoginGraceTime 30
+      X11Forwarding no
+
+      # Coupe les sessions mortes des tunnels ProxyJump.
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+  register: h_ssh_conf
+
+- name: Verifier la configuration effective avant de recharger
+  ansible.builtin.command: sshd -t
+  changed_when: false
+
+- name: Recharger sshd
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded
+  when: h_ssh_conf.changed
+
+- name: Relire la configuration appliquee
+  ansible.builtin.shell:
+    cmd: "sshd -T | grep -E '^(permitrootlogin|passwordauthentication|maxauthtries)'"
+    executable: /bin/bash
+  register: h_ssh_after
+  changed_when: false
+
+- name: Etat de SSH
+  ansible.builtin.debug:
+    msg:
+      - "{{ h_ssh_after.stdout_lines }}"
+      - ""
+      - "{{ h_ssh_keys.stdout | trim }} cle(s) publique(s) autorisee(s) pour root."
+      - "Garde cette session ouverte et teste une NOUVELLE connexion avant de la fermer."

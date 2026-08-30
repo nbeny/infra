@@ -1,0 +1,98 @@
+---
+# Constats 7 et 9 : iperf3 en ecoute publique, rpcbind sans NFS, snmpd sur
+# toutes les interfaces en tant que root.
+
+- name: Verifier qu'aucun stockage NFS n'est utilise
+  ansible.builtin.command: grep -c "^nfs:" /etc/pve/storage.cfg
+  register: h_nfs
+  changed_when: false
+  failed_when: false
+
+- name: Conserver rpcbind si du NFS est configure
+  ansible.builtin.set_fact:
+    h_services_to_disable: >-
+      {{ pve_hardening_disable_services
+         | reject('equalto', 'rpcbind') | list
+         if (h_nfs.stdout | int) > 0
+         else pve_hardening_disable_services }}
+
+- name: Signaler que rpcbind est conserve
+  ansible.builtin.debug:
+    msg: >-
+      Un stockage NFS est declare dans storage.cfg : rpcbind est conserve.
+  when: (h_nfs.stdout | int) > 0
+
+- name: Relever l'etat des services vises
+  ansible.builtin.command: "systemctl is-active {{ item }}"
+  register: h_svc_state
+  changed_when: false
+  failed_when: false
+  loop: "{{ h_services_to_disable }}"
+
+- name: Arreter et desactiver les services inutilises
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ h_services_to_disable }}"
+  failed_when: false
+
+# rpcbind est active par un socket : desactiver le service seul ne suffit pas,
+# le socket le relancerait a la premiere sollicitation.
+- name: Desactiver aussi les sockets associes
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - rpcbind.socket
+  when: "'rpcbind' in h_services_to_disable"
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+#  SNMP
+# ---------------------------------------------------------------------------
+- name: Restreindre snmpd a la boucle locale
+  when: pve_hardening_snmp_action == 'restrict'
+  block:
+
+    - name: Verifier que snmpd est installe
+      ansible.builtin.stat:
+        path: /etc/snmp/snmpd.conf
+      register: h_snmp_conf
+
+    # Le defaut Debian est deja 127.0.0.1 ; la configuration a ete elargie a
+    # toutes les interfaces a un moment.
+    - name: Faire ecouter snmpd uniquement sur 127.0.0.1
+      ansible.builtin.lineinfile:
+        path: /etc/snmp/snmpd.conf
+        regexp: '^\s*agentAddress\s'
+        line: 'agentAddress  udp:127.0.0.1:161'
+        backup: true
+      when: h_snmp_conf.stat.exists
+      register: h_snmp_changed
+
+    - name: Redemarrer snmpd
+      ansible.builtin.systemd_service:
+        name: snmpd
+        state: restarted
+      when: h_snmp_changed.changed | default(false)
+
+- name: Desactiver completement snmpd
+  ansible.builtin.systemd_service:
+    name: snmpd
+    state: stopped
+    enabled: false
+  when: pve_hardening_snmp_action == 'disable'
+  failed_when: false
+
+- name: Ports encore en ecoute apres nettoyage
+  ansible.builtin.shell:
+    cmd: "ss -tulnp | grep -E ':(111|161|5201)\\b' || echo 'aucun -- 111, 161 et 5201 sont fermes'"
+    executable: /bin/bash
+  register: h_svc_after
+  changed_when: false
+
+- name: Etat des services
+  ansible.builtin.debug:
+    msg: "{{ h_svc_after.stdout_lines }}"

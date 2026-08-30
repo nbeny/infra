@@ -1,0 +1,102 @@
+---
+# Constat 8 : le cron mensuel de zfsutils existe et son script est executable,
+# mais aucun scrub n'a eu lieu depuis le 8 mars. On remplace ce cron par un
+# timer systemd : deterministe, et surtout observable
+# (`systemctl list-timers zfs-scrub-all.timer`).
+
+- name: Relever la date du dernier scrub de chaque pool
+  ansible.builtin.shell:
+    cmd: |
+      for p in $(zpool list -H -o name); do
+        printf "%s|" "$p"
+        zpool status "$p" | awk '/scan:/ {print; exit}'
+      done
+    executable: /bin/bash
+  register: h_zfs_last
+  changed_when: false
+
+- name: Dernier scrub connu
+  ansible.builtin.debug:
+    msg: "{{ h_zfs_last.stdout_lines }}"
+
+- name: Neutraliser le cron zfsutils remplace par le timer
+  ansible.builtin.replace:
+    path: /etc/cron.d/zfsutils-linux
+    regexp: '^(?!#)(.*\/usr\/lib\/zfs-linux\/scrub.*)$'
+    replace: '# remplace par zfs-scrub-all.timer (role pve_hardening) : \1'
+  failed_when: false
+
+- name: Deposer le service de scrub
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/zfs-scrub-all.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role pve_hardening) -- constat 8 de l'audit.
+      [Unit]
+      Description=Scrub de tous les pools ZFS
+      After=zfs.target
+
+      [Service]
+      Type=oneshot
+      # `zpool scrub` rend la main immediatement : le scrub tourne en tache de
+      # fond. Pas de -w ici, sinon l'unite resterait active des heures.
+      ExecStart=/bin/sh -c 'for p in $(zpool list -H -o name); do zpool scrub "$p"; done'
+
+- name: Deposer le timer de scrub
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/zfs-scrub-all.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role pve_hardening).
+      [Unit]
+      Description=Scrub ZFS mensuel
+
+      [Timer]
+      OnCalendar={{ pve_hardening_zfs_scrub_schedule }}
+      # Rattrape le declenchement si le noeud etait eteint a l'heure prevue --
+      # c'est exactement ce qui manquait au cron.
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+  register: h_zfs_timer
+
+- name: Activer le timer de scrub
+  ansible.builtin.systemd_service:
+    name: zfs-scrub-all.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Determiner l'anciennete du dernier scrub
+  ansible.builtin.shell:
+    cmd: |
+      last=$(zpool status | awk '/scrub repaired/ {for(i=1;i<=NF;i++) if($i=="on") {print substr($0, index($0,$i)+3); exit}}')
+      if [ -z "$last" ]; then echo 9999; exit 0; fi
+      last_ts=$(date -d "$last" +%s 2>/dev/null || echo 0)
+      if [ "$last_ts" = "0" ]; then echo 9999; exit 0; fi
+      echo $(( ( $(date +%s) - last_ts ) / 86400 ))
+    executable: /bin/bash
+  register: h_zfs_age
+  changed_when: false
+
+- name: Lancer un scrub immediat si le dernier est trop ancien
+  ansible.builtin.shell:
+    cmd: 'for p in $(zpool list -H -o name); do zpool scrub "$p" 2>/dev/null || true; done'
+    executable: /bin/bash
+  when: h_zfs_age.stdout | int > pve_hardening_zfs_scrub_max_age_days | int
+  changed_when: true
+
+- name: Etat du scrub
+  ansible.builtin.debug:
+    msg:
+      - "Dernier scrub : il y a {{ h_zfs_age.stdout }} jour(s)"
+      - >-
+        {{ 'Un scrub vient d etre lance en tache de fond (suivi : zpool status).'
+           if (h_zfs_age.stdout | int > pve_hardening_zfs_scrub_max_age_days | int)
+           else 'Pas de scrub immediat necessaire.' }}
+      - "Prochain declenchement automatique : {{ pve_hardening_zfs_scrub_schedule }}"

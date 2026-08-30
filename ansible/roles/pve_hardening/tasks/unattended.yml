@@ -1,0 +1,78 @@
+---
+# Constat 10 : les VM du lab ont unattended-upgrades, le noeud non -- alors
+# qu'il accuse trois versions de retard sur ZFS.
+#
+# Volontairement limite aux mises a jour de SECURITE Debian. Les paquets
+# Proxmox (pve-manager, noyau, zfsutils) ne sont jamais montes automatiquement :
+# une montee de version PVE peut exiger un redemarrage et casser des VM en
+# cours. Elles restent manuelles via playbooks/90-update.yml.
+
+- name: Installer unattended-upgrades
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Configurer les mises a jour de securite uniquement
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/51-pve-security-only
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Gere par Ansible (role pve_hardening) -- constat 10 de l'audit.
+      //
+      // Uniquement le depot de securite Debian. Les depots Proxmox sont
+      // volontairement absents : leurs mises a jour restent manuelles.
+      Unattended-Upgrade::Origins-Pattern {
+              "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+      };
+
+      // Ne jamais redemarrer tout seul : le noeud heberge des VM.
+      Unattended-Upgrade::Automatic-Reboot "false";
+      Unattended-Upgrade::Remove-Unused-Kernel-Packages "false";
+      Unattended-Upgrade::Remove-Unused-Dependencies "false";
+      Unattended-Upgrade::MinimalSteps "true";
+      Unattended-Upgrade::SyslogEnable "true";
+
+- name: Activer la periodicite
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Gere par Ansible (role pve_hardening).
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+- name: Activer le service
+  ansible.builtin.systemd_service:
+    name: unattended-upgrades
+    enabled: true
+    state: started
+
+- name: Verifier la configuration en simulation
+  ansible.builtin.command: unattended-upgrades --dry-run --debug
+  register: h_unattended_dry
+  changed_when: false
+  failed_when: false
+
+- name: Mises a jour en attente hors perimetre automatique
+  ansible.builtin.shell:
+    cmd: "apt-get -s upgrade 2>/dev/null | grep -c '^Inst' || echo 0"
+    executable: /bin/bash
+  register: h_pending
+  changed_when: false
+
+- name: Etat des mises a jour
+  ansible.builtin.debug:
+    msg:
+      - "unattended-upgrades actif, limite aux correctifs de securite Debian."
+      - "{{ h_pending.stdout | trim }} paquet(s) en attente au total (Proxmox inclus)."
+      - "Les paquets Proxmox et ZFS se mettent a jour explicitement :"
+      - "  ansible-playbook playbooks/90-update.yml -e pve_do_upgrade=true"

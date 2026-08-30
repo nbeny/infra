@@ -1,0 +1,91 @@
+---
+# Constat 5 bis : CrowdSec lit auth.log et pveproxy/access.log, mais n'en parse
+# rien.
+#
+#   | file:/var/log/auth.log            | 1.43k lues  | 0 parsees |
+#   | file:/var/log/pveproxy/access.log | 39.27k lues | 0 parsees |
+#
+# Consequence : aucun bannissement possible sur un bruteforce SSH ni sur
+# l'interface d'administration Proxmox.
+
+- name: Verifier que CrowdSec est installe
+  ansible.builtin.command: cscli version
+  register: h_cs_version
+  changed_when: false
+  failed_when: false
+
+- name: Ignorer si CrowdSec est absent
+  ansible.builtin.debug:
+    msg: "CrowdSec n'est pas installe sur ce noeud : rien a faire."
+  when: h_cs_version.rc != 0
+
+- name: Configurer les acquisitions CrowdSec
+  when: h_cs_version.rc == 0
+  block:
+
+    - name: Installer la collection sshd
+      ansible.builtin.command: cscli collections install crowdsecurity/sshd
+      register: h_cs_sshd
+      changed_when: "'nothing to do' not in h_cs_sshd.stdout | lower"
+      failed_when: false
+
+    # Le fichier d'acquisition doit declarer un `type` que les parseurs
+    # reconnaissent. Sans `type: syslog`, auth.log est lu mais jamais analyse :
+    # c'est exactement ce qui se passe aujourd'hui.
+    - name: Declarer l'acquisition SSH
+      ansible.builtin.copy:
+        dest: /etc/crowdsec/acquis.d/sshd.yaml
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Gere par Ansible (role pve_hardening) -- constat 5 bis de l'audit.
+          filenames:
+            - /var/log/auth.log
+          labels:
+            type: syslog
+      register: h_cs_ssh_acquis
+
+    # Proxmox ecrit ses acces web dans un format proche du CLF de nginx : la
+    # collection nginx (deja presente) sait le parser.
+    - name: Declarer l'acquisition de l'interface Proxmox
+      ansible.builtin.copy:
+        dest: /etc/crowdsec/acquis.d/pveproxy.yaml
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Gere par Ansible (role pve_hardening).
+          # Sans ceci, un bruteforce de l'interface d'administration Proxmox
+          # n'est jamais detecte.
+          filenames:
+            - /var/log/pveproxy/access.log
+          labels:
+            type: nginx
+      register: h_cs_pve_acquis
+
+    - name: Redemarrer CrowdSec
+      ansible.builtin.systemd_service:
+        name: crowdsec
+        state: restarted
+      when: h_cs_ssh_acquis.changed or h_cs_pve_acquis.changed or h_cs_sshd.changed
+
+    - name: Laisser CrowdSec relire les journaux
+      ansible.builtin.wait_for:
+        timeout: 30
+
+    - name: Relever les metriques d'acquisition
+      ansible.builtin.shell:
+        cmd: "cscli metrics 2>/dev/null | grep -E 'auth.log|pveproxy' || echo 'pas encore de metrique'"
+        executable: /bin/bash
+      register: h_cs_metrics
+      changed_when: false
+
+    - name: Etat de CrowdSec
+      ansible.builtin.debug:
+        msg:
+          - "{{ h_cs_metrics.stdout_lines }}"
+          - ""
+          - "La colonne 'Lines parsed' doit devenir non nulle a mesure que de"
+          - "nouvelles lignes arrivent. Verifier plus tard avec :"
+          - "  cscli metrics ; cscli decisions list"

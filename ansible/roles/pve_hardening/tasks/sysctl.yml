@@ -1,0 +1,36 @@
+---
+# Constat 14 : kernel.kptr_restrict=0 expose les adresses noyau, ce qui
+# facilite l'exploitation locale (contournement du KASLR).
+
+- name: Appliquer les sysctl de durcissement
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-pve-hardening.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  loop: "{{ pve_hardening_sysctl_values | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} = {{ item.value }}"
+
+- name: Relire les valeurs appliquees
+  ansible.builtin.shell:
+    cmd: "sysctl {{ pve_hardening_sysctl_values.keys() | join(' ') }} 2>/dev/null"
+    executable: /bin/bash
+  register: h_sysctl_after
+  changed_when: false
+
+- name: Etat des sysctl
+  ansible.builtin.debug:
+    msg: "{{ h_sysctl_after.stdout_lines }}"
+
+# rp_filter passe de 2 (souple) a 1 (strict). Le noeud route le NAT de
+# 10.0.0.0/24 : si un jour tu ajoutes du routage asymetrique (VPN, second
+# uplink), c'est le premier reglage a revoir.
+- name: Rappel sur rp_filter
+  ansible.builtin.debug:
+    msg: >-
+      rp_filter est passe en mode strict (1). En cas de routage asymetrique
+      (VPN, second lien), repasser a 2 dans pve_hardening_sysctl_values.
+  when: "'net.ipv4.conf.all.rp_filter' in pve_hardening_sysctl_values"

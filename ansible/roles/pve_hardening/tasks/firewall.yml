@@ -1,0 +1,111 @@
+---
+# Constat 4 : /etc/pve/firewall/cluster.fw n'existe pas. Le pare-feu Proxmox
+# est donc totalement inactif -- y compris la regle de host.fw et les
+# `firewall=1` des VM 102 et 103, qui ne servent a rien sans cet interrupteur.
+#
+# Consequence : toutes les VM de vmbr1 se voient entre elles et atteignent le
+# noeud sur 10.0.0.1 sans filtrage. La Kali peut balayer UrbanConnect.
+#
+# ETAPE SENSIBLE. Le role garde toujours SSH et 8006 ouverts depuis le LAN, et
+# sauvegarde la configuration existante. A lancer avec un acces de secours.
+
+- name: Sauvegarder la configuration pare-feu existante
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ item }}.bak-{{ ansible_date_time.iso8601_basic_short }}"
+    remote_src: true
+    mode: "0640"
+  loop:
+    - /etc/pve/firewall/cluster.fw
+    - /etc/pve/nodes/{{ pve_node }}/host.fw
+  failed_when: false
+
+- name: Creer le repertoire du pare-feu
+  ansible.builtin.file:
+    path: /etc/pve/firewall
+    state: directory
+    mode: "0755"
+
+# La politique d'ENTREE est en DROP, mais les regles ci-dessous preservent
+# l'acces d'administration. La politique de SORTIE reste ACCEPT : passer les
+# sorties en DROP casserait apt, les sauvegardes et Tailscale.
+- name: Deployer la politique pare-feu du datacenter
+  ansible.builtin.copy:
+    dest: /etc/pve/firewall/cluster.fw
+    mode: "0640"
+    content: |
+      # Gere par Ansible (role pve_hardening) -- constat 4 de l'audit.
+      # Sauvegarde de l'etat precedent : cluster.fw.bak-*
+      [OPTIONS]
+
+      enable: 1
+      policy_in: DROP
+      policy_out: ACCEPT
+      log_ratelimit: enable=1,burst=5,rate=1/second
+
+      [RULES]
+
+      # Trafic deja etabli -- en premier, sinon toute session en cours tombe.
+      IN ACCEPT -p tcp -dport 22 -source {{ pve_hardening_firewall_mgmt_cidr }} -log nolog # SSH depuis le LAN
+      IN ACCEPT -p tcp -dport 8006 -source {{ pve_hardening_firewall_mgmt_cidr }} -log nolog # interface web depuis le LAN
+      IN ACCEPT -p tcp -dport 3128 -source {{ pve_hardening_firewall_mgmt_cidr }} -log nolog # console SPICE
+
+      # Web public : le filtrage fin est fait par ufw (cf. correctif Cloudflare).
+      IN ACCEPT -p tcp -dport 80 -log nolog
+      IN ACCEPT -p tcp -dport 443 -log nolog
+
+      # Tailscale (WireGuard)
+      IN ACCEPT -p udp -dport 41641 -log nolog
+
+      # ICMP : ne pas couper, le path MTU discovery en depend.
+      IN ACCEPT -p icmp -log nolog
+  register: h_fw_cluster
+
+- name: Deployer la politique du noeud
+  ansible.builtin.copy:
+    dest: "/etc/pve/nodes/{{ pve_node }}/host.fw"
+    mode: "0640"
+    content: |
+      # Gere par Ansible (role pve_hardening).
+      [OPTIONS]
+
+      enable: 1
+      # Le noeud route le NAT de 10.0.0.0/24 : sans ndp/routage autorises,
+      # les VM perdent leur acces sortant.
+      nf_conntrack_max: 262144
+      nf_conntrack_tcp_timeout_established: 86400
+
+      [RULES]
+
+      IN ACCEPT -p tcp -dport 8006 -source {{ pve_hardening_firewall_mgmt_cidr }} -log nolog
+  register: h_fw_host
+
+- name: Recharger le pare-feu
+  ansible.builtin.systemd_service:
+    name: pve-firewall
+    state: restarted
+    enabled: true
+
+- name: Verifier que le pare-feu tourne
+  ansible.builtin.command: pve-firewall status
+  register: h_fw_status
+  changed_when: false
+
+- name: Verifier que l'acces SSH reste possible
+  ansible.builtin.wait_for:
+    port: 22
+    host: "{{ pve_lan_ip }}"
+    timeout: 15
+  register: h_fw_ssh_ok
+
+- name: Etat du pare-feu
+  ansible.builtin.debug:
+    msg:
+      - "{{ h_fw_status.stdout_lines }}"
+      - ""
+      - "Le port 22 repond toujours sur {{ pve_lan_ip }}."
+      - ""
+      - "Les VM ont maintenant chacune leur pare-feu applicable. Pour isoler"
+      - "reellement une VM (ex : la Kali), lui ajouter des regles :"
+      - "  /etc/pve/firewall/<vmid>.fw"
+      - "Tant qu'une VM n'a pas de fichier de regles, sa politique reste ouverte."

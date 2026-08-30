@@ -1,0 +1,50 @@
+---
+# Constat 11 : des regles ufw ouvrent des ports sur lesquels rien n'ecoute,
+# ou avec le mauvais protocole. Elles ne creent pas de risque direct, mais
+# elles masquent la vraie surface d'exposition.
+
+- name: Relever les regles ufw actuelles
+  ansible.builtin.command: ufw status numbered
+  register: h_ufw_before
+  changed_when: false
+
+- name: Retirer les regles obsoletes
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.split('/')[0] }}"
+    proto: "{{ item.split('/')[1] if '/' in item else 'any' }}"
+    delete: true
+  loop: "{{ pve_hardening_ufw_drop_rules }}"
+  register: h_ufw_removed
+
+# La redirection 4242 -> 10.0.0.102:22 expose le SSH d'une VM a Internet.
+# Le ProxyJump de ce depot la remplace, mais la retirer casse tout script qui
+# s'en sert encore : d'ou l'activation explicite.
+- name: Retirer la redirection 4242 vers le SSH de la VM 102
+  when: pve_hardening_drop_dnat_4242 | bool
+  block:
+
+    - name: Retirer les regles ufw du port 4242
+      community.general.ufw:
+        rule: allow
+        port: "4242"
+        proto: "{{ item }}"
+        delete: true
+      loop: [any, tcp, udp]
+
+    - name: Rappeler que la regle DNAT reste dans /etc/network/interfaces
+      ansible.builtin.debug:
+        msg: >-
+          Les regles ufw du port 4242 sont retirees, mais la redirection DNAT
+          elle-meme est ecrite en `post-up` dans /etc/network/interfaces.
+          Retire-la de ce fichier (ou passe par le template du role pve_host
+          avec pve_manage_network=true) puis `ifreload -a`.
+
+- name: Relever les regles ufw apres nettoyage
+  ansible.builtin.command: ufw status
+  register: h_ufw_after
+  changed_when: false
+
+- name: Etat du pare-feu
+  ansible.builtin.debug:
+    msg: "{{ h_ufw_after.stdout_lines }}"

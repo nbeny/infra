@@ -1,0 +1,72 @@
+---
+# Constat 1 : aucun job de sauvegarde, et la VM 100 (1 To) n'a jamais ete
+# sauvegardee. C'est le correctif le plus urgent de tout l'audit.
+
+- name: Verifier que le stockage de sauvegarde existe
+  ansible.builtin.command: "pvesm status --storage {{ pve_hardening_backup_storage }}"
+  register: h_bk_storage
+  changed_when: false
+  failed_when: h_bk_storage.rc != 0
+
+- name: Relever l'espace libre sur {{ pve_hardening_backup_storage }}
+  ansible.builtin.shell:
+    cmd: >-
+      pvesm status --storage {{ pve_hardening_backup_storage }}
+      | awk 'NR==2 {printf "%d", $6/1024/1024}'
+    executable: /bin/bash
+  register: h_bk_free
+  changed_when: false
+
+# Un vzdump ecrit une image COMPLETE a chaque passage, sans deduplication.
+# Mieux vaut refuser de creer le job que de remplir le pool et faire tomber
+# les VM qui vivent dessus.
+- name: Refuser si l'espace libre est insuffisant
+  ansible.builtin.fail:
+    msg: >-
+      {{ pve_hardening_backup_storage }} n'a que {{ h_bk_free.stdout }} Gio
+      libres, moins que les {{ pve_hardening_backup_min_free_gb }} Gio exiges.
+      Un vzdump complet de la VM 100 pese plusieurs centaines de Gio.
+      Options : reduire pve_hardening_backup_vmids, baisser la retention
+      (pve_hardening_backup_retention), ou passer a Proxmox Backup Server qui
+      deduplique et n'envoie que les blocs modifies.
+  when: h_bk_free.stdout | int < pve_hardening_backup_min_free_gb | int
+
+- name: Lister les jobs de sauvegarde existants
+  ansible.builtin.command: pvesh get /cluster/backup --output-format json
+  register: h_bk_jobs
+  changed_when: false
+
+- name: Creer le job de sauvegarde quotidien
+  ansible.builtin.command: >-
+    pvesh create /cluster/backup
+      --schedule "{{ pve_hardening_backup_schedule }}"
+      {{ '--all 1' if pve_hardening_backup_vmids == 'all'
+         else '--vmid ' ~ pve_hardening_backup_vmids }}
+      --storage {{ pve_hardening_backup_storage }}
+      --mode {{ pve_hardening_backup_mode }}
+      --compress {{ pve_hardening_backup_compress }}
+      --prune-backups "{{ pve_hardening_backup_retention }}"
+      --enabled 1
+      --notes-template "{% raw %}{{guestname}}{% endraw %}"
+      --comment "Gere par Ansible (role pve_hardening)"
+  when: "'Gere par Ansible' not in h_bk_jobs.stdout"
+  changed_when: true
+
+- name: Relire les jobs de sauvegarde
+  ansible.builtin.command: pvesh get /cluster/backup --output-format json
+  register: h_bk_after
+  changed_when: false
+
+- name: Recapitulatif des sauvegardes
+  ansible.builtin.debug:
+    msg:
+      - "Job cree : {{ pve_hardening_backup_vmids }} vers {{ pve_hardening_backup_storage }} a {{ pve_hardening_backup_schedule }}"
+      - "Retention : {{ pve_hardening_backup_retention }}"
+      - "Espace libre avant : {{ h_bk_free.stdout }} Gio"
+      - "Jobs actifs : {{ (h_bk_after.stdout | from_json) | length }}"
+      - ""
+      - "Lancer une premiere sauvegarde tout de suite, sans attendre la nuit :"
+      - "  vzdump {{ pve_hardening_backup_vmids }} --storage {{ pve_hardening_backup_storage }} --mode {{ pve_hardening_backup_mode }} --compress {{ pve_hardening_backup_compress }}"
+      - ""
+      - "Une sauvegarde sur le meme serveur ne protege pas d'un incendie ni d'un"
+      - "vol. Prevoir une copie hors-site dans un second temps."

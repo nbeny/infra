@@ -1,0 +1,44 @@
+---
+# Applique les correctifs de docs/audit-securite.md.
+#
+# TOUT est desactive par defaut : le noeud heberge de la production, chaque
+# correctif s'active explicitement apres lecture du constat correspondant.
+#
+#   # voir ce qui serait fait, sans rien changer
+#   ansible-playbook playbooks/95-hardening.yml --check --diff
+#
+#   # le plus urgent : les sauvegardes
+#   ansible-playbook playbooks/95-hardening.yml -e pve_hardening_backup=true
+#
+#   # le lot sans risque
+#   ansible-playbook playbooks/95-hardening.yml \
+#     -e pve_hardening_disable_unused=true \
+#     -e pve_hardening_ufw_cleanup=true \
+#     -e pve_hardening_sysctl=true \
+#     -e pve_hardening_zfs_scrub=true \
+#     -e pve_hardening_unattended=true \
+#     -e pve_hardening_crowdsec_acquis=true
+#
+#   # tout, une fois chaque point relu
+#   ansible-playbook playbooks/95-hardening.yml -e pve_hardening_all=true
+#
+# Les correctifs les plus risques (pare-feu Proxmox, verrouillage Cloudflare)
+# s'executent en dernier : si l'un coupe l'acces, le reste est deja applique.
+
+- name: Durcir le noeud Proxmox
+  hosts: proxmox
+  gather_facts: true
+
+  roles:
+    - role: pve_hardening
+
+  post_tasks:
+    - name: Ce qui reste a faire a la main
+      ansible.builtin.debug:
+        msg:
+          - "Correctifs non automatisables (voir docs/audit-securite.md) :"
+          - "  - Diagnostic certbot : 4 certificats expires depuis avril/mai"
+          - "  - 2FA sur root@pam : Datacenter > Permissions > Two Factor"
+          - "  - Choisir entre nginx et openresty (les deux tournent)"
+          - "  - Sauvegarde hors-site (une copie locale ne protege pas de tout)"
+          - "  - Cloudflare en 'Full (strict)', une fois les certificats repares"

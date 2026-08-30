@@ -1,0 +1,88 @@
+---
+# Constat 2 : 100 % du trafic mesure sur nginx arrive en DIRECT sur l'IP
+# publique, sans passer par Cloudflare. Le WAF et la protection DDoS ne
+# s'appliquent donc a personne.
+#
+# On ferme 80/443 a tout ce qui n'est pas Cloudflare.
+#
+# ATTENTION : n'active ce correctif que si TOUS tes domaines sont proxifies
+# (nuage orange dans Cloudflare). Un domaine en DNS-only deviendrait
+# injoignable.
+
+- name: Recuperer les plages IPv4 de Cloudflare
+  ansible.builtin.uri:
+    url: https://www.cloudflare.com/ips-v4
+    return_content: true
+  register: h_cf_v4
+
+- name: Recuperer les plages IPv6 de Cloudflare
+  ansible.builtin.uri:
+    url: https://www.cloudflare.com/ips-v6
+    return_content: true
+  register: h_cf_v6
+
+- name: Constituer la liste des plages
+  ansible.builtin.set_fact:
+    h_cf_ranges: >-
+      {{ (h_cf_v4.content.split('\n') + h_cf_v6.content.split('\n'))
+         | map('trim') | select('search', '/') | list }}
+
+# Une liste vide fermerait 80/443 a tout le monde, y compris Cloudflare.
+- name: Refuser si la liste recuperee est vide
+  ansible.builtin.fail:
+    msg: >-
+      Aucune plage Cloudflare recuperee. Appliquer la regle fermerait 80 et 443
+      a tout le monde. Verifie l'acces reseau vers cloudflare.com et relance.
+  when: h_cf_ranges | length < 10
+
+- name: Nombre de plages recuperees
+  ansible.builtin.debug:
+    msg: "{{ h_cf_ranges | length }} plages Cloudflare recuperees."
+
+- name: Autoriser 80 et 443 depuis Cloudflare
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.1 }}"
+    proto: tcp
+    src: "{{ item.0 }}"
+    comment: "Cloudflare (role pve_hardening)"
+  loop: "{{ h_cf_ranges | product(['80', '443']) | list }}"
+  loop_control:
+    label: "{{ item.0 }} -> {{ item.1 }}"
+
+# Les regles ufw sont evaluees dans l'ordre : les ALLOW ci-dessus ont ete
+# ajoutees avant, elles gagnent donc sur ce DENY generique.
+- name: Refuser 80 et 443 depuis le reste d'Internet
+  community.general.ufw:
+    rule: deny
+    port: "{{ item }}"
+    proto: tcp
+    comment: "Hors Cloudflare (role pve_hardening)"
+  loop: ['80', '443']
+
+- name: Autoriser 80 et 443 depuis le LAN (acces de secours)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    src: "{{ pve_hardening_firewall_mgmt_cidr }}"
+    insert: 1
+    comment: "LAN (role pve_hardening)"
+  loop: ['80', '443']
+
+- name: Etat du pare-feu
+  ansible.builtin.command: ufw status
+  register: h_cf_after
+  changed_when: false
+
+- name: Recapitulatif
+  ansible.builtin.debug:
+    msg:
+      - "80 et 443 ne sont plus joignables que depuis Cloudflare et le LAN."
+      - ""
+      - "A verifier tout de suite, depuis l'exterieur :"
+      - "  curl -I https://nbeny.fr            # doit repondre (via Cloudflare)"
+      - "  curl -I --connect-timeout 5 https://82.65.87.60 -H 'Host: nbeny.fr'   # doit expirer"
+      - ""
+      - "Les plages Cloudflare evoluent : relancer ce correctif periodiquement"
+      - "(ou planifier playbooks/95-hardening.yml -t cloudflare)."
