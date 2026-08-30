@@ -56,9 +56,13 @@ fill() {
 
 echo "Generation des valeurs [auto] dans $ENV_FILE"
 
-# KRATOS_SECRET : Kratos exige >= 32 caracteres. 40 par securite -- l'ancien
-# placeholder en faisait 31 et bloquait tout le demarrage.
-fill KRATOS_SECRET          "$(rand 40)"
+# Kratos impose deux contraintes DIFFERENTES, et s'arrete si l'une n'est pas
+# respectee :
+#   secrets.cookie -> minimum 32 caracteres
+#   secrets.cipher -> EXACTEMENT 32 (minLength ET maxLength valent 32)
+# L'ancien placeholder en faisait 31 : "length must be >= 32, but got 31".
+fill KRATOS_SECRET          "$(rand 48)"
+fill KRATOS_CIPHER_SECRET   "$(rand 32)"
 fill KRATOS_WEBHOOK_SECRET  "$(rand 40)"
 fill POSTGRES_PASSWORD      "$(rand 32)"
 fill KRATOS_DB_PASSWORD     "$(rand 32)"
@@ -87,6 +91,15 @@ set_kv DATABASE_URL "postgresql://${PG_USER}:${PG_PASS}@pgbouncer:6432/${PG_DB}"
 set_kv KRATOS_DSN   "postgres://${K_USER}:${K_PASS}@postgres:5432/${K_DB}?sslmode=disable"
 set_kv REDIS_URL    "redis://:${R_PASS}@redis:6379"
 echo "  DATABASE_URL, KRATOS_DSN, REDIS_URL (recalculees)"
+
+# Kratos REFUSE de demarrer si courier.smtp.connection_uri ne correspond pas a
+# `^smtps?://`. Une valeur vide n'est donc pas neutre : elle empeche le
+# demarrage. On pose une destination inerte pour que le stack tourne -- le
+# courrier ne partira nulle part tant que la vraie URI n'est pas renseignee.
+if [ -z "$(get SMTP_CONNECTION_URI)" ]; then
+    set_kv SMTP_CONNECTION_URI "smtp://localhost:1025/?skip_ssl_verify=true"
+    echo "  SMTP_CONNECTION_URI (destination inerte -- aucun courrier ne partira)"
+fi
 
 chmod 600 "$ENV_FILE"
 

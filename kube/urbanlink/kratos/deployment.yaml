@@ -65,11 +65,16 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: KRATOS_SECRET
+            # Cle DISTINCTE de SECRETS_COOKIE : signer et chiffrer avec le
+            # meme secret est une faiblesse, et les contraintes different --
+            # le cipher doit faire EXACTEMENT 32 caracteres, le cookie au
+            # moins 32. Une seule cle de 40 faisait echouer Kratos au
+            # demarrage : "length must be <= 32, but got 40".
             - name: SECRETS_CIPHER
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
-                  key: KRATOS_SECRET
+                  key: KRATOS_CIPHER_SECRET
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
