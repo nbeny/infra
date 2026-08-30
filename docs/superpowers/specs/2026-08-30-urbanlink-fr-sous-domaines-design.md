@@ -67,7 +67,7 @@ authentique pour des noms qui ne sont joignables que depuis le LAN.
 |---|---|---|
 | **M1** | Les quatre règles `dstnat` (22, 80, 443, 4242) portent `in-interface=ether1` mais **aucun `dst-address`**. | Toute requête du LAN vers **n'importe quelle** IP en `192.168.100.0/24` sur ces ports est détournée vers `192.168.100.50`. Le webfig du routeur lui-même est inatteignable : `https://192.168.100.1` renvoie l'openresty du Proxmox. |
 | **M2** | Les chaînes `input` et `forward` contiennent des règles `accept` mais **aucun `drop` final** — la politique par défaut de RouterOS est `accept`. | Le routeur n'a pas de pare-feu. Seule la box FAI le protège, et elle lui redirige déjà 22/80/443. |
-| **M3** | `/tool/mac-server` et `/tool/mac-server/mac-winbox` sont sur `allowed-interface-list=all`. UPnP activé sans déclaration d'interfaces. | MAC-telnet et MAC-Winbox — qui contournent entièrement la couche IP et son filtrage — répondent sur le segment WAN. UPnP crée déjà deux `dstnat` dynamiques. |
+| **M3** | `/tool/mac-server` et `/tool/mac-server/mac-winbox` sont sur `allowed-interface-list=all`. | MAC-telnet et MAC-Winbox — qui opèrent en couche 2 et contournent entièrement le filtrage IP — répondent sur le segment WAN. Aucune règle de pare-feu ne les arrête. |
 | **M4** | La session BGP avec CrowdSec (`192.168.100.50`, AS 65001) est en `state=active, established=false`. Le scheduler `CrowdsecUpdate` appelle toutes les 15 min un script `crowdsec_import` qui **n'existe pas** (`/system/script` est vide) — 576 exécutions en échec. | Le pipeline de blocage CrowdSec → MikroTik est mort. Les bouncers `cs-mikrotik-bouncer`, `mikrotik-final` et `exabgp-mikrotik` sont enregistrés côté nœud mais ne produisent aucun effet sur le routeur. |
 | **M5** | Pool DHCP `dhcp` = `192.168.100.0-192.168.100.200` : inclut l'adresse réseau **et la passerelle**. Entrée `/ip/dhcp-server/network` fantôme `192.0.0.0/8` avec `gateway=192.168.1.50`. Service `api` en clair (8728) activé. | Un bail sur `.1` couperait tout le segment. L'entrée `/8` est un reliquat dangereux. L'API en clair transporte le mot de passe admin en clair sur le LAN. |
 | **M6** | RouterBOOT en 6.45.9 sous un RouterOS 6.49.4 daté de février 2022. | Retard de firmware et de correctifs. Hors périmètre : la mise à niveau impose un redémarrage, donc une coupure Internet du foyer. |
@@ -114,7 +114,8 @@ segment. Le mTLS du mesh reprend derrière la passerelle, là où il a un sens.
 
 ## Le plan de nommage
 
-Quinze noms, tous couverts par le même certificat wildcard.
+Quinze outils, seize noms — `urbanlink.fr` et `www.urbanlink.fr` désignent
+le même frontend. Tous sont couverts par le même certificat wildcard.
 
 ### Applicatif — étiquette `uc.ingress/tier: public`
 
@@ -205,13 +206,15 @@ mikrotik/
 ├── restore.sh                   rejoue les .rsc dans l'ordre, avec filet
 ├── secrets.rsc.example          modèle ; le vrai fichier est gitignoré
 └── config/
-    ├── 00-system.rsc            identity, horloge, NTP, services IP, utilisateurs
+    ├── 00-system.rsc            identity, horloge, services IP, utilisateurs
+    ├── 05-hardening.rsc         mac-server, UPnP, NTP, services inutilisés (M3, M5)
     ├── 10-interfaces.rsc        bridge, ports, listes WAN/LAN, wireless
     ├── 20-addressing.rsc        adresses, routes, pools, DHCP
     ├── 30-nat.rsc               srcnat + dstnat corrigés (M1)
     ├── 40-firewall.rsc          input / forward / output avec drop final (M2)
     ├── 50-dns.rsc               résolveur
-    └── 60-crowdsec-bgp.rsc      instance BGP, peer, filtre, utilisateur crowdsec
+    ├── 60-crowdsec-bgp.rsc      instance BGP, peer, filtre, utilisateur crowdsec
+    └── current-state.txt        relevé de l'état vivant, produit par backup.sh
 ```
 
 **Un `.rsc` par domaine plutôt qu'un export monolithique.** Un
@@ -219,9 +222,12 @@ mikrotik/
 pas partiellement. Ces fichiers sont écrits pour être appliqués isolément :
 refaire le pare-feu sans toucher au DHCP doit être possible.
 
-`backup.sh` produit tout de même l'export complet dans
-`config/current-export.rsc`, comme point de comparaison entre l'état réel et
-l'état versionné.
+`backup.sh` produit à côté un relevé de l'état vivant dans
+`config/current-state.txt`, comme point de comparaison entre le routeur réel et
+le dépôt. Ce n'est pas un `/export` : RouterOS 6 n'expose ni `/export` ni
+`/import` à l'API, et les ports 22 et 80 du routeur étaient jusqu'au correctif
+M1 détournés vers le nœud. Le relevé parcourt donc les menus un par un, en
+retirant compteurs et horodatages — sans quoi aucun diff ne serait lisible.
 
 **Aucun secret n'est versionné** : mot de passe `admin`, PSK wifi et clé du
 bouncer CrowdSec vivent dans `mikrotik/secrets.rsc`, ajouté au `.gitignore`.
@@ -269,7 +275,7 @@ valide, et les vhosts sont des templates.
 |---|---|---|
 | **M1** | `dst-address=192.168.1.50` ajouté aux quatre règles `dstnat`. Requis par le design. | nul |
 | **M2** | `input` : accept `established,related` → accept `icmp` → accept LAN → accept BGP depuis `192.168.100.50` → accept API/Winbox/SSH depuis les deux LAN → **drop `in-interface-list=WAN`**. `forward` : accept `established,related` → fasttrack → accept LAN→WAN → accept LAN→LAN → **drop invalid** + **drop WAN→LAN non-dstnat**. | **élevé** |
-| **M3** | `mac-server` et `mac-winbox` restreints à `allowed-interface-list=LAN`. UPnP : `ether1` déclaré externe, `bridge1` interne. | faible |
+| **M3** | `mac-server` et `mac-winbox` restreints à `allowed-interface-list=LAN`. UPnP laissé actif : le nœud s'en sert pour le port-mapping Tailscale, et ses interfaces sont déjà correctement déclarées (`ether1` externe, `bridge1` interne) — le `.rsc` ne fait que rendre cet état reproductible. | faible |
 | **M5** | Pool `dhcp` ramené à `192.168.100.100-192.168.100.200`. Suppression du réseau DHCP `192.0.0.0/8`. Service `api` (8728) désactivé, `api-ssl` conservé. Suppression du scheduler orphelin `CrowdsecUpdate`. | faible |
 
 **M2 s'applique avec un filet de sécurité, sans exception.** Séquence
