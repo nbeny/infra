@@ -21,6 +21,10 @@
     urbanlink_namespace: urbanconnect
     urbanlink_kubeconfig: /etc/kubernetes/admin.conf
     urbanlink_wipe: false
+    # Passerelle Istio : le Secret TLS doit vivre aupres de ses pods.
+    urbanlink_gateway_namespace: istio-ingress
+    urbanlink_tls_secret: uc-tls-cert
+    urbanlink_domain: urbanlink.fr
 
   tasks:
 
@@ -41,17 +45,25 @@
       changed_when: false
       failed_when: ul_sc.stdout | int < 1
 
-    # Sans les CRD Traefik, `kubectl apply -k` echoue en bloc sur les
-    # IngressRoute et Middleware.
-    - name: Verifier que les CRD Traefik sont presentes
+    # Sans les CRD Istio, `kubectl apply -k` echoue en bloc sur le Gateway et
+    # les VirtualService.
+    - name: Verifier que les CRD Istio sont presentes
       ansible.builtin.shell:
         cmd: >-
           kubectl --kubeconfig {{ urbanlink_kubeconfig }} get crd -o name
-          | grep -cE 'ingressroutes.traefik.io|middlewares.traefik.io'
+          | grep -cE 'gateways.networking.istio.io|virtualservices.networking.istio.io|authorizationpolicies.security.istio.io'
         executable: /bin/bash
       register: ul_crd
       changed_when: false
-      failed_when: ul_crd.stdout | int < 2
+      failed_when: ul_crd.stdout | int < 3
+
+    - name: Verifier que la passerelle Istio est deployee
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_gateway_namespace }}
+        get deploy istio-ingressgateway
+      register: ul_gw
+      changed_when: false
+      failed_when: ul_gw.rc != 0
 
     - name: Supprimer le namespace existant
       ansible.builtin.command: >-
@@ -100,12 +112,61 @@
         label: "{{ item.name }}"
       changed_when: true
 
+    # ---------------------------------------------------------------------
+    #  TLS de la passerelle
+    # ---------------------------------------------------------------------
+    # Traefik obtenait ses certificats seul via ACME. Istio ne fait pas d'ACME :
+    # il lit un Secret. Sans DNS public pointant ici, Let's Encrypt ne peut pas
+    # valider -- on depose donc un certificat auto-signe, suffisant pour valider
+    # le routage. En production, c'est cert-manager qui remplit ce Secret.
+    - name: Verifier si le certificat de la passerelle existe
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_gateway_namespace }}
+        get secret {{ urbanlink_tls_secret }}
+      register: ul_tls
+      changed_when: false
+      failed_when: false
+
+    - name: Generer un certificat auto-signe pour la passerelle
+      when: ul_tls.rc != 0
+      block:
+
+        - name: Produire la cle et le certificat
+          ansible.builtin.command: >-
+            openssl req -x509 -newkey rsa:2048 -nodes -days 825
+              -keyout /tmp/uc-tls.key -out /tmp/uc-tls.crt
+              -subj "/CN=*.{{ urbanlink_domain }}/O=lab"
+              -addext "subjectAltName=DNS:{{ urbanlink_domain }},DNS:*.{{ urbanlink_domain }}"
+          changed_when: true
+
+        - name: Deposer le certificat dans le namespace de la passerelle
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_gateway_namespace }}
+            create secret tls {{ urbanlink_tls_secret }}
+            --cert=/tmp/uc-tls.crt --key=/tmp/uc-tls.key
+          changed_when: true
+
+        - name: Retirer les fichiers temporaires
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: [/tmp/uc-tls.key, /tmp/uc-tls.crt]
+
     - name: Appliquer le kustomize
       ansible.builtin.command: >-
         kubectl --kubeconfig {{ urbanlink_kubeconfig }}
         apply -k {{ urbanlink_manifests_dest }}
       register: ul_apply
       changed_when: true
+
+    # Hors kustomize : elle doit rester dans istio-ingress, alors que le
+    # kustomization force `namespace: urbanconnect` sur tout ce qu'il liste.
+    - name: Appliquer la politique d'autorisation de la passerelle
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ urbanlink_kubeconfig }}
+        apply -f {{ urbanlink_manifests_dest }}/ingress-istio/authorization.yaml
+      register: ul_authz
+      changed_when: "'created' in ul_authz.stdout or 'configured' in ul_authz.stdout"
 
     - name: Resultat de l'application
       ansible.builtin.debug:

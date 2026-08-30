@@ -22,7 +22,11 @@ spec:
             - kratos
             - serve
             - -c
-            - /etc/config/kratos/kratos.yml
+            # kratos.yml pointe sur localhost:3000 : c'est la config de
+            # developpement. kratos.urbanlink.yml porte les vraies URLs.
+            # Les variables d'env ci-dessous surchargent base_url et
+            # cookies, mais PAS les ui_url -- le fichier monte compte.
+            - /etc/config/kratos/kratos.urbanlink.yml
             - --watch-courier
           ports:
             - containerPort: 4433
@@ -75,11 +79,11 @@ spec:
                   name: urbanconnect-secrets
                   key: GOOGLE_CLIENT_SECRET
             - name: SELFSERVICE_DEFAULT_BROWSER_RETURN_URL
-              value: "https://urbanconnect.fr"
+              value: "https://urbanlink.fr"
             - name: SERVE_PUBLIC_BASE_URL
-              value: "https://kratos.urbanconnect.fr"
+              value: "https://auth.urbanlink.fr"
             - name: COOKIES_DOMAIN
-              value: "urbanconnect.fr"
+              value: "urbanlink.fr"
             - name: COOKIES_SAME_SITE
               value: "Lax"
           volumeMounts:

@@ -1,0 +1,22 @@
+---
+# Publie les outils du lab sous *.urbanlink.fr, depuis le noeud Proxmox.
+#
+# Prerequis :
+#   1. Les enregistrements A urbanlink.fr et *.urbanlink.fr pointent sur
+#      192.168.100.50, en DNS-only (nuage gris).
+#   2. Le certificat wildcard existe
+#      -> ansible-playbook playbooks/32-tls-certificates.yml
+#   3. La passerelle Istio repond sur 10.0.0.111:30080
+#      -> ansible-playbook playbooks/31-urbanlink-deploy.yml
+#
+#   ansible-playbook playbooks/33-urbanlink-edge.yml
+#
+# Le TLS est termine ici, pas par Istio : le certificat wildcard vit sur le
+# noeud, et c'est aussi le point ou le bouncer CrowdSec s'applique.
+
+- name: Publier les outils sous *.urbanlink.fr
+  hosts: proxmox
+  gather_facts: true
+  become: true
+  roles:
+    - edge_urbanlink

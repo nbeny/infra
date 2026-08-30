@@ -49,11 +49,86 @@ comblés automatiquement par `ansible/playbooks/20-debian-k8s.yml` :
 | Manque | Conséquence sans lui | Comblé par |
 |---|---|---|
 | Aucun provisionneur de volumes | Les 9 PVC restent `Pending`, aucun StatefulSet ne démarre | `local-path-provisioner`, StorageClass par défaut |
-| CRD `IngressRoute` / `Middleware` / `TLSOption` absentes | `kubectl apply -k` échoue en bloc | Traefik (chart Helm) |
-| Pas de LAPI ni de WAF CrowdSec | Les `Middleware` `crowdsec` et `uc-edge` ne résolvent pas | CrowdSec (chart Helm) + plugin bouncer déclaré dans Traefik |
+| Pas d'ingress ni de CRD associées | `kubectl apply -k` échoue en bloc | **Istio** (Gateway + VirtualService) |
+| Réseau de pods plat, aucun chiffrement | Le frontend peut joindre PostgreSQL en direct | **Istio ambient** : mTLS automatique + `AuthorizationPolicy` |
 
-Réglages dans `ansible/inventory/group_vars/debian_nodes.yml`
-(`k8s_storage_provisioner`, `k8s_ingress_controller`, `k8s_crowdsec_enabled`).
+Réglages dans `ansible/inventory/group_vars/debian_nodes.yml` et
+`ansible/inventory/host_vars/urbanlink.yml`.
+
+---
+
+### Istio remplace Traefik
+
+L'ingress est passé de Traefik à Istio. La correspondance :
+
+| Traefik | Istio |
+|---|---|
+| `IngressRoute` (routage + politique mêlés) | `VirtualService` — routage seul |
+| `Middleware` `uc-edge` / `uc-edge-auth` | `AuthorizationPolicy` — politique seule |
+| `entryPoints` + `TLSOption uc-tls` | `Gateway` (`minProtocolVersion: TLSV1_2`) |
+| `forwardAuth` vers Oathkeeper | `AuthorizationPolicy` action `CUSTOM` + ext_authz |
+| `certResolver: letsencrypt` (ACME natif) | Secret TLS — **cert-manager requis en production** |
+| plugin bouncer CrowdSec | *rien* — voir ci-dessous |
+
+Les manifests d'origine restent dans `ingress/` à titre de référence ; ils ne
+sont plus appliqués. Les nouveaux sont dans `ingress-istio/`.
+
+**Mode ambient, et ce n'est pas un choix de confort.** Le mode sidecar injecte
+un conteneur dans chaque pod, ce qui casse deux choses dans ce stack : les
+trois Jobs (`kratos-migrate`, `minio-init`, `elasticsearch-setup`) ne se
+termineraient jamais — le conteneur applicatif sort, le sidecar reste vivant —
+et `coturn` tourne en `hostNetwork`, où un sidecar n'intercepte rien. En
+ambient, l'interception se fait par un `ztunnel` par nœud : aucun de ces deux
+problèmes, et l'enrôlement se fait par un label de namespace sans redémarrer
+un seul pod.
+
+#### Deux régressions assumées
+
+**CrowdSec disparaît du cluster.** Son bouncer était un plugin Go du binaire
+Traefik. Le portage Envoy officiel (`crowdsecurity/cs-envoy-bouncer`) n'a ni
+release ni image publiée, et brancher l'AppSec en direct est impossible : elle
+exige l'URI et l'IP client de chaque requête dans des en-têtes
+`X-Crowdsec-Appsec-*`, or le champ Istio `includeAdditionalHeadersInCheck`
+n'accepte que des valeurs **fixes**. CrowdSec reste donc actif sur le nginx du
+nœud Proxmox, qui est de toute façon la vraie porte d'entrée Internet.
+Ce qui est réellement perdu devant l'API : le WAF applicatif (SQLi/XSS,
+virtual patching des CVE) et la blocklist communautaire d'IP.
+
+**Le TLS n'est plus automatique.** Traefik obtenait ses certificats seul.
+Istio lit un Secret. Dans le lab, le playbook dépose un certificat auto-signé
+— suffisant pour valider le routage, pas pour des visiteurs. En production :
+
+```bash
+helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
+# puis un Certificate qui remplit le secret uc-tls-cert dans istio-ingress
+```
+
+Le challenge DNS-01 via Cloudflare est le plus robuste ici — il ne dépend
+d'aucune joignabilité HTTP (voir `docs/audit-securite.md`, constat 3).
+
+#### Vérifié après bascule
+
+```console
+$ curl -H 'Host: pgadmin.urbanconnect.fr' http://10.0.0.111:30080/     → 302
+$ curl -H 'Host: inconnu.example.com'     http://10.0.0.111:30080/     → 404
+$ curl -H 'Host: api.urbanconnect.fr'     http://10.0.0.111:30080/metrics → 404
+$ curl -H 'Host: api.urbanconnect.fr'     http://10.0.0.111:30080/graphql → 403
+```
+
+Le 404 sur `/metrics` reproduit le `!PathPrefix` de Traefik ; le 403 sur
+`/graphql` montre l'ext_authz actif et **fail-closed** (`failOpen: false` —
+une panne d'Oathkeeper refuse les requêtes au lieu de les laisser passer).
+
+#### Piste d'amélioration relevée par `istioctl analyze`
+
+Six Services nomment leurs ports sans préfixe de protocole (`postgres`,
+`redis`, `pgbouncer`, `pgadmin`, `postgres-nominatim`, `temporal-ui`). Istio
+retombe alors sur la détection automatique. Les nommer `tcp-postgres`,
+`http-web`… rend le traitement déterministe :
+
+```bash
+istioctl analyze -n urbanconnect
+```
 
 ---
 
@@ -169,7 +244,8 @@ NATé et l'environnement de production visé.
 
 ### Accès
 
-Traefik est exposé en NodePort sur la VM (pas de LoadBalancer en bare-metal) :
+La passerelle Istio est exposée en NodePort sur la VM (pas de LoadBalancer en
+bare-metal) — elle a repris les ports que Traefik occupait :
 
 ```bash
 # Tunnel depuis Windows
@@ -184,8 +260,19 @@ soit directement :
 curl -H 'Host: api.urbanconnect.fr' http://localhost:8080/
 ```
 
-Dashboard Traefik (non exposé, volontairement) :
+**Kiali** — le graphe de service du mesh : qui parle à qui, en mTLS ou non,
+avec les taux d'erreur. C'est l'outil qui remplace avantageusement le dashboard
+Traefik pour comprendre ce qui se passe dans le cluster.
 
 ```bash
-kubectl -n traefik port-forward deploy/traefik 9000:9000
+kubectl -n istio-system port-forward svc/kiali 20001:20001
+# puis http://localhost:20001
+```
+
+Diagnostic du maillage :
+
+```bash
+istioctl analyze -A                          # cohérence de la configuration
+istioctl ztunnel-config workload             # charges réellement capturées
+kubectl -n istio-system logs ds/ztunnel      # trafic mTLS, identités SPIFFE
 ```

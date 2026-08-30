@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# Necessaire pour relayer les WebSocket. Sans cette carte, l'en-tete
+# `Connection` serait transmis tel quel et la montee en WebSocket echouerait
+# sur Kibana, Kiali, la console MinIO, Directus et la console Proxmox.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}

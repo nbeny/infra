@@ -121,9 +121,9 @@ spec:
                   optional: true
             # CORS
             - name: CORS_ORIGIN
-              value: "https://urbanconnect.fr"
+              value: "https://urbanlink.fr"
             - name: FRONTEND_URL
-              value: "https://urbanconnect.fr"
+              value: "https://urbanlink.fr"
             # Stripe
             - name: STRIPE_SECRET_KEY
               valueFrom:

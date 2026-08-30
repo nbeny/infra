@@ -36,7 +36,7 @@ data:
         redirect:
           enabled: true
           config:
-            to: https://urbanconnect.fr/login
+            to: https://urbanlink.fr/login
             when:
               - error: [401, 403]
                 request:
@@ -91,7 +91,7 @@ data:
       # id_token:
       #   enabled: true
       #   config:
-      #     issuer_url: https://oathkeeper.urbanconnect.fr/
+      #     issuer_url: https://oathkeeper.urbanlink.fr/
       #     jwks_url: file:///etc/oathkeeper/jwks/jwks.json
       #     claims: '{"sub":"{{ print .Subject }}","email":"{{ print .Extra.identity.traits.email }}"}'
 
@@ -106,7 +106,7 @@ data:
     # d'identité injectés. Sinon → guest (le backend gère l'authZ via ses guards).
     - id: "api:passthrough"
       match:
-        url: "https://api.urbanconnect.fr/<.*>"
+        url: "https://api.urbanlink.fr/<.*>"
         methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       authenticators:
         - handler: cookie_session
@@ -121,7 +121,7 @@ data:
     # → 401/403 + redirection login pour les navigateurs). Adapter le préfixe.
     # - id: "api:protected"
     #   match:
-    #     url: "https://api.urbanconnect.fr/admin<.*>"
+    #     url: "https://api.urbanlink.fr/admin<.*>"
     #     methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
     #   authenticators:
     #     - handler: cookie_session
@@ -133,4 +133,4 @@ data:
     #   errors:
     #     - handler: redirect
     #       config:
-    #         to: https://urbanconnect.fr/login
+    #         to: https://urbanlink.fr/login

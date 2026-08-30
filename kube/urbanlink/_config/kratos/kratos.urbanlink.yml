@@ -8,27 +8,27 @@ version: v1.0.0
 # surcharges via variables d'env du compose ne couvrent PAS les ui_url).
 #
 #   - Front public   : https://urbanlink.fr
-#   - Kratos public  : https://kratos.urbanlink.fr   (routé par Traefik → kratos:4433)
+#   - Kratos public  : https://auth.urbanlink.fr   (routé par Istio → kratos:4433)
 #   - Kratos admin   : http://kratos:4434            (réseau Docker interne, jamais exposé)
 #
 # Chargé par le service `kratos` dans docker-compose.vps.yml :
 #   command: serve -c /etc/config/kratos/kratos.urbanlink.yml --watch-courier
 #
 # ⚠️ Google OAuth : l'URI de redirection à déclarer dans la Google Console est
-#   https://kratos.urbanlink.fr/self-service/methods/oidc/callback/google
+#   https://auth.urbanlink.fr/self-service/methods/oidc/callback/google
 # ============================================================================
 
 dsn: env://DSN
 
 serve:
   public:
-    base_url: https://kratos.urbanlink.fr/
+    base_url: https://auth.urbanlink.fr/
     cors:
       enabled: true
       allowed_origins:
         - https://urbanlink.fr
         - https://api.urbanlink.fr
-        - https://kratos.urbanlink.fr
+        - https://auth.urbanlink.fr
       allowed_methods:
         - POST
         - GET
