@@ -1,0 +1,28 @@
+# Le depot est edite depuis Windows mais tout son contenu s'execute sous Linux.
+# Sans cette normalisation, git rend les fichiers en CRLF a la copie de travail
+# et un script shell parti vers un invite echoue sur un `\r` invisible :
+#   /bin/bash^M: bad interpreter
+#
+# `text eol=lf` force LF dans le depot ET dans la copie de travail.
+
+*                 text=auto eol=lf
+
+*.sh              text eol=lf
+*.j2              text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf
+*.tf              text eol=lf
+*.tfvars          text eol=lf
+*.hcl             text eol=lf
+*.cfg             text eol=lf
+*.md              text eol=lf
+Dockerfile*       text eol=lf
+.gitignore        text eol=lf
+.gitattributes    text eol=lf
+
+# Binaires : jamais de conversion.
+*.png             binary
+*.jpg             binary
+*.pdf             binary
+*.zst             binary
+*.qcow2           binary
