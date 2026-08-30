@@ -1,0 +1,43 @@
+---
+# Inventaire statique : le noeud Proxmox + les VMs existantes "adoptees".
+# Les VMs creees par Terraform arrivent dans 20-terraform.yml (genere, non versionne).
+#
+# Par defaut on suppose qu'Ansible tourne SUR le noeud Proxmox (connection: local).
+# Depuis un poste distant / WSL :  ansible-playbook ... -e pve_connection=ssh
+all:
+  children:
+
+    proxmox:
+      hosts:
+        pve:
+          ansible_host: 192.168.100.50
+          ansible_user: root
+          ansible_port: 22
+          ansible_connection: "{{ pve_connection | default('local') }}"
+          ansible_python_interpreter: /usr/bin/python3
+
+    # VMs Debian (docker + kubernetes)
+    debian_nodes:
+      hosts:
+        urbanconnect:
+          ansible_host: 10.0.0.100
+          vm_id: 100
+          # Host principal existant. Adopte via `ansible/playbooks/05-adopt-existing.yml`
+          # (injection de la cle SSH par l'agent QEMU) avant toute autre execution.
+          k8s_role: control_plane
+          k8s_single_node: true
+
+    # VMs Kali
+    kali_nodes:
+      hosts:
+        kali:
+          ansible_host: 10.0.0.103
+          vm_id: 103
+          # VM Kali existante (arretee au moment de l'ecriture de ce fichier).
+          # A demarrer + adopter avant utilisation, ou a remplacer par une VM Terraform.
+
+    # Groupe parapluie : tout ce qui est une VM invitee (pas le noeud PVE)
+    guests:
+      children:
+        debian_nodes:
+        kali_nodes:

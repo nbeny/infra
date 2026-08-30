@@ -1,0 +1,58 @@
+---
+# ============================================================================
+#  Variables du noeud Proxmox (groupe `proxmox`)
+# ============================================================================
+
+# --- Mises a jour ---------------------------------------------------------
+# `false` par defaut : une montee de version PVE peut demander un reboot.
+# Active explicitement :  -e pve_do_upgrade=true
+pve_do_upgrade: false
+pve_reboot_if_required: false
+
+# --- Depots APT -----------------------------------------------------------
+pve_use_no_subscription_repo: true
+pve_disable_enterprise_repo: true
+# Retire le popup "No valid subscription" de l'interface web.
+# Patch cosmetique reapplique a chaque mise a jour de pve-manager.
+pve_remove_subscription_nag: false
+
+# --- Reseau ---------------------------------------------------------------
+# DANGER : `true` fait reecrire /etc/network/interfaces par Ansible.
+# Une erreur ici coupe l'acces au noeud. Laisse a `false` tant que tu n'as pas
+# lu roles/pve_host/templates/interfaces.j2 et verifie le nom de l'interface
+# physique. Voir la section "Reconstruire le noeud Proxmox" du README.
+pve_manage_network: false
+
+# Regles DNAT optionnelles (host:port -> VM:22). Le mode d'acces recommande
+# reste le ProxyJump (voir ssh/config.example) qui ne touche pas au reseau.
+pve_dnat_rules: []
+#  - { host_port: 4242, dest_ip: 10.0.0.102, dest_port: 22 }
+
+# --- Outils installes sur le noeud (il sert de noeud de controle) ---------
+pve_base_packages:
+  - curl
+  - wget
+  - git
+  - jq
+  - unzip
+  - vim
+  - htop
+  - tmux
+  - rsync
+  - python3-pip
+  - python3-proxmoxer
+  - python3-requests
+
+pve_install_iac_tools: true
+pve_terraform_version: "1.16.0"
+pve_packer_version: "1.16.0"
+pve_iac_bin_dir: /usr/local/bin
+
+# --- Token API pour Terraform --------------------------------------------
+# Passe a `true` UNE SEULE FOIS pour creer l'utilisateur + le token.
+# La valeur du secret n'est affichee qu'a la creation : copie-la aussitot
+# dans terraform/terraform.tfvars.
+pve_create_api_token: false
+pve_api_user: "terraform@pve"
+pve_api_token_name: "provider"
+pve_api_role: "TerraformProv"

@@ -1,0 +1,45 @@
+# --- Terraform ---
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+.terraform.lock.hcl
+
+# --- Packer ---
+packer_cache/
+*.auto.pkrvars.hcl
+!*.auto.pkrvars.hcl.example
+manifest.json
+
+# --- Ansible ---
+*.retry
+ansible/inventory/20-terraform.yml
+ansible/inventory/*.generated.yml
+ansible/facts_cache/
+ansible/collections/
+
+# --- Secrets ---
+.env
+secrets.yml
+vault-password*
+*.pem
+*.key
+!**/roles/**/*.key
+id_rsa*
+!id_rsa*.pub
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/

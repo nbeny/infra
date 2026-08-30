@@ -1,0 +1,53 @@
+---
+- name: Verifier que la cible est bien un noeud Proxmox VE
+  ansible.builtin.stat:
+    path: /usr/bin/pveversion
+  register: pve_binary
+
+- name: Echouer si ce n'est pas un noeud Proxmox
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} n'a pas /usr/bin/pveversion : ce role ne doit
+      s'appliquer qu'a un noeud Proxmox VE.
+  when: not pve_binary.stat.exists
+
+- name: Relever la version de Proxmox VE
+  ansible.builtin.command: pveversion
+  register: pve_version_out
+  changed_when: false
+
+- name: Afficher la version de Proxmox VE
+  ansible.builtin.debug:
+    msg: "Proxmox VE detecte : {{ pve_version_out.stdout }}"
+
+- name: Configurer les depots APT
+  ansible.builtin.import_tasks: repos.yml
+  tags: [repos]
+
+- name: Installer les paquets de base
+  ansible.builtin.import_tasks: packages.yml
+  tags: [packages]
+
+- name: Installer Terraform et Packer
+  ansible.builtin.import_tasks: iac_tools.yml
+  when: pve_install_iac_tools | bool
+  tags: [iac]
+
+- name: Configurer le routage et le NAT du reseau du lab
+  ansible.builtin.import_tasks: network.yml
+  tags: [network]
+
+- name: Retirer le popup "No valid subscription"
+  ansible.builtin.import_tasks: subscription_nag.yml
+  when: pve_remove_subscription_nag | bool
+  tags: [nag]
+
+- name: Creer le token API pour Terraform
+  ansible.builtin.import_tasks: api_token.yml
+  when: pve_create_api_token | bool
+  tags: [token, never]
+
+- name: Mettre a jour le noeud
+  ansible.builtin.import_tasks: upgrade.yml
+  when: pve_do_upgrade | bool
+  tags: [upgrade]

@@ -1,0 +1,13 @@
+---
+# Configure le noeud Proxmox lui-meme : depots, outils, routage, mises a jour.
+# C'est le playbook qui permet de reconstruire le noeud apres une reinstallation.
+#
+#   ansible-playbook playbooks/00-proxmox-host.yml
+#   ansible-playbook playbooks/00-proxmox-host.yml -e pve_do_upgrade=true
+#   ansible-playbook playbooks/00-proxmox-host.yml -t token -e pve_create_api_token=true
+
+- name: Configurer le noeud Proxmox VE
+  hosts: proxmox
+  gather_facts: true
+  roles:
+    - role: pve_host

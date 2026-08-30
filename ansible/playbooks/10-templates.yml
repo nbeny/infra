@@ -1,0 +1,15 @@
+---
+# Construit les templates de BASE (socles cloud-init) sur le noeud Proxmox :
+#   9000  tpl-debian-13-base
+#   9001  tpl-kali-base
+#
+# Ce sont les entrees de Packer, pas les templates utilises par Terraform.
+#
+#   ansible-playbook playbooks/10-templates.yml
+#   ansible-playbook playbooks/10-templates.yml -e pve_templates_force=true
+
+- name: Construire les templates cloud-init de base
+  hosts: proxmox
+  gather_facts: true
+  roles:
+    - role: pve_templates

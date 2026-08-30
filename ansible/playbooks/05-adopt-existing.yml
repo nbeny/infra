@@ -1,0 +1,114 @@
+---
+# "Adopte" une VM existante creee a la main : injecte le compte admin et les
+# cles SSH via l'agent invite QEMU, sans avoir besoin d'un acces SSH prealable.
+#
+# Utile pour reprendre en main UrbanConnect (VM 100) et Kali (VM 103) sans
+# les detruire. Purement additif : aucune configuration existante n'est
+# supprimee.
+#
+#   ansible-playbook playbooks/05-adopt-existing.yml
+#   ansible-playbook playbooks/05-adopt-existing.yml -e '{"adopt_vms":[{"vmid":101,"name":"Alesio"}]}'
+
+- name: Adopter les VMs existantes via l'agent invite QEMU
+  hosts: proxmox
+  gather_facts: true
+
+  vars:
+    adopt_vms:
+      - { vmid: 100, name: UrbanConnect }
+      - { vmid: 103, name: Kali }
+
+  tasks:
+
+    - name: Lister les VMs presentes sur le noeud
+      ansible.builtin.command: qm list
+      register: adopt_vmlist
+      changed_when: false
+
+    - name: Verifier l'etat de chaque VM ciblee
+      ansible.builtin.command: "qm status {{ item.vmid }}"
+      register: adopt_status
+      changed_when: false
+      failed_when: false
+      loop: "{{ adopt_vms }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Signaler les VMs non demarrees
+      ansible.builtin.debug:
+        msg: >-
+          VM {{ item.item.vmid }} ({{ item.item.name }}) :
+          {{ 'introuvable' if item.rc != 0 else item.stdout | trim }}.
+          Elle doit etre demarree avec l'agent QEMU actif pour etre adoptee
+          (qm start {{ item.item.vmid }}).
+      loop: "{{ adopt_status.results }}"
+      loop_control:
+        label: "{{ item.item.vmid }}"
+      when: item.rc != 0 or 'running' not in item.stdout
+
+    - name: Retenir les VMs demarrees
+      ansible.builtin.set_fact:
+        adopt_running: >-
+          {{ adopt_status.results
+             | selectattr('rc', 'equalto', 0)
+             | selectattr('stdout', 'search', 'running')
+             | map(attribute='item')
+             | list }}
+
+    - name: Verifier que l'agent invite repond
+      ansible.builtin.command: "qm agent {{ item.vmid }} ping"
+      register: adopt_ping
+      changed_when: false
+      failed_when: false
+      loop: "{{ adopt_running }}"
+      loop_control:
+        label: "{{ item.vmid }} ({{ item.name }})"
+
+    - name: Ecarter les VMs dont l'agent ne repond pas
+      ansible.builtin.debug:
+        msg: >-
+          L'agent QEMU de la VM {{ item.item.vmid }} ne repond pas. Installe-le
+          dans l'invite (apt install qemu-guest-agent && systemctl enable --now
+          qemu-guest-agent), la VM ne peut pas etre adoptee sans lui.
+      loop: "{{ adopt_ping.results }}"
+      loop_control:
+        label: "{{ item.item.vmid }}"
+      when: item.rc != 0
+
+    - name: Construire le script d'adoption
+      ansible.builtin.set_fact:
+        adopt_script_b64: "{{ lookup('template', 'adopt.sh.j2') | b64encode }}"
+
+    # Le script est passe en base64 : cela evite tout probleme d'echappement
+    # entre le shell d'Ansible, celui de qm et celui de l'invite.
+    - name: Injecter le compte admin et les cles SSH dans l'invite
+      ansible.builtin.command: >-
+        qm guest exec {{ item.item.vmid }} --timeout 120 --
+        /bin/bash -c "echo {{ adopt_script_b64 }} | base64 -d | bash"
+      register: adopt_exec
+      changed_when: true
+      loop: "{{ adopt_ping.results }}"
+      loop_control:
+        label: "{{ item.item.vmid }} ({{ item.item.name }})"
+      when: item.rc == 0
+
+    - name: Afficher le resultat de l'adoption
+      ansible.builtin.debug:
+        msg: "{{ (item.stdout | from_json).get('out-data', 'pas de sortie') | trim }}"
+      loop: "{{ adopt_exec.results }}"
+      loop_control:
+        label: "{{ item.item.item.vmid | default('?') }}"
+      when:
+        - item.skipped is not defined
+        - item.stdout is defined
+
+    # `join` renvoie toujours une chaine, eventuellement vide : le filtre
+    # `default` ne s'y appliquerait jamais sans le test de longueur.
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - >-
+            VMs adoptees :
+            {{ adopt_running | map(attribute='name') | join(', ')
+               if adopt_running | length > 0 else 'aucune' }}
+          - "Verifie l'acces :  ansible guests -m ping"

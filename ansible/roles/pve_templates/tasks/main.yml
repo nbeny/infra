@@ -1,0 +1,31 @@
+---
+- name: Creer le repertoire de cache des images cloud
+  ansible.builtin.file:
+    path: "{{ pve_image_cache_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# cloud-init injecte les cles depuis un fichier ; `qm set --sshkeys` attend un
+# chemin sur le noeud, pas la valeur des cles.
+- name: Deposer les cles publiques autorisees pour cloud-init
+  ansible.builtin.copy:
+    content: "{{ lab_ssh_public_keys | join('\n') }}\n"
+    dest: "{{ pve_template_keys_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Verifier que le stockage des templates existe
+  ansible.builtin.command: "pvesm status --storage {{ pve_template_storage }}"
+  register: pve_tpl_storage
+  changed_when: false
+  failed_when: pve_tpl_storage.rc != 0
+
+- name: Construire les templates de base
+  ansible.builtin.include_tasks: build_template.yml
+  loop: "{{ pve_base_templates }}"
+  loop_control:
+    loop_var: tpl
+    label: "{{ tpl.id }} - {{ tpl.name }}"

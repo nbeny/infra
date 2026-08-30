@@ -1,0 +1,90 @@
+---
+# Cree l'utilisateur + le role + le token API utilises par Terraform.
+# A ne lancer qu'une fois : la valeur du secret n'est affichee qu'a la creation
+# et Proxmox ne permet pas de la relire ensuite.
+#
+#   ansible-playbook playbooks/00-proxmox-host.yml -t token -e pve_create_api_token=true
+
+# Liste calee sur Proxmox VE 9 : VM.Monitor a disparu au profit des
+# privileges VM.GuestAgent.*, sans lesquels le provider ne peut pas lire l'IP
+# des VMs via l'agent invite.
+- name: Definir les privileges du role Terraform
+  ansible.builtin.set_fact:
+    pve_api_privs: >-
+      Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate
+      Datastore.Audit Pool.Allocate Pool.Audit SDN.Use
+      Sys.Audit Sys.Console Sys.Modify User.Modify
+      VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.CPU
+      VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory
+      VM.Config.Network VM.Config.Options VM.Console
+      VM.GuestAgent.Audit VM.GuestAgent.Unrestricted
+      VM.Migrate VM.PowerMgmt VM.Snapshot
+
+- name: Lister les roles existants
+  ansible.builtin.command: pveum role list --output-format json
+  register: pve_roles
+  changed_when: false
+
+- name: Creer le role {{ pve_api_role }}
+  ansible.builtin.command: >-
+    pveum role add {{ pve_api_role }} --privs "{{ pve_api_privs | trim }}"
+  when: pve_api_role not in (pve_roles.stdout | from_json | map(attribute='roleid') | list)
+  changed_when: true
+
+- name: Mettre a jour les privileges du role {{ pve_api_role }}
+  ansible.builtin.command: >-
+    pveum role modify {{ pve_api_role }} --privs "{{ pve_api_privs | trim }}"
+  when: pve_api_role in (pve_roles.stdout | from_json | map(attribute='roleid') | list)
+  changed_when: true
+
+- name: Lister les utilisateurs existants
+  ansible.builtin.command: pveum user list --output-format json
+  register: pve_users
+  changed_when: false
+
+- name: Creer l'utilisateur {{ pve_api_user }}
+  ansible.builtin.command: >-
+    pveum user add {{ pve_api_user }} --comment "Utilisateur Terraform (gere par Ansible)"
+  when: pve_api_user not in (pve_users.stdout | from_json | map(attribute='userid') | list)
+  changed_when: true
+
+- name: Donner le role {{ pve_api_role }} sur / a {{ pve_api_user }}
+  ansible.builtin.command: >-
+    pveum acl modify / --users {{ pve_api_user }} --roles {{ pve_api_role }}
+  changed_when: true
+
+- name: Lister les tokens de {{ pve_api_user }}
+  ansible.builtin.command: "pveum user token list {{ pve_api_user }} --output-format json"
+  register: pve_tokens
+  changed_when: false
+  failed_when: false
+
+- name: Creer le token {{ pve_api_token_name }}
+  ansible.builtin.command: >-
+    pveum user token add {{ pve_api_user }} {{ pve_api_token_name }}
+    --privsep 0 --output-format json
+  register: pve_new_token
+  when: >-
+    pve_tokens.stdout is not search(pve_api_token_name)
+  changed_when: true
+
+- name: Afficher le token (copie-le MAINTENANT, il ne sera plus lisible)
+  ansible.builtin.debug:
+    msg:
+      - "======================================================================"
+      - "Token API cree. Renseigne-le dans terraform/terraform.tfvars :"
+      - ""
+      - "  pve_api_token = \"{{ pve_api_user }}!{{ pve_api_token_name }}={{ (pve_new_token.stdout | from_json).value }}\""
+      - ""
+      - "Cette valeur ne sera plus jamais affichee par Proxmox."
+      - "======================================================================"
+  when: pve_new_token.changed
+
+- name: Rappeler qu'un token existe deja
+  ansible.builtin.debug:
+    msg: >-
+      Un token {{ pve_api_user }}!{{ pve_api_token_name }} existe deja. Pour en
+      regenerer un :
+      pveum user token remove {{ pve_api_user }} {{ pve_api_token_name }}
+      puis relancer ce playbook.
+  when: not pve_new_token.changed

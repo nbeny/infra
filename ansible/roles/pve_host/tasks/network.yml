@@ -1,0 +1,55 @@
+---
+# Le routage IP est indispensable : les VMs de vmbr1 (10.0.0.0/24) sortent en
+# NAT via vmbr0. Le sysctl ci-dessous est sur et idempotent, on l'applique
+# toujours -- contrairement a la reecriture de /etc/network/interfaces.
+
+- name: Activer le routage IPv4 de facon persistante
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_file: /etc/sysctl.d/99-pve-lab.conf
+    sysctl_set: true
+    state: present
+    reload: true
+
+- name: Verifier l'etat actuel des bridges
+  ansible.builtin.command: ip -br addr show
+  register: pve_bridges
+  changed_when: false
+
+- name: Avertir si le bridge du lab est absent
+  ansible.builtin.fail:
+    msg: >-
+      Le bridge {{ lab_bridge }} est introuvable sur {{ inventory_hostname }}.
+      Active pve_manage_network=true pour qu'Ansible ecrive
+      /etc/network/interfaces, ou cree le bridge a la main dans l'interface web.
+  when:
+    - lab_bridge not in pve_bridges.stdout
+    - not (pve_manage_network | bool)
+
+# ---------------------------------------------------------------------------
+# Reecriture complete de /etc/network/interfaces.
+# Desactivee par defaut : une erreur ici coupe l'acces reseau au noeud.
+# ---------------------------------------------------------------------------
+- name: Reecrire la configuration reseau du noeud
+  when: pve_manage_network | bool
+  block:
+
+    - name: Sauvegarder la configuration reseau actuelle
+      ansible.builtin.copy:
+        src: /etc/network/interfaces
+        dest: "/etc/network/interfaces.bak-{{ ansible_date_time.iso8601_basic_short }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Deployer /etc/network/interfaces
+      ansible.builtin.template:
+        src: interfaces.j2
+        dest: /etc/network/interfaces
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      notify: Recharger la configuration reseau

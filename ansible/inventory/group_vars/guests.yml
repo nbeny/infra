@@ -1,0 +1,42 @@
+---
+# ============================================================================
+#  Variables communes a toutes les VMs invitees
+# ============================================================================
+
+ansible_user: "{{ lab_admin_user }}"
+ansible_python_interpreter: /usr/bin/python3
+
+# --- Role `common` --------------------------------------------------------
+common_packages:
+  - qemu-guest-agent
+  - ca-certificates
+  - curl
+  - wget
+  - gnupg
+  - sudo
+  - git
+  - vim
+  - htop
+  - tmux
+  - unzip
+  - jq
+  - rsync
+  - net-tools
+  - dnsutils
+  - lsb-release
+  - apt-transport-https
+
+common_timezone: "{{ lab_timezone }}"
+common_locale: "{{ lab_locale }}"
+
+# --- Durcissement SSH -----------------------------------------------------
+# Le compte admin passe par cle uniquement. Le seul chemin d'acces reste le
+# ProxyJump via le noeud Proxmox : les VMs ne sont pas exposees sur le LAN.
+common_ssh_permit_root_login: prohibit-password
+common_ssh_password_authentication: false
+common_ssh_pubkey_authentication: true
+
+# --- Mises a jour de securite automatiques --------------------------------
+common_unattended_upgrades: true
+common_do_upgrade: false        # `true` = apt full-upgrade a chaque run
+common_reboot_if_required: false

@@ -1,0 +1,46 @@
+# {{ ansible_managed }}
+# Genere par le role pve_host. Ne pas editer a la main : les modifications
+# seront ecrasees au prochain run avec pve_manage_network=true.
+
+auto lo
+iface lo inet loopback
+iface lo inet6 loopback
+
+auto {{ pve_uplink_interface }}
+iface {{ pve_uplink_interface }} inet manual
+
+# --- Bridge LAN : interface d'administration du noeud ----------------------
+auto {{ pve_lan_bridge }}
+iface {{ pve_lan_bridge }} inet static
+	address {{ pve_lan_ip }}/24
+	gateway {{ pve_lan_gateway }}
+	bridge-ports {{ pve_uplink_interface }}
+	bridge-stp off
+	bridge-fd 0
+	bridge_hello 2
+	bridge_maxage 12
+{% for rule in pve_dnat_rules %}
+	# DNAT {{ pve_lan_ip }}:{{ rule.host_port }} -> {{ rule.dest_ip }}:{{ rule.dest_port }}
+	post-up   iptables -t nat -A PREROUTING -i {{ pve_lan_bridge }} -p tcp --dport {{ rule.host_port }} -j DNAT --to-destination {{ rule.dest_ip }}:{{ rule.dest_port }}
+	post-up   iptables -A FORWARD -p tcp -d {{ rule.dest_ip }} --dport {{ rule.dest_port }} -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+	post-down iptables -t nat -D PREROUTING -i {{ pve_lan_bridge }} -p tcp --dport {{ rule.host_port }} -j DNAT --to-destination {{ rule.dest_ip }}:{{ rule.dest_port }}
+	post-down iptables -D FORWARD -p tcp -d {{ rule.dest_ip }} --dport {{ rule.dest_port }} -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+{% endfor %}
+
+# --- Bridge du lab : reseau interne NATe des VMs ---------------------------
+auto {{ lab_bridge }}
+iface {{ lab_bridge }} inet static
+	address {{ lab_gateway }}/{{ lab_netmask_bits }}
+	bridge-ports none
+	bridge-stp off
+	bridge-fd 0
+
+	post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+	post-up   iptables -t nat -A POSTROUTING -s '{{ lab_subnet }}' -o {{ pve_lan_bridge }} -j MASQUERADE
+	post-down iptables -t nat -D POSTROUTING -s '{{ lab_subnet }}' -o {{ pve_lan_bridge }} -j MASQUERADE
+
+{% for iface in pve_unused_interfaces %}
+iface {{ iface }} inet manual
+
+{% endfor %}
+source /etc/network/interfaces.d/*

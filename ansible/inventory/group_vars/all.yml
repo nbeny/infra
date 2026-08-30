@@ -1,0 +1,50 @@
+---
+# ============================================================================
+#  Variables globales du lab
+# ============================================================================
+
+# --- Identite du noeud Proxmox -------------------------------------------
+pve_node: pve
+pve_lan_ip: 192.168.100.50
+pve_lan_bridge: vmbr0
+pve_lan_gateway: 192.168.100.1
+
+# --- Reseau interne des VMs (NAT derriere le noeud Proxmox) ---------------
+lab_bridge: vmbr1
+lab_subnet: 10.0.0.0/24
+lab_netmask_bits: 24
+lab_gateway: 10.0.0.1
+
+# Le resolveur du noeud est Tailscale (100.100.100.100) et n'est PAS joignable
+# depuis 10.0.0.0/24. Les VMs utilisent donc des resolveurs publics.
+lab_dns_servers:
+  - 1.1.1.1
+  - 9.9.9.9
+lab_search_domain: lab.nbeny.fr
+
+# --- Stockage -------------------------------------------------------------
+# pool1 : 861 Go libres, heberge les VMs historiques 100-103
+# pool2 : 2,5 To libres -> cible pour les templates et les nouvelles VMs
+pve_vm_storage: pool2
+pve_template_storage: pool2
+pve_iso_storage: local
+
+# --- Compte administrateur cree sur toutes les VMs ------------------------
+lab_admin_user: nbeny
+lab_admin_shell: /bin/bash
+
+# Cles publiques autorisees sur le compte admin de chaque VM.
+# Ce sont des cles PUBLIQUES : les versionner est normal et rend le repo
+# auto-suffisant (indispensable pour recreer le lab depuis zero).
+lab_ssh_public_keys:
+  # Poste Windows principal -- utilise pour l'acces ProxyJump
+  - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDVPJg8TExJ9JMLcDWGUlAkHwlNZBsbiBp/+lVoYASGSFL/FDaNI67BOYoCZOThv4C3FMGGiu9Z/3SkG7We7eSXKAf31sA3faRhY+5R0xEfA7TCkd1YbHubv7tj9NqEEtn8bivgLzWnE9FwLBmDFyy0WRrVGaCrVSN1jXUeQpC6RhQji+heiEkfQWPl66PJsbD03b6yWClY+DGtiMzNu9P3tRNHV1XtF8N4T3c4UWRUdEoZc/1fF2JZiSgiT/9BqGwgyb6lAx8XL2cZwYMPOz/8cJsm8L+FycZp9g5c2C+MSu3ny5QuUxsxUtpy7DVIQ80hMvSdqdy2C9NtfMee8XZg7nkyJc53KpEF7Atdnkfg+NNtUJwpsembV6iQkCUQSKwOiv4ol+4jHMXK2YenY2Ye92/STLqsrJsKRUemEKWDLlDbxnclX394rS3IvPEAfPT7CsD6uuvrp1UlFuuPFo5mKykdSQ/K1jjVrWbaHD27vLQkyOkfvOOuHbooypDEZU+p2ezvnbyBgdLi9XG6Xq4mwntTKUIyvnLTc6xHh+xtMxdU44wnEkIeoei3fjjMLMI8gqhjSsmsM/fkFXlG4lC+I16S+hGTMurfaWdAx7A40wnhRh66/Srs3iDTGBZYM3aL33I35EHpy+feGXDPdIi4e+2T7OzpMh35Cue3Y5jy3Q== nbeny@PC-Alesio"
+  # Noeud Proxmox (root@pve) -- indispensable : c'est le noeud de controle Ansible
+  - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDWtjiHeGHHf7fipu5Wrr04fs3W7LjdZMqFhlqS2W/2Ofwf8dFS05NIJPq1zmH8etGyDMpxyYmOjQ8UUS3zujs3uuCmETWAP1haUt3Snk78riq7tbVGoaixHcXTERMIOQ9UFRphuuWsWHwalOAbSta1P4z/mDaWBk7K0nfMt81HmhPR5feY4CudZVD5dkH4y4AqVL1N1YPB/rctvphjqbkixP4LUwGB6XbLekDgPsPDc8CwB/Gb/9fu3ujDzDCywY7iDD0Ud6s/PNVNf2ADUc/4sGtTKtHDLLM7bEw+xAFh+qTHttZ8u6QTS+zR95Cxsg+BtviVG83m3QC7vfz/2VtsKHPxlzvgs+z1vHGlm+gL1MucANpLmSse+vtcvfvBjShtFrKh7N/MVTX1piP3PBGBm0z9r7poiP/10cicTXeb9hZLj3XsLxsjWjxYLbIVlNeXXgFmgJ3aealum0IeX4OC81drUkOxL2eaeY/jPUVFYVPxb36uGaMD7yR+miY4pIHcrbV+bScuVgvFMtcpH3hIMfMBmeqf/fKz9dXmVrYronyJqPoOkDl23FFwaI3gP3lEfYHx9J1R3wffNk3qJPuGlC9Ctvt1F3c1hLawMtTHHa78Cf3UqHI781ch/xK5pAnA9xawp2n/sCrcaP1n35Wk5h7xJdKiIph1M8Xe4pz44Q== root@pve"
+  - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDSUylZjvfpw8wg62j+RhkydI1wVHfqo9UETPXgxfCbM+WkqBzHq9leC9UpYwPtc8flbkB+j0M7k0bRUVrQi+oGjfxLhn/7SWD3GOLAPTQSpDWjG2CTA9nNCiB8wKbIO2LUUApaFMvPdezQvUi4YYaF/PZ4SNJgO8xgG5m5uYcxlLDsSAJq//xoff/6T9zsbCoHPiPm19PKm1PjIlha2O12kfVJcjVeC/vgGo4Yuzm8XLIqpgRFDdbUiJc59js7I5zRgAXUdXrY8QmuyGcE6ACb6/U8/a42harMNvJno9uRahQsct8pdBjmWRUn6meJx1n5gFM9e+Lgiv0xm3TIy4b3n3tL1Tr5sx+lv+OdCdtNHg2ik8BId9U5eHZcKp7ZJXXiw6/W7X/MFFxu5TXcFlm5n8PtzilBAIMRCEKdURyHxfJ3Ip4k8cy8q/jBBeMEjyYM5LZpuPErXxITytzTKxNvOO2Euh04v/+JJgm9yIxPheoMsNEuP8L0c4vXaISzl6WSl0kCjCB0CeDflsKPDed2qJUHj4Z9GkVF6HOWf5uLq0LOpotR9X7CisOUf0eRD89DQlulozV5g/h/v5LeLL0b+YHyuVfWIaEJfik/noBXuU7ahGiqdaAQOGxpsWPo960wURVgReGr0s6QhkgtciC1PiNT99ENliqDq8gnodrnMQ== root@pve"
+  # Poste secondaire
+  - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCxdCJcurl06bHxslyeOcxDYQfbf4zqdBMU54iFjhRnO6R7lVdbTNYSh15vO+nPEvNwqsTWRYqDrZHru+O9k2ZCDY2MhESiC+yKJQU73l9MdkcHXdgf5teJaLNdyUs/mfyIrjMXGBd/DBWuxQ2OKVOBDhrQ4RBtVFNzqH+dwl9eEZiiHITP6zr8W85juO9IP728WvgkHnEITv0LqneZAo6068msBbZsVRWMMNO0eqV2UhSpEvk7CPNxOrHwHaV72zwRl9lS0RQTiMSVlb36vV7SdcfiFFqPp1T5fM2Y1cJTFRNfTirH7uUqx5j7MKeZhjE2T9MNw8IA6gf0s1k5wf5kmibaDaTUKLosvNc/kUOIa55zfrItJbkC90Pmhl88cqFjIg4jMr+sASlwWzCnqk/gykT8qwPi5ovvPfn4QyR/H/Rlgbj2gwQC7rsYeKmUzprs3B5vK06EasNCBc85uODRdHUWwsMc33t51XlkcW1bYhK11leahAsAv7852zjEMxs3YA9R/p6Ojlyo0zTuDByRXFj0oJOKpcRU8YUepNY4pLCQ1EL3m2DamJUlTjAEWwD3zoPnPvseI9WWEY4LURHXXsqwj/30FLEgd/rfVB6KO7ULjQvhZ/gX7yPJMJ4R6GcR2nyjT8ZsBRD92FEs80E3OOwTBpNruyuYFMZKdcGjYQ== nbeny@student.42.fr"
+
+# --- Divers ---------------------------------------------------------------
+lab_timezone: Europe/Paris
+lab_locale: en_US.UTF-8

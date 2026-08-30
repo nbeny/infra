@@ -1,0 +1,52 @@
+---
+# ============================================================================
+#  VMs Debian : docker + kubernetes
+# ============================================================================
+
+# --- Docker ---------------------------------------------------------------
+docker_users:
+  - "{{ lab_admin_user }}"
+docker_compose_plugin: true
+# containerd doit utiliser le cgroup driver systemd, sinon kubelet refuse de
+# demarrer (kubelet est sur systemd depuis la v1.22).
+docker_containerd_systemd_cgroup: true
+
+# --- Kubernetes -----------------------------------------------------------
+# 1.36 est la derniere mineure avec plusieurs patchs (1.36.4). 1.37.0 vient de
+# sortir : bascule quand tu veux, c'est juste cette variable + le depot.
+kubernetes_version: "1.36"
+kubernetes_package_version: ""   # "" = dernier patch de la mineure ci-dessus
+
+# `install_only` : installe kubeadm/kubelet/kubectl sans creer de cluster.
+# Toujours `true` pendant un build Packer (sinon l'etat du cluster est fige
+# dans l'image, ce qui la rend inutilisable pour cloner plusieurs noeuds).
+k8s_install_only: false
+
+k8s_role: control_plane          # control_plane | worker
+k8s_single_node: true            # retire le taint control-plane -> workloads sur le master
+k8s_pod_cidr: "10.244.0.0/16"    # doit matcher le CNI ci-dessous
+k8s_service_cidr: "10.96.0.0/12"
+k8s_cni: flannel                 # flannel | cilium | none
+k8s_apiserver_advertise_address: "{{ ansible_host }}"
+
+# Outils confort installes a cote du cluster
+k8s_extra_tools:
+  helm: true
+  k9s: true
+
+# --- Stockage -------------------------------------------------------------
+# Un cluster kubeadm nu n'a aucun provisionneur : sans ca, tout PVC reste en
+# Pending et aucun StatefulSet ne demarre.
+k8s_storage_provisioner: local-path      # local-path | none
+
+# --- Edge : ingress et securite -------------------------------------------
+# Traefik apporte les CRD IngressRoute / Middleware / TLSOption exigees par les
+# manifests de kube/urbanlink. CrowdSec fournit le bouncer et le WAF AppSec
+# references par leurs Middleware.
+k8s_ingress_controller: traefik          # traefik | none
+k8s_crowdsec_enabled: true
+k8s_crowdsec_appsec: true
+
+# Bare-metal : pas de LoadBalancer, on expose Traefik en NodePort.
+k8s_traefik_nodeport_http: 30080
+k8s_traefik_nodeport_https: 30443

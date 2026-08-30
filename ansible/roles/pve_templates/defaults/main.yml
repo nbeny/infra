@@ -1,0 +1,42 @@
+---
+# Repertoire de cache des images cloud telechargees sur le noeud
+pve_image_cache_dir: /var/lib/vz/template/cloud-images
+
+# `true` detruit et reconstruit les templates existants.
+# Attention : impossible si des clones lies (linked clones) en dependent.
+# Terraform fait des clones complets (full clone), donc c'est sans risque ici.
+pve_templates_force: false
+
+# Fichier des cles publiques injecte par cloud-init dans les templates
+pve_template_keys_file: /root/.lab_ssh_keys.pub
+
+# ---------------------------------------------------------------------------
+#  Templates de base : images cloud officielles, cloud-init pret a l'emploi.
+#  Ce sont les SOCLES. Packer les clone pour produire les templates "golden"
+#  (9100 / 9101) qui contiennent reellement docker+k8s ou les outils Kali.
+# ---------------------------------------------------------------------------
+pve_base_templates:
+
+  - id: 9000
+    name: tpl-debian-13-base
+    description: "Debian 13 (trixie) genericcloud + cloud-init. Socle -- gere par Ansible."
+    url: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+    filename: debian-13-genericcloud-amd64.qcow2
+    archive: false
+    ciuser: debian
+    cores: 2
+    memory: 2048
+    disk_size: 20
+
+  - id: 9001
+    name: tpl-kali-base
+    description: "Kali Linux rolling genericcloud + cloud-init. Socle -- gere par Ansible."
+    url: https://kali.download/cloud-images/current/kali-linux-2026.2-cloud-genericcloud-amd64.tar.xz
+    filename: kali-linux-2026.2-cloud-genericcloud-amd64.tar.xz
+    archive: true
+    ciuser: kali
+    cores: 2
+    memory: 2048
+    # kali-linux-large pese ~15 Go une fois installe : 20 Go ne suffisent pas.
+    # Pour kali-linux-everything (100+ Go), monter a 200.
+    disk_size: 64

@@ -1,0 +1,25 @@
+---
+# Valeurs de repli : les vraies valeurs vivent dans
+# inventory/group_vars/{all,proxmox}.yml
+
+pve_do_upgrade: false
+pve_reboot_if_required: false
+pve_use_no_subscription_repo: true
+pve_disable_enterprise_repo: true
+pve_remove_subscription_nag: false
+pve_manage_network: false
+pve_dnat_rules: []
+pve_install_iac_tools: true
+pve_terraform_version: "1.16.0"
+pve_packer_version: "1.16.0"
+pve_iac_bin_dir: /usr/local/bin
+pve_create_api_token: false
+pve_api_user: "terraform@pve"
+pve_api_token_name: "provider"
+pve_api_role: "TerraformProv"
+pve_base_packages: [curl, git, jq, unzip, rsync]
+
+# Interfaces physiques -- utilisees uniquement par le template interfaces.j2
+# quand pve_manage_network=true.
+pve_uplink_interface: nic3
+pve_unused_interfaces: [nic0, nic1, nic2]

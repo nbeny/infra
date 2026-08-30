@@ -1,0 +1,49 @@
+#!/bin/bash
+# Genere par Ansible (playbooks/05-adopt-existing.yml).
+# Rend une VM existante pilotable par Ansible. Strictement additif.
+set -euo pipefail
+
+USER_NAME="{{ lab_admin_user }}"
+USER_SHELL="{{ lab_admin_shell }}"
+USER_HOME="/home/${USER_NAME}"
+
+# --- Compte administrateur -------------------------------------------------
+if ! id -u "${USER_NAME}" >/dev/null 2>&1; then
+    useradd --create-home --shell "${USER_SHELL}" "${USER_NAME}"
+    echo "compte ${USER_NAME} cree"
+else
+    echo "compte ${USER_NAME} deja present"
+fi
+
+# `sudo` sur Debian, `wheel` ailleurs
+for grp in sudo wheel; do
+    getent group "${grp}" >/dev/null 2>&1 && usermod -aG "${grp}" "${USER_NAME}" || true
+done
+
+# --- Cles SSH --------------------------------------------------------------
+install -d -m 700 -o "${USER_NAME}" -g "${USER_NAME}" "${USER_HOME}/.ssh"
+cat > "${USER_HOME}/.ssh/authorized_keys" <<'AUTHORIZED_KEYS_EOF'
+{% for key in lab_ssh_public_keys %}
+{{ key }}
+{% endfor %}
+AUTHORIZED_KEYS_EOF
+chown "${USER_NAME}:${USER_NAME}" "${USER_HOME}/.ssh/authorized_keys"
+chmod 600 "${USER_HOME}/.ssh/authorized_keys"
+echo "$(wc -l < "${USER_HOME}/.ssh/authorized_keys") cles autorisees"
+
+# --- sudo sans mot de passe ------------------------------------------------
+echo "${USER_NAME} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/90-${USER_NAME}"
+chmod 440 "/etc/sudoers.d/90-${USER_NAME}"
+visudo -c >/dev/null
+
+# --- Prerequis Ansible -----------------------------------------------------
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "installation de python3 (requis par Ansible)"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq && apt-get install -y -qq python3
+fi
+
+# --- SSH actif -------------------------------------------------------------
+systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1 || true
+
+echo "adoption terminee sur $(hostname) ($(hostname -I | awk '{print $1}'))"

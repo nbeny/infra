@@ -1,0 +1,45 @@
+---
+# Patch cosmetique : retire la boite de dialogue "No valid subscription" de
+# l'interface web. Il est reapplique a chaque mise a jour de pve-manager, d'ou
+# le hook APT ci-dessous. Rien de fonctionnel n'en depend.
+
+- name: Sauvegarder proxmoxlib.js
+  ansible.builtin.copy:
+    src: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+    dest: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js.orig
+    remote_src: true
+    force: false
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Neutraliser le test d'abonnement
+  ansible.builtin.replace:
+    path: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+    regexp: "data\\.status\\.toLowerCase\\(\\) !== 'active'"
+    replace: "false"
+  register: pve_nag_patch
+  notify: Redemarrer pveproxy
+
+- name: Reappliquer le patch apres chaque mise a jour de pve-manager
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/no-nag-script
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Gere par Ansible (role pve_host).
+      DPkg::Post-Invoke {
+        "if [ -s /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js ]; then \
+           sed -i \"s/data.status.toLowerCase() !== 'active'/false/g\" \
+             /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js; \
+         fi";
+      };
+
+- name: Signaler si le motif n'a pas ete trouve
+  ansible.builtin.debug:
+    msg: >-
+      Le motif du test d'abonnement n'a pas ete trouve dans proxmoxlib.js.
+      Proxmox l'a probablement modifie : ce patch est purement cosmetique,
+      tu peux l'ignorer ou mettre a jour le regexp du role.
+  when: not pve_nag_patch.changed

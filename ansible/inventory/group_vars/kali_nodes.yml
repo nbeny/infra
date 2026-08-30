@@ -1,0 +1,42 @@
+---
+# ============================================================================
+#  VMs Kali : outils offensifs
+# ============================================================================
+
+# Metapackage Kali installe. Ordre de grandeur du telechargement :
+#   kali-linux-headless    ~  2 Go   (CLI, outils "top 10" + essentiels)
+#   kali-linux-default     ~  4 Go   (equivalent de l'ISO d'installation)
+#   kali-linux-large       ~ 15 Go   (la grande majorite des outils)  <-- defaut
+#   kali-linux-everything  ~ 100+ Go (absolument tout, tres long)
+#
+# "Tous les outils" = kali-linux-everything, mais compte plusieurs heures de
+# build et ~120 Go sur pool2. `large` couvre en pratique tout ce qui sert.
+kali_metapackage: kali-linux-large
+
+# Outils supplementaires hors metapackage
+kali_extra_packages:
+  - seclists
+  - golang
+  - python3-pip
+  - python3-venv
+  - pipx
+  - docker.io
+  - tmux
+  - zsh
+  - ripgrep
+  - fzf
+
+# --- Interface graphique (optionnelle) ------------------------------------
+# `true` installe XFCE + xrdp : connexion RDP via un tunnel SSH
+#   ssh -L 3389:10.0.0.x:3389 pve   puis mstsc sur localhost:3389
+kali_install_gui: false
+kali_gui_metapackage: kali-desktop-xfce
+
+# zsh est le shell par defaut de Kali depuis 2020 et il est present dans
+# l'image cloud. Le role `common` retombe sur /bin/bash si le binaire manque.
+lab_admin_shell: /usr/bin/zsh
+
+# Les VMs Kali n'ont pas vocation a etre mises a jour automatiquement :
+# une rolling release qui se met a jour toute seule casse les environnements
+# d'exercice. Mise a jour explicite via playbooks/90-update.yml.
+common_unattended_upgrades: false

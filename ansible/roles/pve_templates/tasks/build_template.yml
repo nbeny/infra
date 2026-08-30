@@ -1,0 +1,154 @@
+---
+# Construit UN template de base a partir d'une image cloud officielle.
+# Idempotent : si le VMID existe deja, on ne fait rien (sauf pve_templates_force).
+
+- name: "[{{ tpl.name }}] Verifier si le VMID {{ tpl.id }} existe deja"
+  ansible.builtin.command: "qm config {{ tpl.id }}"
+  register: tpl_existing
+  changed_when: false
+  failed_when: false
+
+- name: "[{{ tpl.name }}] Template deja present, rien a faire"
+  ansible.builtin.debug:
+    msg: >-
+      Le template {{ tpl.id }} ({{ tpl.name }}) existe deja.
+      Utilise -e pve_templates_force=true pour le reconstruire.
+  when:
+    - tpl_existing.rc == 0
+    - not (pve_templates_force | bool)
+
+- name: "[{{ tpl.name }}] Construction du template"
+  when: tpl_existing.rc != 0 or (pve_templates_force | bool)
+  block:
+
+    - name: "[{{ tpl.name }}] Detruire l'ancien template"
+      ansible.builtin.command: >-
+        qm destroy {{ tpl.id }} --purge 1 --destroy-unreferenced-disks 1
+      when: tpl_existing.rc == 0
+      changed_when: true
+
+    - name: "[{{ tpl.name }}] Telecharger l'image cloud (peut etre long)"
+      ansible.builtin.get_url:
+        url: "{{ tpl.url }}"
+        dest: "{{ pve_image_cache_dir }}/{{ tpl.filename }}"
+        owner: root
+        group: root
+        mode: "0644"
+        timeout: 60
+      register: tpl_download
+      retries: 3
+      delay: 10
+      until: tpl_download is succeeded
+
+    - name: "[{{ tpl.name }}] Extraire l'archive"
+      when: tpl.archive | default(false) | bool
+      block:
+
+        - name: "[{{ tpl.name }}] Creer le repertoire d'extraction"
+          ansible.builtin.file:
+            path: "{{ pve_image_cache_dir }}/{{ tpl.id }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: "[{{ tpl.name }}] Decompresser l'archive"
+          ansible.builtin.unarchive:
+            src: "{{ pve_image_cache_dir }}/{{ tpl.filename }}"
+            dest: "{{ pve_image_cache_dir }}/{{ tpl.id }}"
+            remote_src: true
+            creates: "{{ pve_image_cache_dir }}/{{ tpl.id }}/.extracted"
+
+        - name: "[{{ tpl.name }}] Marquer l'archive comme extraite"
+          ansible.builtin.file:
+            path: "{{ pve_image_cache_dir }}/{{ tpl.id }}/.extracted"
+            state: touch
+            owner: root
+            group: root
+            mode: "0644"
+
+        # L'archive amont peut contenir un .qcow2, un .raw ou un .img selon la
+        # version : on prend le plus gros fichier disque trouve.
+        - name: "[{{ tpl.name }}] Localiser le fichier disque extrait"
+          ansible.builtin.shell:
+            cmd: >-
+              find "{{ pve_image_cache_dir }}/{{ tpl.id }}" -type f
+              \( -name '*.qcow2' -o -name '*.raw' -o -name '*.img' \)
+              -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-
+            executable: /bin/bash
+          register: tpl_extracted_disk
+          changed_when: false
+
+        - name: "[{{ tpl.name }}] Echouer si aucun disque n'a ete trouve"
+          ansible.builtin.fail:
+            msg: >-
+              Aucun fichier disque (.qcow2/.raw/.img) trouve dans
+              {{ pve_image_cache_dir }}/{{ tpl.id }}. Le format de l'archive
+              amont a probablement change.
+          when: tpl_extracted_disk.stdout | trim | length == 0
+
+    - name: "[{{ tpl.name }}] Determiner le chemin du disque source"
+      ansible.builtin.set_fact:
+        tpl_disk_path: >-
+          {{ (tpl_extracted_disk.stdout | trim)
+             if (tpl.archive | default(false) | bool)
+             else (pve_image_cache_dir ~ '/' ~ tpl.filename) }}
+
+    - name: "[{{ tpl.name }}] Creer la VM {{ tpl.id }}"
+      ansible.builtin.command: >-
+        qm create {{ tpl.id }}
+          --name {{ tpl.name }}
+          --description "{{ tpl.description }}"
+          --ostype l26
+          --cpu x86-64-v2-AES
+          --cores {{ tpl.cores | default(2) }}
+          --sockets 1
+          --memory {{ tpl.memory | default(2048) }}
+          --numa 0
+          --net0 virtio,bridge={{ lab_bridge }}
+          --scsihw virtio-scsi-single
+          --serial0 socket
+          --vga serial0
+          --agent enabled=1
+          --onboot 0
+      changed_when: true
+
+    # PVE 8.2+ sait importer directement un fichier image dans un stockage.
+    - name: "[{{ tpl.name }}] Importer le disque cloud dans {{ pve_template_storage }}"
+      ansible.builtin.command: >-
+        qm set {{ tpl.id }}
+          --scsi0 {{ pve_template_storage }}:0,import-from={{ tpl_disk_path }},iothread=1,discard=on,ssd=1
+      changed_when: true
+
+    - name: "[{{ tpl.name }}] Porter le disque a {{ tpl.disk_size | default(20) }} Go"
+      ansible.builtin.command: >-
+        qm disk resize {{ tpl.id }} scsi0 {{ tpl.disk_size | default(20) }}G
+      changed_when: true
+
+    - name: "[{{ tpl.name }}] Ajouter le lecteur cloud-init et fixer l'ordre de boot"
+      ansible.builtin.command: >-
+        qm set {{ tpl.id }}
+          --ide2 {{ pve_template_storage }}:cloudinit
+          --boot order=scsi0
+      changed_when: true
+
+    # ip=dhcp n'est qu'un defaut : il n'y a pas de serveur DHCP sur vmbr1.
+    # Packer et Terraform imposent tous les deux une IP statique au clonage.
+    - name: "[{{ tpl.name }}] Configurer cloud-init"
+      ansible.builtin.command: >-
+        qm set {{ tpl.id }}
+          --ciuser {{ tpl.ciuser }}
+          --sshkeys {{ pve_template_keys_file }}
+          --ipconfig0 ip=dhcp
+          --nameserver "{{ lab_dns_servers | join(' ') }}"
+          --searchdomain {{ lab_search_domain }}
+          --ciupgrade 0
+      changed_when: true
+
+    - name: "[{{ tpl.name }}] Convertir en template"
+      ansible.builtin.command: "qm template {{ tpl.id }}"
+      changed_when: true
+
+    - name: "[{{ tpl.name }}] Template pret"
+      ansible.builtin.debug:
+        msg: "Template {{ tpl.id }} ({{ tpl.name }}) construit depuis {{ tpl_disk_path }}"

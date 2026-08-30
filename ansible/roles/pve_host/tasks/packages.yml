@@ -1,0 +1,26 @@
+---
+- name: Installer les paquets de base du noeud
+  ansible.builtin.apt:
+    name: "{{ pve_base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Le noeud sert de noeud de controle Ansible : il doit pouvoir se joindre
+# lui-meme en SSH (utilise aussi par le bloc `ssh` du provider Terraform).
+- name: Generer une paire de cles SSH pour root si absente
+  ansible.builtin.openssh_keypair:
+    path: /root/.ssh/id_rsa
+    type: rsa
+    size: 4096
+    regenerate: never
+    owner: root
+    group: root
+    mode: "0600"
+  register: pve_root_key
+
+- name: Autoriser la cle de root sur lui-meme (boucle locale SSH)
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ pve_root_key.public_key }}"
+    state: present

@@ -1,0 +1,41 @@
+---
+- name: Mettre a jour le cache APT
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Appliquer les mises a jour du noeud (dist-upgrade)
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+    autoclean: true
+  register: pve_upgrade_result
+
+- name: Detecter si un redemarrage est requis
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: pve_reboot_required
+
+- name: Signaler qu'un redemarrage est requis
+  ansible.builtin.debug:
+    msg: >-
+      Le noeud {{ inventory_hostname }} demande un redemarrage (nouveau noyau).
+      Il heberge des VMs en production : redemarre-le manuellement au bon
+      moment, ou relance avec -e pve_reboot_if_required=true.
+  when:
+    - pve_reboot_required.stat.exists
+    - not (pve_reboot_if_required | bool)
+
+- name: Redemarrer le noeud
+  when:
+    - pve_reboot_required.stat.exists
+    - pve_reboot_if_required | bool
+  block:
+
+    - name: Arreter proprement les VMs demarrees automatiquement
+      ansible.builtin.command: pvesh create /nodes/{{ pve_node }}/stopall
+      changed_when: true
+
+    - name: Redemarrer et attendre le retour du noeud
+      ansible.builtin.reboot:
+        reboot_timeout: 900
+        post_reboot_delay: 30

@@ -1,0 +1,47 @@
+---
+# Debian trixie n'a pas de paquet officiel HashiCorp : on installe les binaires
+# depuis releases.hashicorp.com, en version epinglee et de facon idempotente.
+
+- name: Relever les versions IaC deja installees
+  ansible.builtin.shell:
+    cmd: >-
+      if command -v {{ item.name }} >/dev/null 2>&1; then
+        {{ item.name }} --version 2>/dev/null | head -1;
+      else
+        echo absent;
+      fi
+    executable: /bin/bash
+  register: pve_iac_current
+  changed_when: false
+  check_mode: false
+  loop: &iac_tools
+    - { name: terraform, version: "{{ pve_terraform_version }}" }
+    - { name: packer, version: "{{ pve_packer_version }}" }
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Installer ou mettre a jour les binaires IaC
+  ansible.builtin.unarchive:
+    src: "https://releases.hashicorp.com/{{ item.item.name }}/{{ item.item.version }}/{{ item.item.name }}_{{ item.item.version }}_linux_amd64.zip"
+    dest: "{{ pve_iac_bin_dir }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+    extra_opts: [-o]
+  loop: "{{ pve_iac_current.results }}"
+  loop_control:
+    label: "{{ item.item.name }} -> {{ item.item.version }}"
+  when: item.item.version not in item.stdout
+
+- name: Verifier que les binaires IaC repondent
+  ansible.builtin.command: "{{ item.name }} --version"
+  register: pve_iac_check
+  changed_when: false
+  loop: *iac_tools
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Afficher les versions IaC installees
+  ansible.builtin.debug:
+    msg: "{{ pve_iac_check.results | map(attribute='stdout_lines') | map('first') | list }}"

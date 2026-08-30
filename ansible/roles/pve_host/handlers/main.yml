@@ -1,0 +1,13 @@
+---
+- name: Mettre a jour le cache APT
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Recharger la configuration reseau
+  ansible.builtin.command: ifreload -a
+  changed_when: true
+
+- name: Redemarrer pveproxy
+  ansible.builtin.systemd_service:
+    name: pveproxy
+    state: restarted
