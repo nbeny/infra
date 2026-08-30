@@ -165,6 +165,18 @@
         dest: "{{ urbanlink_config_dest }}/"
         delete: true
 
+    # ⚠️ **Retirer les retours chariot, sinon chaque VALEUR en herite.**
+    # Le depot applicatif n'a pas de .gitattributes et ces fichiers sont
+    # commites en CRLF (mesure : 41 lignes du blob de pgbouncer.env en
+    # portent). Sur un fichier YAML ou SQL c'est sans consequence ; sur un
+    # fichier d'environnement lu par `--from-env-file`, c'est fatal :
+    # `DB_HOST=postgres\r` fait chercher un hote nomme « postgres\r », et le
+    # message d'erreur ne montre pas le caractere fautif.
+    - name: Normaliser les fins de ligne de la configuration
+      ansible.builtin.command: >-
+        find {{ urbanlink_config_dest }} -type f -exec sed -i 's/\r$//' {} +
+      changed_when: true
+
     - name: Creer le namespace
       ansible.builtin.command: >-
         kubectl --kubeconfig {{ urbanlink_kubeconfig }}
@@ -197,15 +209,33 @@
             --from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/kratos/
         - name: postgres-init
           src: "--from-file={{ urbanlink_config_dest }}/common/postgres-init/"
-        # Reglages de pool seuls. Les identifiants restent dans le Secret :
-        # pgbouncer/deployment.yaml pose DB_NAME/DB_USER/DB_PASSWORD en `env:`,
-        # qui prime sur `envFrom:` en cas de collision.
+        # ⚠️ **`--from-env-file` et NON `--from-file` pour ces deux-la.**
+        # Les deux sont consommees par `envFrom: configMapRef:`, qui attend une
+        # ConfigMap dont CHAQUE CLE est une variable. `--from-file` produit au
+        # contraire UNE seule cle, nommee comme le fichier, contenant tout son
+        # texte : `envFrom` tente alors de creer une variable nommee
+        # « pgbouncer.env » — un nom invalide — et aucune des vraies variables
+        # n'est posee.
+        #
+        # Mesure sur la VM `urbanlink` : le pod refusait de demarrer sur
+        # « /entrypoint.sh: line 68: DB_HOST: Setup pgbouncer config error!
+        # You must set DB_HOST env », alors que `DB_HOST=postgres` figure bien
+        # dans le fichier. Le message accuse une variable absente, la cause est
+        # la FORME de la ConfigMap.
+        #
+        # Les identifiants restent dans le Secret : pgbouncer/deployment.yaml
+        # pose DB_NAME/DB_USER/DB_PASSWORD en `env:`, qui prime sur `envFrom:`.
         - name: pgbouncer-config
-          src: "--from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/pgbouncer/"
+          src: "--from-env-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/pgbouncer/pgbouncer.env"
+        # ⚠️ **Le fichier d'environnement SEUL**, pas le repertoire `common/`.
+        # Celui-ci contient `fetch-pbf.sh`, un SCRIPT : melange a un `envFrom`,
+        # il produirait une variable nommee « fetch-pbf.sh » et ferait echouer
+        # le pod avec `InvalidVariableNames`. Le script n'est monte nulle part
+        # aujourd'hui — l'import OSM n'est pas cable sur ce cluster. Le jour ou
+        # il le sera, il lui faudra sa PROPRE ConfigMap et un `volumeMounts`,
+        # pas une place dans celle-ci.
         - name: nominatim-config
-          src: >-
-            --from-file={{ urbanlink_config_dest }}/common/nominatim/
-            --from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/nominatim/
+          src: "--from-env-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/nominatim/nominatim.env"
         # ⚠️ `observability-config` n'est PAS construite ici, volontairement :
         # aucun workload de ce depot ne la monterait. La pile LGTM (collecteur
         # OTLP, Tempo, Loki, Prometheus applicatif, Grafana) n'est pas encore
