@@ -128,13 +128,40 @@ kubectl create secret generic crowdsec-bouncer-apikey -n traefik --from-literal=
 > bad bots, SQLi/XSS via WAF, réputation d'IP). La protection volumétrique L3/L4
 > reste à assurer **en amont** (Cloudflare / DDoS du LB cloud).
 
-### 3.3 ConfigMaps (montées par kratos et postgres)
+### 3.3 ConfigMaps — la configuration vient du dépôt applicatif
 
-```bash
-kubectl create namespace urbanconnect
-kubectl create configmap kratos-config --from-file=./kratos/ -n urbanconnect
-kubectl create configmap postgres-init --from-file=init-db.sql -n urbanconnect
-```
+Elles ne sont **pas** à créer à la main : `playbooks/31-urbanlink-deploy.yml`
+s'en charge, parce que chacune fusionne deux répertoires — ce que kustomize ne
+sait pas faire et ce qu'une commande recopiée à la main finit toujours par
+faire à moitié.
+
+> ⚠️ **Leur contenu ne vit pas dans ce dépôt.** Il est dans `config/` du dépôt
+> **UrbanConnct**, à côté du `docker-compose.yml` qui monte les mêmes fichiers
+> en développement. C'est ce qui empêche un réglage de diverger entre les deux
+> environnements : il n'existe qu'une fois. `kube/urbanlink/config/`, qui en
+> portait une copie, a été supprimé le 2026-08-30.
+
+| ConfigMap | Construite depuis | Montée par |
+|---|---|---|
+| `kratos-config` | `common/kratos/` + `<env>/kratos/` | kratos, kratos-migrate |
+| `postgres-init` | `common/postgres-init/` | postgres |
+| `pgbouncer-config` | `<env>/pgbouncer/` | pgbouncer (`envFrom`) |
+| `nominatim-config` | `common/nominatim/` + `<env>/nominatim/` | nominatim (`envFrom`) |
+
+`<env>` vaut `prod` par défaut (`urbanlink_env`). Le répertoire arrive sur le
+nœud de contrôle par le même `tar` que les sources applicatives — voir l'en-tête
+de `30-urbanlink-images.yml`, qui emporte désormais `config` en plus de
+`backTs` et `front`. Le playbook s'arrête en le disant s'il ne le trouve pas,
+plutôt que de créer des ConfigMaps vides.
+
+Carte de l'arbre et raisons du découpage : `config/README.md` du dépôt
+applicatif.
+
+> `config/{common,prod}/observability/` existe déjà (collecteur OTLP, Tempo,
+> Loki, Prometheus applicatif, datasources Grafana) mais **aucune ConfigMap
+> n'en est construite** : les manifests de la pile LGTM ne sont pas dans ce
+> dépôt, personne ne la monterait. La ligne est prête, commentée, dans le
+> playbook.
 
 ### 3.4 Secrets
 

@@ -24,24 +24,25 @@ spec:
           image: mediagis/nominatim:5.2
           ports:
             - containerPort: 8080
+          # Parametres d'import : ConfigMap `nominatim-config`, construite par
+          # playbooks/31-urbanlink-deploy.yml depuis config/prod/nominatim/ du
+          # depot APPLICATIF. C'est la que vivent PBF_URL, REPLICATION_URL,
+          # IMPORT_*, UPDATE_MODE et THREADS -- avec, en commentaire, ce que
+          # chacun coute en temps, en disque et en memoire.
+          #
+          # ⚠️ Changer PBF_URL sur un PVC deja importe ne reimporte RIEN :
+          # l'image ne lance l'import que sur une base vide. Basculer de region
+          # suppose de supprimer le PVC.
+          envFrom:
+            - configMapRef:
+                name: nominatim-config
           env:
-            - name: PBF_URL
-              value: "https://download.geofabrik.de/europe-latest.osm.pbf"
-            - name: REPLICATION_URL
-              value: "https://download.geofabrik.de/europe-updates/"
-            - name: IMPORT_WIKIPEDIA
-              value: "false"
-            - name: POSTGRES_HOST
-              value: postgres-nominatim
-            - name: POSTGRES_USER
-              value: nominatim
+            # Seul le mot de passe reste ici : le reste est versionne.
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: NOMINATIM_DB_PASSWORD
-            - name: POSTGRES_DB
-              value: nominatim
           volumeMounts:
             - name: nominatim-data
               mountPath: /var/lib/postgresql/16/main

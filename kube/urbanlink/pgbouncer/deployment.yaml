@@ -20,11 +20,25 @@ spec:
           image: edoburu/pgbouncer:latest
           ports:
             - containerPort: 6432
+          # Reglages de pool : ConfigMap `pgbouncer-config`, construite par
+          # playbooks/31-urbanlink-deploy.yml depuis config/prod/pgbouncer/
+          # du depot APPLICATIF -- le meme fichier que lit docker compose en
+          # developpement, a l'environnement pres.
+          #
+          # ⚠️ L'image edoburu/pgbouncer GENERE son pgbouncer.ini au demarrage
+          # a partir de ces variables. Elle ne lit aucun .ini monte -- c'est ce
+          # qui rendait `pgbouncer/pgbouncer.ini` du depot applicatif
+          # totalement inerte, alors qu'il annoncait `auth_type = trust` quand
+          # le vivant disait `scram-sha-256`. Fichier supprime.
+          #
+          # `envFrom` est evalue AVANT `env` : les quatre identifiants
+          # ci-dessous gagnent sur toute homonymie dans la ConfigMap. C'est ce
+          # qui permet de versionner les reglages sans jamais y mettre un
+          # secret.
+          envFrom:
+            - configMapRef:
+                name: pgbouncer-config
           env:
-            - name: DB_HOST
-              value: postgres
-            - name: DB_PORT
-              value: "5432"
             - name: DB_NAME
               valueFrom:
                 secretKeyRef:
@@ -40,34 +54,11 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: POSTGRES_PASSWORD
-            - name: LISTEN_PORT
-              value: "6432"
-            - name: POOL_MODE
-              value: transaction
-            - name: MAX_CLIENT_CONN
-              value: "200"
-            - name: DEFAULT_POOL_SIZE
-              value: "20"
-            - name: MIN_POOL_SIZE
-              value: "5"
-            - name: RESERVE_POOL_SIZE
-              value: "5"
-            - name: RESERVE_POOL_TIMEOUT
-              value: "5"
-            - name: SERVER_IDLE_TIMEOUT
-              value: "600"
-            - name: CLIENT_IDLE_TIMEOUT
-              value: "600"
-            - name: LOG_CONNECTIONS
-              value: "0"
-            - name: LOG_DISCONNECTIONS
-              value: "0"
-            - name: LOG_POOLER_ERRORS
-              value: "1"
-            - name: IGNORE_STARTUP_PARAMETERS
-              value: extra_float_digits
-            - name: AUTH_TYPE
-              value: scram-sha-256
+            # Les quinze reglages de pool qui vivaient ici (DB_HOST, DB_PORT,
+            # POOL_MODE, MAX_CLIENT_CONN, DEFAULT_POOL_SIZE, AUTH_TYPE…) sont
+            # partis dans config/prod/pgbouncer/pgbouncer.env. Ils dupliquaient
+            # mot pour mot le bloc `environment:` du docker compose, sans
+            # qu'aucun des deux ne sache que l'autre existait.
             - name: ADMIN_USERS
               valueFrom:
                 secretKeyRef:

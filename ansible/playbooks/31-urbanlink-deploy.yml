@@ -25,13 +25,35 @@
     urbanlink_gateway_namespace: istio-ingress
     urbanlink_tls_secret: uc-tls-cert
     urbanlink_domain: urbanlink.fr
+
+    # -----------------------------------------------------------------------
+    #  Configuration -- elle vient du DEPOT APPLICATIF, plus de celui-ci
+    # -----------------------------------------------------------------------
+    # `config/` vit dans UrbanConnct, a cote du docker-compose.yml qui monte
+    # les memes fichiers en developpement. C'est ce qui garantit qu'un reglage
+    # ne peut pas diverger entre les deux environnements : il n'existe qu'une
+    # fois. Ce depot-ci n'en garde AUCUNE copie -- kube/urbanlink/config/ a ete
+    # supprime le 2026-08-30.
+    #
+    # Le repertoire arrive sur le noeud de controle par le meme tar que les
+    # sources applicatives (voir l'en-tete de 30-urbanlink-images.yml, qui
+    # emporte desormais `config` en plus de `backTs` et `front`).
+    #
+    # ⚠️ 30 et 31 restent INDEPENDANTS : 31 ne suppose pas que les images ont
+    # ete construites, il ne partage que le repertoire depose. Si le tar est
+    # absent, la tache de verification ci-dessous s'arrete en le disant plutot
+    # que de creer des ConfigMaps vides -- ce qui laisserait Kratos en
+    # CrashLoopBackOff sans expliquer pourquoi.
+    urbanlink_config_control: /root/urbanlink-src/config
+    urbanlink_config_dest: /opt/urbanlink-config
+
     # Environnement de configuration : `prod` ou `dev`.
-    #   config/common/  -- schema d'identite, mapper OIDC : commun aux deux
-    #   config/prod/    -- URLs en urbanlink.fr, cookies sur le domaine
+    #   config/common/  -- ce qui ne depend pas de l'environnement
+    #   config/prod/    -- URLs en urbanlink.fr, pools elargis, Europe entiere
     #   config/dev/     -- URLs en localhost, pour un poste de developpement
-    # Les deux fournissent un `kratos.yml` : le nom du fichier monte ne change
-    # pas, seul son contenu change. Le deploiement n'a donc pas a savoir dans
-    # quel environnement il tourne.
+    # Les deux fournissent les MEMES NOMS DE FICHIERS : seul leur contenu
+    # change. Le deploiement n'a donc pas a savoir ou il tourne.
+    # Carte complete : config/README.md du depot applicatif.
     urbanlink_env: prod
 
   tasks:
@@ -97,6 +119,52 @@
         dest: "{{ urbanlink_manifests_dest }}/"
         delete: true
 
+    # ---------------------------------------------------------------------
+    #  Configuration applicative
+    # ---------------------------------------------------------------------
+    - name: Verifier que la configuration applicative est sur le noeud de controle
+      ansible.builtin.stat:
+        path: "{{ urbanlink_config_control }}/{{ item }}"
+      register: ul_config_check
+      delegate_to: localhost
+      become: false
+      loop: [common, "{{ urbanlink_env }}"]
+
+    # Sans ce garde-fou, un tar oublie donnerait des ConfigMaps VIDES : Kratos
+    # demarrerait sans configuration et repartirait en CrashLoopBackOff, sans
+    # que rien ne relie la panne au fichier manquant.
+    - name: Exiger la configuration applicative
+      ansible.builtin.assert:
+        that: ul_config_check.results | rejectattr('stat.exists') | list | length == 0
+        fail_msg: >-
+          {{ urbanlink_config_control }} ne contient pas common/ et
+          {{ urbanlink_env }}/. Cette configuration vit dans le depot
+          UrbanConnct (repertoire config/), pas dans celui-ci. La deposer
+          depuis Windows :
+            cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
+            tar -czf - --exclude=node_modules --exclude=.next --exclude=dist
+                       --exclude=.git --exclude=coverage backTs front config
+              | ssh root@192.168.100.50 'mkdir -p /root/urbanlink-src
+                                         && tar -xzf - -C /root/urbanlink-src'
+
+    - name: Creer le repertoire de configuration sur la VM
+      ansible.builtin.file:
+        path: "{{ urbanlink_config_dest }}"
+        state: directory
+        owner: "{{ lab_admin_user }}"
+        group: "{{ lab_admin_user }}"
+        mode: "0755"
+
+    # `delete: true` : un fichier retire du depot applicatif doit disparaitre
+    # de la VM, sinon il resterait dans la ConfigMap au passage suivant --
+    # `create configmap --from-file=<repertoire>` prend TOUT ce qu'il trouve.
+    - name: Transferer la configuration applicative sur la VM
+      become: false
+      ansible.posix.synchronize:
+        src: "{{ urbanlink_config_control }}/"
+        dest: "{{ urbanlink_config_dest }}/"
+        delete: true
+
     - name: Creer le namespace
       ansible.builtin.command: >-
         kubectl --kubeconfig {{ urbanlink_kubeconfig }}
@@ -114,16 +182,42 @@
           | kubectl --kubeconfig {{ urbanlink_kubeconfig }} apply -f -
         executable: /bin/bash
       loop:
-        # kratos-config est construite depuis DEUX repertoires : `kubectl
-        # create configmap` accepte plusieurs --from-file et fusionne. Cela
-        # evite de dupliquer identity.schema.json et oidc.google.jsonnet dans
-        # chaque environnement -- une duplication qui divergerait.
+        # Chaque ConfigMap est construite depuis DEUX repertoires : `kubectl
+        # create configmap` accepte plusieurs --from-file et fusionne, la ou
+        # kustomize ne sait pas le faire. Cela evite de recopier dans chaque
+        # environnement ce qui n'y varie pas -- une copie qui divergerait.
+        #
+        # ⚠️ La fusion se fait par NOM DE FICHIER : deux homonymes dans common/
+        # et <env>/ se marcheraient dessus, le dernier gagnant en silence. Le
+        # decoupage est pense pour qu'il n'y en ait aucun -- voir
+        # config/README.md du depot applicatif avant d'ajouter un fichier.
         - name: kratos-config
           src: >-
-            --from-file={{ urbanlink_manifests_dest }}/config/common/kratos/
-            --from-file={{ urbanlink_manifests_dest }}/config/{{ urbanlink_env }}/kratos/
+            --from-file={{ urbanlink_config_dest }}/common/kratos/
+            --from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/kratos/
         - name: postgres-init
-          src: "--from-file={{ urbanlink_manifests_dest }}/config/common/postgres-init/"
+          src: "--from-file={{ urbanlink_config_dest }}/common/postgres-init/"
+        # Reglages de pool seuls. Les identifiants restent dans le Secret :
+        # pgbouncer/deployment.yaml pose DB_NAME/DB_USER/DB_PASSWORD en `env:`,
+        # qui prime sur `envFrom:` en cas de collision.
+        - name: pgbouncer-config
+          src: "--from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/pgbouncer/"
+        - name: nominatim-config
+          src: >-
+            --from-file={{ urbanlink_config_dest }}/common/nominatim/
+            --from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/nominatim/
+        # ⚠️ `observability-config` n'est PAS construite ici, volontairement :
+        # aucun workload de ce depot ne la monterait. La pile LGTM (collecteur
+        # OTLP, Tempo, Loki, Prometheus applicatif, Grafana) n'est pas encore
+        # deployee sur le cluster -- seule sa configuration existe, dans
+        # config/{common,prod}/observability/ du depot applicatif. Creer la
+        # ConfigMap malgre tout donnerait un objet que personne ne lit, et
+        # laisserait croire que la pile tourne.
+        # Pour l'activer : ajouter les manifests, puis
+        #   - name: observability-config
+        #     src: >-
+        #       --from-file={{ urbanlink_config_dest }}/common/observability/
+        #       --from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/observability/
       loop_control:
         label: "{{ item.name }} ({{ urbanlink_env }})"
       changed_when: true

@@ -4,9 +4,19 @@
 #   ansible-playbook playbooks/31-urbanlink-deploy.yml
 #
 # Ce que le playbook ajoute, et pourquoi :
-#   1. ConfigMap kratos-config, construite depuis config/common/kratos/ ET
-#      config/<env>/kratos/ — kustomize ne sait pas fusionner deux répertoires.
-#   2. ConfigMap postgres-init, depuis config/common/postgres-init/.
+#   1. Les quatre ConfigMaps de configuration. ⚠️ Leur contenu ne vient PAS de
+#      ce dépôt : il vit dans `config/` du dépôt APPLICATIF (UrbanConnct), à
+#      côté du docker-compose.yml qui monte les mêmes fichiers en dev. C'est ce
+#      qui empêche un réglage de diverger entre les deux environnements — il
+#      n'existe qu'une fois. `kube/urbanlink/config/`, qui en portait une copie,
+#      a été supprimé le 2026-08-30.
+#        kratos-config      common/kratos      + <env>/kratos
+#        postgres-init      common/postgres-init
+#        pgbouncer-config                        <env>/pgbouncer
+#        nominatim-config   common/nominatim   + <env>/nominatim
+#      Chacune fusionne deux répertoires, ce que kustomize ne sait pas faire et
+#      que `kubectl create configmap` fait (plusieurs --from-file).
+#      Carte complète : config/README.md du dépôt applicatif.
 #   3. Secret urbanconnect-secrets, depuis un secrets.env NON VERSIONNÉ.
 #      Voir secrets.env.example. Le playbook refuse un fichier contenant
 #      encore des CHANGE_ME.

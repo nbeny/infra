@@ -22,12 +22,13 @@ spec:
             - kratos
             - serve
             - -c
-            # Le contenu de ce fichier vient de config/<env>/kratos/, la
-            # ConfigMap `kratos-config` etant construite depuis config/common/
-            # plus le repertoire de l'environnement. Le nom ne change pas ;
-            # seul le contenu change. Cela compte : les variables d'env
-            # ci-dessous surchargent base_url et cookies, mais PAS les
-            # `ui_url` -- c'est le fichier qui les porte.
+            # Le contenu de ce fichier vient de config/<env>/kratos/ du depot
+            # APPLICATIF (UrbanConnct), la ConfigMap `kratos-config` etant
+            # construite depuis config/common/ plus le repertoire de
+            # l'environnement. Le nom ne change pas ; seul le contenu change.
+            # Cela compte : les variables d'env ci-dessous surchargent base_url
+            # et cookies, mais PAS les `ui_url` -- c'est le fichier qui les
+            # porte, et c'est pour ca qu'il doit exister en deux versions.
             - /etc/config/kratos/kratos.yml
             - --watch-courier
           ports:

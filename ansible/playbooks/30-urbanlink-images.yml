@@ -10,8 +10,14 @@
 #
 #   cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
 #   tar -czf - --exclude=node_modules --exclude=.next --exclude=dist \
-#              --exclude=.git --exclude=coverage backTs front \
+#              --exclude=.git --exclude=coverage backTs front config \
 #     | ssh root@192.168.100.50 'mkdir -p /root/urbanlink-src && tar -xzf - -C /root/urbanlink-src'
+#
+# ⚠️ `config` est dans la liste et n'y est PAS pour ce playbook : les images ne
+# l'utilisent pas (les contextes de build sont backTs/ et front/, config/ est a
+# la racine, hors des deux). C'est 31-urbanlink-deploy.yml qui en a besoin,
+# pour construire les ConfigMaps. Les deux playbooks partagent ce depot depose,
+# et rien d'autre -- 31 ne suppose pas que 30 ait tourne.
 #
 # Puis :
 #   ansible-playbook playbooks/30-urbanlink-images.yml
