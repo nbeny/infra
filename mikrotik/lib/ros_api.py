@@ -80,9 +80,16 @@ class Ros:
             words.append(self._read(n).decode(errors="replace"))
 
     def talk(self, words):
-        """Envoie une commande, renvoie la liste des lignes de reponse."""
+        """Envoie une commande, renvoie la liste des lignes de reponse.
+
+        Un `!trap` est suivi d'un `!done` : il faut le consommer avant de
+        lever, sinon il reste dans le tampon et la commande SUIVANTE lit
+        cette reponse perimee au lieu de la sienne. Le symptome est vicieux
+        -- une commande qui renvoie une liste vide sans erreur.
+        """
         self.send(words)
         replies = []
+        error = None
         while True:
             sentence = self.read_sentence()
             if not sentence:
@@ -93,11 +100,17 @@ class Ros:
                     k, _, v = w[1:].partition("=")
                     attrs[k] = v
             if tag == "!done":
+                if error is not None:
+                    raise RosApiError(error)
                 if attrs:
                     replies.append(attrs)
                 return replies
             if tag in ("!trap", "!fatal"):
-                raise RosApiError(attrs.get("message", " ".join(sentence)))
+                error = attrs.get("message", " ".join(sentence))
+                if tag == "!fatal":
+                    # `!fatal` ferme la session : il n'y aura pas de !done.
+                    raise RosApiError(error)
+                continue
             replies.append(attrs)
 
     def login(self, user, password):

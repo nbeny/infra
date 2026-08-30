@@ -21,12 +21,16 @@
 # L'alternative serait www-ssl avec un certificat auto-signe, que nginx devrait
 # alors accepter sans le verifier : du chiffrement sans authentification, qui
 # ne protegerait de rien de plus ici.
-/ip service set www      address=192.168.100.50 disabled=no
+/ip service set www      address=192.168.100.50/32 disabled=no
 /ip service set www-ssl  disabled=yes
 /ip service set ssh      address=192.168.100.0/24,192.168.1.0/24 disabled=no
 /ip service set winbox   address=192.168.100.0/24,192.168.1.0/24 disabled=no
 /ip service set api-ssl  address=192.168.100.0/24,192.168.1.0/24 disabled=no
-/ip service set api      address=192.168.100.0/24,192.168.1.0/24 disabled=no
+
+# M5 -- l'API en clair transporte le mot de passe admin en clair sur le LAN.
+# api-ssl (8729) couvre exactement le meme besoin, et c'est ce qu'utilisent
+# les scripts de ce depot.
+/ip service set api      disabled=yes
 
 # --- Utilisateurs ----------------------------------------------------------
 # Pas de `remove [find]` ici : il emporterait le compte admin et fermerait la

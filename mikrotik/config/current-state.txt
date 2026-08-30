@@ -30,12 +30,12 @@
 ==============================================================================
 ## /system/ntp/client/print
 ==============================================================================
-  enabled=false primary-ntp=0.0.0.0 secondary-ntp=0.0.0.0 server-dns-names= mode=broadcast
+  enabled=true primary-ntp=162.159.200.1 secondary-ntp=162.159.200.123 server-dns-names= mode=unicast poll-interval=1m4s active-server=162.159.200.1 last-update-from=162.159.200.1 last-update-before=27s680ms last-adjustment=-137us
 
 ==============================================================================
 ## /system/scheduler/print
 ==============================================================================
-  name=CrowdsecUpdate interval=15m on-event=crowdsec_import owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon disabled=false
+  (vide)
 
 ==============================================================================
 ## /system/script/print
@@ -118,19 +118,17 @@
 ==============================================================================
 ## /ip/pool/print
 ==============================================================================
-  name=dhcp ranges=192.168.100.0-192.168.100.200
   name=dhcp_pool-lan ranges=192.168.100.100-192.168.100.200
 
 ==============================================================================
 ## /ip/dhcp-server/print
 ==============================================================================
-  name=dhcp-lan interface=bridge1 lease-time=10m address-pool=dhcp authoritative=yes use-radius=no lease-script= dynamic=false invalid=false disabled=false
+  name=dhcp-lan interface=bridge1 lease-time=10m address-pool=dhcp_pool-lan authoritative=yes use-radius=no lease-script= dynamic=false invalid=false disabled=false
 
 ==============================================================================
 ## /ip/dhcp-server/network/print
 ==============================================================================
-  address=192.0.0.0/8 gateway=192.168.1.50 netmask=8 dns-server=192.168.100.1 wins-server= ntp-server= caps-manager= dhcp-option= dynamic=false
-  address=192.168.100.0/24 gateway=192.168.100.1 dns-server=192.168.100.1 wins-server= ntp-server= caps-manager= dhcp-option= dynamic=false
+  address=192.168.100.0/24 gateway=192.168.100.1 dns-server=192.168.1.254 wins-server= ntp-server= caps-manager= dhcp-option= dynamic=false
 
 ==============================================================================
 ## /ip/dhcp-server/lease/print
@@ -194,7 +192,7 @@
   name=www port=80 address=192.168.100.50/32 invalid=false disabled=false
   name=ssh port=22 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
   name=www-ssl port=443 address= certificate=none tls-version=any invalid=true disabled=true
-  name=api port=8728 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
+  name=api port=8728 address=192.168.100.0/24,192.168.1.0/24 invalid=true disabled=true
   name=winbox port=8291 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
   name=api-ssl port=8729 address=192.168.100.0/24,192.168.1.0/24 certificate=none tls-version=any invalid=false disabled=false
 
@@ -241,12 +239,12 @@
 ==============================================================================
 ## /tool/mac-server/print
 ==============================================================================
-  allowed-interface-list=all
+  allowed-interface-list=LAN
 
 ==============================================================================
 ## /tool/mac-server/mac-winbox/print
 ==============================================================================
-  allowed-interface-list=all
+  allowed-interface-list=LAN
 
 ==============================================================================
 ## /tool/romon/print
