@@ -367,13 +367,28 @@
       when: ul_google_ok
       no_log: true
 
-    # Passe par un FICHIER et non `--from-literal` : le JSON contient des
-    # guillemets et des deux-points, qu'une ligne de commande shell abimerait.
-    - name: Deposer le bloc providers
+    # ⚠️ **`--from-env-file` ne se combine NI avec `--from-file` NI avec
+    # `--from-literal`** : kubectl refuse net (« from-env-file cannot be
+    # combined with from-file or from-literal »). Le bloc `providers` ne peut
+    # donc pas etre ajoute a cote du fichier d'environnement — il faut qu'il
+    # soit DEDANS. On assemble donc une copie temporaire.
+    #
+    # Le JSON tient sur une seule ligne (`JSON.stringify`), ce qu'un fichier
+    # d'environnement exige : une valeur ne peut pas y courir sur deux lignes.
+    - name: Assembler le fichier d'environnement du Secret
       ansible.builtin.copy:
-        content: "{{ ul_oidc_providers }}"
-        dest: /tmp/kratos-oidc-providers.json
+        src: "{{ urbanlink_manifests_dest }}/secrets.env"
+        dest: /tmp/urbanconnect-secrets.env
+        remote_src: true
         mode: "0600"
+      changed_when: true
+
+    - name: Y ajouter le bloc providers Kratos
+      ansible.builtin.lineinfile:
+        path: /tmp/urbanconnect-secrets.env
+        regexp: '^KRATOS_OIDC_PROVIDERS='
+        line: "KRATOS_OIDC_PROVIDERS={{ ul_oidc_providers }}"
+        state: present
       when: ul_google_ok
       no_log: true
 
@@ -382,17 +397,16 @@
         cmd: >-
           kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
           create secret generic urbanconnect-secrets
-          --from-env-file={{ urbanlink_manifests_dest }}/secrets.env
-          {{ '--from-file=KRATOS_OIDC_PROVIDERS=/tmp/kratos-oidc-providers.json' if ul_google_ok else '' }}
+          --from-env-file=/tmp/urbanconnect-secrets.env
           --dry-run=client -o yaml
           | kubectl --kubeconfig {{ urbanlink_kubeconfig }} apply -f -
         executable: /bin/bash
       no_log: true
       changed_when: true
 
-    - name: Retirer le bloc providers du disque
+    - name: Retirer le fichier d'environnement assemble
       ansible.builtin.file:
-        path: /tmp/kratos-oidc-providers.json
+        path: /tmp/urbanconnect-secrets.env
         state: absent
 
     # ---------------------------------------------------------------------

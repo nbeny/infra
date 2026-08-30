@@ -123,6 +123,10 @@ resources:
   - pgadmin/service.yaml
 
   # Application
+  # ⚠️ Le Job de migration doit rester liste ICI : depuis qu'il existe, les
+  # replicas du backend ne migrent plus. L'oublier ferait demarrer le backend
+  # sur un schema perime sans rien dire. Voir l'en-tete du fichier.
+  - backend/migrate-job.yaml
   - backend/deployment.yaml
   - backend/service.yaml
   - backend/hpa.yaml

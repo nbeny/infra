@@ -1,0 +1,78 @@
+# ============================================================================
+#  backend-migrate -- applique les migrations Prisma, UNE SEULE FOIS
+# ----------------------------------------------------------------------------
+#  ⚠️ POURQUOI CE JOB EXISTE : la commande de demarrage de l'image backend
+#  lancait `npx prisma migrate deploy && node dist/main.js`, donc a CHAQUE
+#  replica. Prisma serialise ces executions par un verrou consultatif Postgres,
+#  ce qui est sur, mais le perdant attend -- et sa patience est bornee a 10 s.
+#
+#  Mesure sur le cluster urbanlink : deux replicas au demarrage, `Error: P1002 /
+#  Timed out trying to acquire a postgres advisory lock`, en boucle, sans jamais
+#  converger. Et pour RIEN : la base portait deja 95 migrations appliquees et
+#  0 en attente, donc les deux pods se disputaient un verrou pour un travail
+#  vide. Le Dockerfile du depot applicatif l'annoncait d'ailleurs : « a deplacer
+#  vers un job d'initialisation dedie le jour ou les migrations deviennent
+#  couteuses ». Ce jour est arrive -- pas parce qu'elles sont longues, mais
+#  parce que le noeud est lent et que la course se perd.
+#
+#  ⚠️ CONSEQUENCE A CONNAITRE : les replicas ne migrent plus. Si ce Job n'est
+#  pas applique, le backend demarre sur un schema perime SANS RIEN DIRE. Il
+#  fait donc partie du kustomization, au meme titre que `kratos-migrate`.
+#
+#  ⚠️ Un Job est IMMUABLE une fois cree. Le rejouer apres un changement de tag
+#  d'image suppose de le supprimer d'abord :
+#      kubectl -n urbanconnect delete job backend-migrate
+#      kubectl -n urbanconnect apply -f backend/migrate-job.yaml
+#  `31-urbanlink-deploy.yml` le fait pour minio-init ; meme geste ici.
+# ============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-migrate
+  namespace: urbanconnect
+  labels:
+    app: backend-migrate
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: backend-migrate
+    spec:
+      restartPolicy: OnFailure
+      # Migrer avant que pgbouncer ne soit joignable ne servirait qu'a
+      # consommer les 5 tentatives du backoff.
+      initContainers:
+        - name: wait-for-pgbouncer
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z pgbouncer 6432; do
+                echo "Attente de pgbouncer..."
+                sleep 2
+              done
+      containers:
+        - name: backend-migrate
+          # ⚠️ MEME image que le Deployment, et c'est necessaire : le schema et
+          # les migrations viennent de `prisma/`, qui n'existe que dedans.
+          # `kustomize edit set image urbanconnect-backend=…` reecrit les deux
+          # references d'un coup — le Job ne peut donc pas deriver du Deployment.
+          image: urbanconnect-backend:prod
+          command: ["sh", "-c", "npx prisma migrate deploy"]
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: DATABASE_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
