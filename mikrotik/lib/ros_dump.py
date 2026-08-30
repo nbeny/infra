@@ -51,6 +51,10 @@ SECRET = {"password", "wpa-pre-shared-key", "wpa2-pre-shared-key",
 
 
 def main():
+    # Sans cela, Python sous Windows ecrit des CRLF et le fichier differe
+    # selon la machine qui lance backup.sh. Le releve doit etre identique
+    # depuis le poste et depuis le noeud, sinon le diff n'est pas exploitable.
+    sys.stdout.reconfigure(newline="\n")
     out = sys.stdout
     ros = connect_from_env()
     out.write("# Releve de la configuration vivante du MikroTik.\n")
