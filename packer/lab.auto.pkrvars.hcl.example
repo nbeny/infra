@@ -1,0 +1,29 @@
+# Copie ce fichier en `lab.auto.pkrvars.hcl` (ignore par git) et renseigne le
+# secret du token API. Packer charge automatiquement tout *.auto.pkrvars.hcl.
+#
+#   cp lab.auto.pkrvars.hcl.example lab.auto.pkrvars.hcl
+#
+# Alternative sans fichier :
+#   export PKR_VAR_proxmox_api_token_secret='xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
+
+proxmox_api_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# --- Surcharges courantes ---------------------------------------------------
+
+# proxmox_api_url      = "https://192.168.100.50:8006/api2/json"
+# proxmox_api_token_id = "terraform@pve!provider"
+# proxmox_node         = "pve"
+# storage_pool         = "pool2"
+
+# Chemin du repertoire ansible/ sur la machine qui execute Packer.
+# ansible_root = "/root/infra/ansible"
+
+# Mineure Kubernetes gravee dans l'image Debian.
+# kubernetes_version = "1.36"
+
+# kali-linux-headless (~2 Go) | kali-linux-default (~4 Go)
+# kali-linux-large (~15 Go)   | kali-linux-everything (100+ Go, tres long)
+# kali_metapackage = "kali-linux-large"
+
+# Bureau XFCE + xrdp dans l'image Kali (accessible par tunnel SSH uniquement).
+# kali_install_gui = false
