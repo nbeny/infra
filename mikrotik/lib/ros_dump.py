@@ -44,6 +44,11 @@ VOLATILE = {
     "forwarding", "sending-rstp", "point-to-point-port", "external-fdb-status",
     "actual-mtu", "l2mtu", "port-number", "public-address", "dst-address-list",
     ".nextid", "hw-offload", "bad-blocks", "start-time", "start-date",
+    # `.id` est un handle interne reattribue des qu'un objet est recree :
+    # rejouer un .rsc le fait changer sans que la configuration bouge. Le
+    # garder rendrait tout diff faussement positif. L'identite d'une ligne,
+    # ici, c'est son contenu.
+    ".id",
 }
 SECRET = {"password", "wpa-pre-shared-key", "wpa2-pre-shared-key",
           "tcp-md5-key", "nv2-preshared-key", "static-key-0", "secrets",
