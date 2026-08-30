@@ -1,0 +1,285 @@
+---
+# ---------------------------------------------------------------------------
+#  Istio -- service mesh
+# ---------------------------------------------------------------------------
+# Istio s'ajoute SOUS Traefik, il ne le remplace pas : les manifests de
+# kube/urbanlink reposent sur les CRD Traefik (IngressRoute, Middleware) et sur
+# le bouncer CrowdSec. Traefik reste donc la porte d'entree, Istio prend le
+# relais a l'interieur du cluster.
+#
+#   Internet -> Traefik (+ CrowdSec) -> | mesh Istio : mTLS, politiques, telemetrie |
+#
+# MODE AMBIENT PAR DEFAUT, et ce n'est pas un detail de gout. Le mode sidecar
+# injecte un conteneur dans chaque pod, ce qui casse deux choses ici :
+#
+#   1. Les Jobs (kratos-migrate, minio-init, elasticsearch-setup) ne se
+#      terminent jamais : le conteneur applicatif sort, le sidecar reste vivant,
+#      le Job pend indefiniment.
+#   2. coturn tourne en hostNetwork : un sidecar n'y capture rien.
+#
+# En ambient, le trafic est intercepte par un ztunnel par NOEUD : pas de
+# sidecar, donc pas de Job bloque, et les pods hostNetwork sont simplement
+# ignores au lieu d'etre casses. L'enrolement se fait par un label de
+# namespace, sans redemarrer un seul pod.
+
+- name: Ajouter le depot Helm d'Istio
+  ansible.builtin.command: helm repo add istio https://istio-release.storage.googleapis.com/charts
+  register: k8s_istio_repo
+  changed_when: "'has been added' in k8s_istio_repo.stdout"
+  environment: &istioenv
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: Mettre a jour les depots Helm
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  environment: *istioenv
+
+# ---------------------------------------------------------------------------
+#  1) CRD et espace de noms
+# ---------------------------------------------------------------------------
+- name: Deposer les valeurs Helm d'istio-base
+  ansible.builtin.template:
+    src: istio-base-values.yaml.j2
+    dest: /root/istio-base-values.yaml
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Installer les CRD Istio (istio/base)
+  ansible.builtin.include_tasks: helm_release.yml
+  vars:
+    hr_name: istio-base
+    hr_chart: istio/base
+    hr_namespace: "{{ k8s_istio_namespace }}"
+    hr_version: "{{ k8s_istio_version }}"
+    hr_values: /root/istio-base-values.yaml
+    hr_timeout: 5m
+
+# ---------------------------------------------------------------------------
+#  2) Plan de controle
+# ---------------------------------------------------------------------------
+- name: Deposer les valeurs Helm d'istiod
+  ansible.builtin.template:
+    src: istiod-values.yaml.j2
+    dest: /root/istiod-values.yaml
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Installer le plan de controle (istiod)
+  ansible.builtin.include_tasks: helm_release.yml
+  vars:
+    hr_name: istiod
+    hr_chart: istio/istiod
+    hr_namespace: "{{ k8s_istio_namespace }}"
+    hr_version: "{{ k8s_istio_version }}"
+    hr_values: /root/istiod-values.yaml
+
+# ---------------------------------------------------------------------------
+#  3) Plan de donnees ambient : istio-cni puis ztunnel
+# ---------------------------------------------------------------------------
+- name: Installer le plan de donnees ambient
+  when: k8s_istio_mode == 'ambient'
+  block:
+
+    - name: Deposer les valeurs Helm d'istio-cni
+      ansible.builtin.template:
+        src: istio-cni-values.yaml.j2
+        dest: /root/istio-cni-values.yaml
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Installer istio-cni
+      ansible.builtin.include_tasks: helm_release.yml
+      vars:
+        hr_name: istio-cni
+        hr_chart: istio/cni
+        hr_namespace: "{{ k8s_istio_namespace }}"
+        hr_version: "{{ k8s_istio_version }}"
+        hr_values: /root/istio-cni-values.yaml
+        hr_timeout: 5m
+
+    - name: Installer ztunnel
+      ansible.builtin.include_tasks: helm_release.yml
+      vars:
+        hr_name: ztunnel
+        hr_chart: istio/ztunnel
+        hr_namespace: "{{ k8s_istio_namespace }}"
+        hr_version: "{{ k8s_istio_version }}"
+        hr_values: ""
+        hr_timeout: 5m
+
+# ---------------------------------------------------------------------------
+#  4) Passerelle d'entree -- remplace Traefik
+# ---------------------------------------------------------------------------
+- name: Deployer la passerelle d'entree Istio
+  when: k8s_istio_gateway | bool
+  block:
+
+    # Traefik doit partir AVANT : les deux ne peuvent pas ecouter sur les
+    # memes NodePort, le second a se deployer resterait en Pending.
+    - name: Desinstaller Traefik
+      ansible.builtin.command: >-
+        helm uninstall traefik --namespace {{ k8s_ingress_namespace }} --wait --timeout 5m
+      register: k8s_traefik_gone
+      changed_when: "'uninstalled' in k8s_traefik_gone.stdout"
+      failed_when:
+        - k8s_traefik_gone.rc != 0
+        - "'not found' not in k8s_traefik_gone.stderr"
+      when: k8s_istio_replaces_traefik | bool
+      environment: *istioenv
+
+    # L'agent CrowdSec n'avait qu'une source de logs : les pods Traefik. Sans
+    # eux il tourne et ne lit plus rien -- 3 pods et ~1 Go pour une protection
+    # qui n'existe plus, et pire, qui en donne l'apparence. On le retire.
+    # CrowdSec reste actif la ou il protege vraiment : le nginx du noeud.
+    - name: Desinstaller CrowdSec du cluster
+      ansible.builtin.command: >-
+        helm uninstall crowdsec --namespace {{ k8s_crowdsec_namespace }} --wait --timeout 5m
+      register: k8s_cs_gone
+      changed_when: "'uninstalled' in k8s_cs_gone.stdout"
+      failed_when:
+        - k8s_cs_gone.rc != 0
+        - "'not found' not in k8s_cs_gone.stderr"
+      environment: *istioenv
+
+    # `--ignore-not-found` ne produit aucune sortie quand le namespace est
+    # deja absent : c'est ce qui distingue une vraie suppression d'un no-op.
+    - name: Supprimer les namespaces devenus vides
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf delete namespace {{ item }}
+        --ignore-not-found --wait=false
+      loop:
+        - "{{ k8s_ingress_namespace }}"
+        - "{{ k8s_crowdsec_namespace }}"
+      register: k8s_ns_del
+      changed_when: "'deleted' in k8s_ns_del.stdout"
+
+    - name: Attendre la liberation des NodePort
+      ansible.builtin.wait_for:
+        timeout: 15
+      when: k8s_traefik_gone.changed | default(false)
+
+    - name: Deposer les valeurs Helm de la passerelle
+      ansible.builtin.template:
+        src: istio-gateway-values.yaml.j2
+        dest: /root/istio-gateway-values.yaml
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Installer la passerelle Istio
+      ansible.builtin.include_tasks: helm_release.yml
+      vars:
+        hr_name: istio-ingressgateway
+        hr_chart: istio/gateway
+        hr_namespace: "{{ k8s_istio_gateway_namespace }}"
+        hr_version: "{{ k8s_istio_version }}"
+        hr_values: /root/istio-gateway-values.yaml
+
+# ---------------------------------------------------------------------------
+#  5) Enrolement des namespaces
+# ---------------------------------------------------------------------------
+# En ambient, un simple label suffit et aucun pod n'est redemarre. En sidecar,
+# le label ne prend effet qu'a la recreation des pods.
+- name: Enroler les namespaces dans le mesh
+  ansible.builtin.command: >-
+    kubectl --kubeconfig /etc/kubernetes/admin.conf label namespace {{ item }}
+    {{ 'istio.io/dataplane-mode=ambient' if k8s_istio_mode == 'ambient' else 'istio-injection=enabled' }}
+    --overwrite
+  loop: "{{ k8s_istio_namespaces }}"
+  register: k8s_istio_label
+  # `kubectl label` affiche "namespace/x labeled" ou "namespace/x NOT labeled" :
+  # tester la presence de "labeled" seul serait vrai dans les deux cas.
+  changed_when: "'not labeled' not in k8s_istio_label.stdout"
+  failed_when:
+    - k8s_istio_label.rc != 0
+    - "'not found' not in k8s_istio_label.stderr"
+
+- name: Signaler les namespaces absents
+  ansible.builtin.debug:
+    msg: >-
+      Le namespace {{ item.item }} n'existe pas encore : il sera enrole au
+      prochain passage, apres son deploiement.
+  loop: "{{ k8s_istio_label.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc != 0
+
+# ---------------------------------------------------------------------------
+#  5) Observabilite (Prometheus + Kiali)
+# ---------------------------------------------------------------------------
+- name: Installer l'observabilite du mesh
+  when: k8s_istio_observability | bool
+  block:
+
+    # Ces manifests amont posent des champs que l'API server complete ensuite :
+    # un `apply` repete signale donc "configured" a chaque passage, meme sans
+    # changement reel. On ne les applique que s'ils sont absents.
+    - name: Verifier si l'observabilite est deja deployee
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_istio_namespace }}
+        get deployment {{ item }}
+      register: k8s_istio_obs_present
+      changed_when: false
+      failed_when: false
+      loop: [prometheus, kiali]
+
+    - name: Deployer Prometheus (source de metriques de Kiali)
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f
+        https://raw.githubusercontent.com/istio/istio/release-{{ k8s_istio_version.split('.')[0] }}.{{ k8s_istio_version.split('.')[1] }}/samples/addons/prometheus.yaml
+      when: k8s_istio_obs_present.results[0].rc != 0
+      changed_when: true
+
+    - name: Deployer Kiali
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f
+        https://raw.githubusercontent.com/istio/istio/release-{{ k8s_istio_version.split('.')[0] }}.{{ k8s_istio_version.split('.')[1] }}/samples/addons/kiali.yaml
+      when: k8s_istio_obs_present.results[1].rc != 0
+      changed_when: true
+
+    - name: Attendre que Kiali soit pret
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_istio_namespace }}
+        rollout status deployment/kiali --timeout=300s
+      changed_when: false
+      failed_when: false
+
+# ---------------------------------------------------------------------------
+#  6) Verification
+# ---------------------------------------------------------------------------
+- name: Verifier l'etat du plan de controle
+  ansible.builtin.shell:
+    cmd: >-
+      kubectl --kubeconfig /etc/kubernetes/admin.conf -n {{ k8s_istio_namespace }}
+      get pods --no-headers | awk '{print $3}' | sort | uniq -c
+    executable: /bin/bash
+  register: k8s_istio_pods
+  changed_when: false
+
+- name: Verifier les namespaces enroles
+  ansible.builtin.shell:
+    cmd: >-
+      kubectl --kubeconfig /etc/kubernetes/admin.conf get namespaces
+      -L istio.io/dataplane-mode -L istio-injection --no-headers
+      | awk '$4 != "" || $5 != "" {print $1, $4, $5}'
+    executable: /bin/bash
+  register: k8s_istio_enrolled
+  changed_when: false
+
+- name: Etat du mesh
+  ansible.builtin.debug:
+    msg:
+      - "Istio {{ k8s_istio_version }} en mode {{ k8s_istio_mode }}"
+      - "--- pods du plan de controle ---"
+      - "{{ k8s_istio_pods.stdout_lines }}"
+      - "--- namespaces enroles ---"
+      - "{{ k8s_istio_enrolled.stdout_lines | default(['aucun']) }}"
+      - ""
+      - "mTLS : automatique entre pods enroles, assure par le ztunnel du noeud."
+      - >-
+        {{ 'Kiali :  kubectl -n ' ~ k8s_istio_namespace ~ ' port-forward svc/kiali 20001:20001'
+           if k8s_istio_observability else 'Observabilite desactivee (k8s_istio_observability).' }}
+      - "Diagnostic : istioctl analyze -A  (ou kubectl -n {{ k8s_istio_namespace }} logs ds/ztunnel)"

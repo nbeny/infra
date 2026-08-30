@@ -1,0 +1,113 @@
+# ============================================================================
+#  Politique edge -- remplace les Middleware Traefik `uc-edge` / `uc-edge-auth`
+# ----------------------------------------------------------------------------
+#  Traefik chainait deux middlewares :
+#
+#    uc-edge       = crowdsec
+#    uc-edge-auth  = crowdsec + oathkeeper-auth   (applique a l'API seulement)
+#
+#  Ce qui devient :
+#
+#    oathkeeper  -> AuthorizationPolicy CUSTOM + ext_authz   (ci-dessous)
+#    crowdsec    -> N'EST PAS PORTE. Voir la note en fin de fichier.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+#  Authentification de session Kratos a l'edge, via Oathkeeper
+# ---------------------------------------------------------------------------
+# Equivalent exact du forwardAuth Traefik :
+#   address: http://oathkeeper-api...:4456/decisions
+#   authResponseHeaders: [X-User-Id, X-User-Email]
+#
+# Le fournisseur `oathkeeper` est declare dans le meshConfig d'istiod
+# (role kubernetes, template istiod-values.yaml.j2), avec failOpen: false --
+# une panne d'Oathkeeper refuse les requetes au lieu de les laisser passer.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: uc-edge-auth
+  namespace: istio-ingress
+spec:
+  selector:
+    matchLabels:
+      istio: ingressgateway
+  action: CUSTOM
+  provider:
+    name: oathkeeper
+  rules:
+    - to:
+        - operation:
+            hosts:
+              - "api.urbanlink.fr"
+              - "api.urbanlink.fr:*"
+            # Memes exclusions que la regle Traefik d'origine. Elles sont
+            # redondantes avec le 404 du VirtualService, mais les garder ici
+            # evite d'appeler Oathkeeper pour rien sur ces chemins.
+            notPaths:
+              - /metrics
+              - /metrics/*
+              - /health
+              - /health/*
+---
+# ---------------------------------------------------------------------------
+#  Refus par defaut sur le maillage applicatif
+# ---------------------------------------------------------------------------
+# Ceci n'a pas d'equivalent Traefik : c'est un gain apporte par Istio, et la
+# reponse au constat K2 de l'audit (reseau de pods totalement plat, le frontend
+# pouvait joindre PostgreSQL en direct).
+#
+# ATTENTION : une politique ALLOW sur un namespace bascule celui-ci en
+# "refus par defaut" -- tout ce qui n'est pas explicitement autorise tombe.
+# Elle est donc livree COMMENTEE. A activer apres avoir verifie, dans Kiali,
+# que le graphe de service ne montre aucun flux legitime hors de cette liste.
+#
+# apiVersion: security.istio.io/v1
+# kind: AuthorizationPolicy
+# metadata:
+#   name: uc-default-deny
+#   namespace: urbanconnect
+# spec:
+#   action: ALLOW
+#   rules:
+#     # Trafic entrant par la passerelle.
+#     - from:
+#         - source:
+#             principals:
+#               - cluster.local/ns/istio-ingress/sa/istio-ingressgateway
+#     # Trafic interne au namespace (service a service).
+#     - from:
+#         - source:
+#             namespaces: ["urbanconnect"]
+#     # Sondes de kubelet et scrapes Prometheus : hors mesh, sans identite.
+#     - from:
+#         - source:
+#             namespaces: ["istio-system", "kube-system"]
+
+# ============================================================================
+#  CROWDSEC -- ce qui change, et pourquoi
+# ----------------------------------------------------------------------------
+#  Le bouncer CrowdSec etait un plugin Go du binaire Traefik. Il ne survit pas
+#  au remplacement de Traefik, et il n'existe pas de portage utilisable :
+#
+#    - crowdsecurity/cs-envoy-bouncer : depot public sans aucune release,
+#      sans image publiee, dernier commit aout 2025. Non deployable.
+#    - Brancher l'AppSec (port 7422) directement comme fournisseur ext_authz
+#      est impossible : elle exige l'URI, le verbe et l'IP CLIENT de chaque
+#      requete dans des en-tetes X-Crowdsec-Appsec-*, alors que le champ
+#      Istio `includeAdditionalHeadersInCheck` n'accepte que des valeurs
+#      FIXES. Et la cle d'API y serait ecrite en clair dans un ConfigMap.
+#
+#  CrowdSec reste donc ou il est deja en place et fonctionnel : le nginx du
+#  noeud Proxmox. C'est de toute facon la vraie porte d'entree Internet -- ce
+#  cluster n'est pas expose directement (cf. docs/audit-securite.md).
+#
+#  Ce qu'Istio apporte a la place, dans le cluster :
+#    - mTLS automatique entre toutes les charges enrolees
+#    - AuthorizationPolicy (refus par defaut ci-dessus, filtrage par identite)
+#    - limitation de debit via EnvoyFilter, si besoin
+#
+#  Ce qui est reellement perdu : le WAF applicatif (SQLi/XSS, virtual patching
+#  des CVE) et la blocklist communautaire d'IP, DEVANT l'API. Le nginx amont
+#  les applique toujours, mais un attaquant qui atteindrait la passerelle sans
+#  passer par lui n'y serait plus soumis.
+# ============================================================================

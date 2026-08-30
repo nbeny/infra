@@ -1,0 +1,97 @@
+# ============================================================================
+#  Passerelle d'entree Istio -- remplace le couple entryPoints + TLSOption de
+#  Traefik.
+# ----------------------------------------------------------------------------
+#  Equivalences avec la configuration Traefik remplacee :
+#
+#    entryPoints: [websecure]        -> server port 443 ci-dessous
+#    TLSOption uc-tls
+#      minVersion: VersionTLS12      -> tls.minProtocolVersion: TLSV1_2
+#      sniStrict: true               -> implicite : un server Istio n'accepte
+#                                       que les hosts qu'il declare
+#    certResolver: letsencrypt       -> credentialName (secret TLS)
+#
+#  OU LE TLS EST TERMINE, ET POURQUOI PAS ICI
+#
+#  L'openresty du noeud Proxmox termine le TLS avec un certificat wildcard
+#  *.urbanlink.fr obtenu par challenge DNS-01, puis relaie EN CLAIR vers le
+#  NodePort 30080 de cette passerelle. Ce saut traverse vmbr1, un bridge
+#  virtuel interne au meme hyperviseur : il ne quitte jamais la machine.
+#
+#  Passer par le port 443 de cette passerelle obligerait nginx a accepter son
+#  certificat auto-signe sans le verifier -- du chiffrement sans
+#  authentification, qui ne protegerait de rien de plus sur ce segment. Le
+#  mTLS du mesh reprend derriere la passerelle, la ou il a un sens.
+#
+#  Le serveur HTTPS ci-dessous reste declare pour un acces direct au NodePort
+#  30443, utile en diagnostic. Son certificat est auto-signe : le playbook le
+#  depose si le Secret n'existe pas.
+#
+#  `proxmox.urbanlink.fr` et `router.urbanlink.fr` ne figurent PAS ici : ils
+#  sont servis directement par nginx, sans passer par le cluster.
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: uc-gateway
+  namespace: urbanconnect
+spec:
+  # Selectionne les pods de la passerelle, deployes dans istio-ingress.
+  selector:
+    istio: ingressgateway
+
+  servers:
+    # --- HTTP -------------------------------------------------------------
+    # C'est l'entree reelle : nginx relaie ici apres avoir termine le TLS.
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "urbanlink.fr"
+        - "www.urbanlink.fr"
+        - "api.urbanlink.fr"
+        - "auth.urbanlink.fr"
+        - "nominatim.urbanlink.fr"
+        - "s3.urbanlink.fr"
+        - "directus.urbanlink.fr"
+        - "minio.urbanlink.fr"
+        - "pgadmin.urbanlink.fr"
+        - "kafka.urbanlink.fr"
+        - "temporal.urbanlink.fr"
+        - "kibana.urbanlink.fr"
+        - "kiali.urbanlink.fr"
+        - "prometheus.urbanlink.fr"
+      # Reste a `false` : la redirection vers HTTPS est faite par nginx, en
+      # amont. L'activer ici renverrait les requetes deja dechiffrees vers un
+      # https:// que nginx a deja servi -- une boucle.
+      tls:
+        httpsRedirect: false
+
+    # --- HTTPS ------------------------------------------------------------
+    # Acces direct au NodePort 30443, hors du chemin nominal.
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        - "urbanlink.fr"
+        - "www.urbanlink.fr"
+        - "api.urbanlink.fr"
+        - "auth.urbanlink.fr"
+        - "nominatim.urbanlink.fr"
+        - "s3.urbanlink.fr"
+        - "directus.urbanlink.fr"
+        - "minio.urbanlink.fr"
+        - "pgadmin.urbanlink.fr"
+        - "kafka.urbanlink.fr"
+        - "temporal.urbanlink.fr"
+        - "kibana.urbanlink.fr"
+        - "kiali.urbanlink.fr"
+        - "prometheus.urbanlink.fr"
+      tls:
+        mode: SIMPLE
+        # Le Secret doit vivre dans le namespace des pods de la passerelle
+        # (istio-ingress), pas dans celui de cette ressource.
+        credentialName: uc-tls-cert
+        minProtocolVersion: TLSV1_2

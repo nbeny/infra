@@ -1,0 +1,70 @@
+# {{ ansible_managed }}
+# ============================================================================
+#  Exposition des outils du lab sous *.{{ edge_urbanlink_domain }}
+# ----------------------------------------------------------------------------
+#  Genere depuis edge_urbanlink_services. NE PAS EDITER SUR LE NOEUD : le
+#  playbook ecrase ce fichier a chaque passage.
+#
+#  Deux barrieres, dans cet ordre :
+#    1. les enregistrements A publics pointent sur une IP privee -- depuis
+#       Internet, ces noms ne menent nulle part. Cette barriere ne depend
+#       d'aucune regle et aucune erreur de configuration ne peut l'ouvrir ;
+#    2. le bloc allow/deny ci-dessous, au cas ou la premiere tomberait.
+# ============================================================================
+{% for svc in edge_urbanlink_services %}
+{% set upstream = svc.upstream | default(edge_urbanlink_gateway) %}
+
+# --- {{ svc.name }} {{ '-' * (66 - svc.name | length) }}
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name {{ svc.hosts | join(' ') }};
+
+    ssl_certificate     /etc/letsencrypt/live/{{ edge_urbanlink_domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ edge_urbanlink_domain }}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+{% for cidr in edge_urbanlink_allow %}
+    allow {{ cidr }};
+{% endfor %}
+    deny all;
+
+    client_max_body_size {{ svc.max_body | default('64m') }};
+
+    location / {
+        proxy_pass {{ upstream }};
+
+        # C'est l'en-tete Host qui selectionne le VirtualService cote Istio :
+        # le perdre casserait tout le routage.
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+{% if upstream.startswith('https://') %}
+
+        # Amont en certificat auto-signe (interface Proxmox). On ne le verifie
+        # pas, faute d'autorite commune -- le saut reste interne au noeud.
+        proxy_ssl_verify off;
+{% endif %}
+
+        proxy_connect_timeout 10s;
+        proxy_read_timeout    {{ svc.read_timeout | default('60s') }};
+        proxy_send_timeout    {{ svc.read_timeout | default('60s') }};
+    }
+}
+{% endfor %}
+
+# --- redirection HTTP -> HTTPS pour tous les noms ---------------------------
+server {
+    listen 80;
+    listen [::]:80;
+    server_name{% for svc in edge_urbanlink_services %}{% for h in svc.hosts %} {{ h }}{% endfor %}{% endfor %};
+
+    return 301 https://$host$request_uri;
+}

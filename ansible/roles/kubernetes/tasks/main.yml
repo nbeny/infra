@@ -38,3 +38,13 @@
     - k8s_role == 'control_plane'
     - k8s_ingress_controller != 'none'
   tags: [k8s-ingress]
+
+# En dernier : le maillage s'ajoute sous un cluster deja fonctionnel, et il
+# enrole des namespaces qui doivent donc exister.
+- name: Deployer le service mesh
+  ansible.builtin.import_tasks: istio.yml
+  when:
+    - not (k8s_install_only | bool)
+    - k8s_role == 'control_plane'
+    - k8s_service_mesh == 'istio'
+  tags: [k8s-mesh]

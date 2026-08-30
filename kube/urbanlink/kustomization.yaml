@@ -34,7 +34,12 @@ namespace: urbanconnect
 resources:
   # Foundation
   - namespace.yaml
-  - secrets.yaml
+  # secrets.yaml a ete retire : un Secret en clair dans un depot est une bombe
+  # a retardement, et .gitignore ne couvrait que `secrets.yml` -- une lettre
+  # d'ecart suffisait a le laisser passer. Le Secret `urbanconnect-secrets`
+  # est desormais cree par playbooks/31-urbanlink-deploy.yml avec
+  # `kubectl create secret generic --from-env-file`, depuis un secrets.env
+  # non versionne. Voir kube/urbanlink/secrets.env.example.
 
   # Databases
   - postgres/statefulset.yaml
@@ -77,11 +82,12 @@ resources:
   - kratos/deployment.yaml
   - kratos/service.yaml
 
-  # Access proxy — Oathkeeper (forward-auth Kratos à l'edge via Traefik)
+  # Access proxy — Oathkeeper (forward-auth Kratos à l'edge)
+  # oathkeeper/middleware.yaml retiré : c'était un Middleware Traefik.
+  # Son équivalent est l'AuthorizationPolicy de ingress-istio/authorization.yaml.
   - oathkeeper/configmap.yaml
   - oathkeeper/deployment.yaml
   - oathkeeper/service.yaml
-  - oathkeeper/middleware.yaml
 
   # CMS
   - directus/deployment.yaml
@@ -111,12 +117,27 @@ resources:
   # WebRTC (appels) — STUN/TURN sur les nœuds publics (hostNetwork)
   - coturn/daemonset.yaml
 
-  # Edge security — CrowdSec bouncer + AppSec (WAF) via plugin Traefik
-  - crowdsec/middleware.yaml
+  # Edge security — CrowdSec
+  #   crowdsec/middleware.yaml est retiré : c'était le câblage du plugin
+  #   bouncer de Traefik, qui n'a pas d'équivalent portable sur Istio.
+  #   CrowdSec reste actif sur le nginx du nœud Proxmox — la vraie porte
+  #   d'entrée Internet. Détail et justification dans
+  #   ingress-istio/authorization.yaml.
 
-  # Ingress — pattern master/children Traefik (ACME natif)
-  #   master   : politique edge partagée (chaînes uc-edge/uc-edge-auth + TLSOption)
-  #   children : IngressRoutes par tier, référencent le master, extensibles
-  - ingress/master.yaml
-  - ingress/child-public.yaml
-  - ingress/child-internal.yaml
+  # Ingress — Istio (Gateway + VirtualService + AuthorizationPolicy)
+  #   Remplace le pattern master/children de Traefik :
+  #     Gateway             <- entryPoints + TLSOption
+  #     VirtualService      <- IngressRoute (routage seul)
+  #     AuthorizationPolicy <- Middleware (politique seule)
+  #
+  #   Les anciens manifests Traefik restent dans ingress/ à titre de
+  #   référence ; ils ne sont plus appliqués.
+  #
+  #   ingress-istio/authorization.yaml n'est PAS liste ici : le champ
+  #   `namespace: urbanconnect` en tete de ce fichier s'applique a toutes les
+  #   ressources, or l'AuthorizationPolicy doit vivre dans `istio-ingress`,
+  #   aupres des pods de la passerelle -- c'est le seul endroit ou l'ext_authz
+  #   L7 s'applique en mode ambient (ztunnel ne fait que du L4). Elle est
+  #   appliquee separement par playbooks/31-urbanlink-deploy.yml.
+  - ingress-istio/gateway.yaml
+  - ingress-istio/virtualservices.yaml

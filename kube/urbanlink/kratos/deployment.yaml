@@ -22,6 +22,12 @@ spec:
             - kratos
             - serve
             - -c
+            # Le contenu de ce fichier vient de config/<env>/kratos/, la
+            # ConfigMap `kratos-config` etant construite depuis config/common/
+            # plus le repertoire de l'environnement. Le nom ne change pas ;
+            # seul le contenu change. Cela compte : les variables d'env
+            # ci-dessous surchargent base_url et cookies, mais PAS les
+            # `ui_url` -- c'est le fichier qui les porte.
             - /etc/config/kratos/kratos.yml
             - --watch-courier
           ports:
@@ -59,11 +65,16 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: KRATOS_SECRET
+            # Cle DISTINCTE de SECRETS_COOKIE : signer et chiffrer avec le
+            # meme secret est une faiblesse, et les contraintes different --
+            # le cipher doit faire EXACTEMENT 32 caracteres, le cookie au
+            # moins 32. Une seule cle de 40 faisait echouer Kratos au
+            # demarrage : "length must be <= 32, but got 40".
             - name: SECRETS_CIPHER
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
-                  key: KRATOS_SECRET
+                  key: KRATOS_CIPHER_SECRET
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -75,11 +86,11 @@ spec:
                   name: urbanconnect-secrets
                   key: GOOGLE_CLIENT_SECRET
             - name: SELFSERVICE_DEFAULT_BROWSER_RETURN_URL
-              value: "https://urbanconnect.fr"
+              value: "https://urbanlink.fr"
             - name: SERVE_PUBLIC_BASE_URL
-              value: "https://kratos.urbanconnect.fr"
+              value: "https://auth.urbanlink.fr"
             - name: COOKIES_DOMAIN
-              value: "urbanconnect.fr"
+              value: "urbanlink.fr"
             - name: COOKIES_SAME_SITE
               value: "Lax"
           volumeMounts:

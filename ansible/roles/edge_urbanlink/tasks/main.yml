@@ -1,0 +1,66 @@
+---
+# Sans certificat, tous les vhosts refusent de charger et openresty ne
+# redemarrerait plus. On verifie AVANT d'ecrire quoi que ce soit.
+- name: Verifier que le certificat wildcard existe
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ edge_urbanlink_domain }}/fullchain.pem"
+  register: edge_cert
+
+- name: Exiger le certificat wildcard
+  ansible.builtin.assert:
+    that: edge_cert.stat.exists
+    fail_msg: >-
+      /etc/letsencrypt/live/{{ edge_urbanlink_domain }}/fullchain.pem est
+      absent. Jouer d'abord playbooks/32-tls-certificates.yml.
+
+- name: Deposer la carte connection_upgrade
+  ansible.builtin.template:
+    src: connection-upgrade.conf.j2
+    dest: /etc/nginx/conf.d/40-connection-upgrade.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload openresty
+
+# `validate` du module template ne convient pas ici : il testerait le fichier
+# hors de son contexte, sans la carte connection_upgrade ni les certificats.
+# On ecrit, on teste la configuration COMPLETE, et on retire tout si le test
+# echoue -- sinon un fichier casse resterait en place et le prochain
+# rechargement, meme manuel, tuerait le serveur.
+- name: Publier les vhosts urbanlink
+  block:
+
+    - name: Ecrire les vhosts
+      ansible.builtin.template:
+        src: urbanlink.conf.j2
+        dest: /etc/nginx/sites-available/{{ edge_urbanlink_domain }}
+        owner: root
+        group: root
+        mode: "0644"
+      notify: reload openresty
+
+    - name: Activer les vhosts
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/{{ edge_urbanlink_domain }}
+        dest: /etc/nginx/sites-enabled/{{ edge_urbanlink_domain }}
+        state: link
+      notify: reload openresty
+
+    - name: Valider la configuration complete
+      ansible.builtin.command: "{{ edge_urbanlink_binary }} -t"
+      changed_when: false
+
+  rescue:
+
+    - name: Desactiver les vhosts invalides
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/{{ edge_urbanlink_domain }}
+        state: absent
+
+    - name: Signaler l'echec sans laisser de configuration cassee
+      ansible.builtin.fail:
+        msg: >-
+          La configuration nginx produite est invalide ; le lien a ete retire
+          et openresty n'a pas ete recharge. Le fichier fautif reste lisible
+          dans /etc/nginx/sites-available/{{ edge_urbanlink_domain }}.
+          Tester a la main : {{ edge_urbanlink_binary }} -t

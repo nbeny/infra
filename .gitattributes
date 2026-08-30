@@ -26,3 +26,24 @@ Dockerfile*       text eol=lf
 *.pdf             binary
 *.zst             binary
 *.qcow2           binary
+
+# --- Ajouts -----------------------------------------------------------------
+# Cas reellement rencontre : create-databases.sh etait en CRLF et bash lisait
+# `pipefail`. Le script mourait ligne 5, les bases kratos, directus et
+# temporal n'etaient jamais creees, et Kratos tournait en boucle sans que le
+# lien soit visible. Le fichier datait d'avant ce .gitattributes et n'avait
+# jamais ete renormalise : `git add --renormalize .` corrige l'existant.
+*.sql             text eol=lf
+*.py              text eol=lf
+*.jsonnet         text eol=lf
+*.json            text eol=lf
+
+# Scripts RouterOS : appliques via l'API au MikroTik, meme exigence.
+*.rsc             text eol=lf
+
+# Scripts Windows : CRLF assume, ils ne quittent jamais le poste.
+*.ps1             text eol=crlf
+*.cmd             text eol=crlf
+*.bat             text eol=crlf
+
+*.gz              binary

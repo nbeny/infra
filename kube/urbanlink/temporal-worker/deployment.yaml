@@ -140,7 +140,7 @@ spec:
                   name: urbanconnect-secrets
                   key: JWT_EXPIRATION
             - name: FRONTEND_URL
-              value: "https://urbanconnect.fr"
+              value: "https://urbanlink.fr"
             # Stripe
             - name: STRIPE_SECRET_KEY
               valueFrom:

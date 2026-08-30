@@ -1,0 +1,8 @@
+---
+# `openresty`, pas `nginx` : nginx.service est inactive et disabled sur ce
+# noeud. Recharger le mauvais service ne rechargerait rien -- ou pire,
+# demarrerait un second serveur en conflit sur les ports 80 et 443.
+- name: reload openresty
+  ansible.builtin.systemd_service:
+    name: "{{ edge_urbanlink_service }}"
+    state: reloaded

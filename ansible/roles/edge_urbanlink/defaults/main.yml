@@ -1,0 +1,68 @@
+---
+# ============================================================================
+#  Exposition des outils du lab sous *.urbanlink.fr -- LAN uniquement
+# ============================================================================
+edge_urbanlink_domain: urbanlink.fr
+
+# ATTENTION -- le serveur qui tourne est OPENRESTY, pas le nginx de Debian.
+# nginx.service est inactive et disabled ; c'est openresty.service qui sert,
+# et sa configuration inclut /etc/nginx/conf.d/*.conf et
+# /etc/nginx/sites-enabled/*. Tester la configuration avec /usr/sbin/nginx
+# echoue sur la directive `lua_package_path` du bouncer CrowdSec -- c'est ce
+# qui avait silencieusement casse le renouvellement des certificats.
+edge_urbanlink_service: openresty
+edge_urbanlink_binary: /usr/local/openresty/nginx/sbin/nginx
+
+# Amont commun : tous les services du cluster passent par la passerelle Istio,
+# c'est l'en-tete Host qui les distingue cote Istio.
+edge_urbanlink_gateway: "http://10.0.0.111:30080"
+
+# Les seules sources autorisees. Les enregistrements A publics pointant deja
+# sur une IP privee, ce filtre est la seconde barriere -- pas la premiere.
+edge_urbanlink_allow:
+  - 192.168.1.0/24
+  - 192.168.100.0/24
+
+# `upstream` absent => la passerelle Istio.
+edge_urbanlink_services:
+  # --- applicatif ---------------------------------------------------------
+  - name: app
+    hosts: ["urbanlink.fr", "www.urbanlink.fr"]
+  - name: api
+    hosts: ["api.urbanlink.fr"]
+  - name: auth
+    hosts: ["auth.urbanlink.fr"]
+  - name: nominatim
+    hosts: ["nominatim.urbanlink.fr"]
+    read_timeout: 300s          # un geocodage complet peut etre long
+  - name: s3
+    hosts: ["s3.urbanlink.fr"]
+    max_body: 0                 # 0 = illimite, pour les envois objet
+  # --- consoles d'administration ------------------------------------------
+  - name: directus
+    hosts: ["directus.urbanlink.fr"]
+  - name: minio
+    hosts: ["minio.urbanlink.fr"]
+    max_body: 0
+  - name: pgadmin
+    hosts: ["pgadmin.urbanlink.fr"]
+  - name: kafka
+    hosts: ["kafka.urbanlink.fr"]
+  - name: temporal
+    hosts: ["temporal.urbanlink.fr"]
+  - name: kibana
+    hosts: ["kibana.urbanlink.fr"]
+    read_timeout: 300s
+  - name: kiali
+    hosts: ["kiali.urbanlink.fr"]
+  - name: prometheus
+    hosts: ["prometheus.urbanlink.fr"]
+  # --- hors cluster : amont explicite --------------------------------------
+  - name: proxmox
+    hosts: ["proxmox.urbanlink.fr"]
+    upstream: "https://192.168.100.50:8006"
+    read_timeout: 3600s         # console noVNC et shell : connexions longues
+  - name: router
+    hosts: ["router.urbanlink.fr"]
+    # Webfig du MikroTik, restreint cote routeur a la seule adresse du noeud.
+    upstream: "http://192.168.100.1"

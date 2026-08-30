@@ -1,34 +1,35 @@
-version: v1.0.0
-
 # ============================================================================
-# kratos.urbanlink.yml — configuration Kratos pour le déploiement VPS (Traefik)
+# Configuration Kratos -- PRODUCTION (urbanlink.fr)
 # ----------------------------------------------------------------------------
-# Copie de kratos.yml avec TOUTES les URLs pointant sur le domaine urbanlink.fr
-# (le navigateur est redirigé vers ces URLs pour les flows self-service ; les
-# surcharges via variables d'env du compose ne couvrent PAS les ui_url).
+# Toutes les URLs pointent sur urbanlink.fr : le navigateur est redirige vers
+# elles pour les flows self-service, et les surcharges par variables d'env ne
+# couvrent PAS les `ui_url`. Changer l'env ne suffit donc pas -- c'est ce
+# fichier qui compte.
 #
 #   - Front public   : https://urbanlink.fr
-#   - Kratos public  : https://kratos.urbanlink.fr   (routé par Traefik → kratos:4433)
-#   - Kratos admin   : http://kratos:4434            (réseau Docker interne, jamais exposé)
+#   - Kratos public  : https://auth.urbanlink.fr   (routé par Istio → kratos:4433)
+#   - Kratos admin   : http://kratos:4434          (interne au cluster, jamais exposé)
 #
-# Chargé par le service `kratos` dans docker-compose.vps.yml :
-#   command: serve -c /etc/config/kratos/kratos.urbanlink.yml --watch-courier
+# Monté sous /etc/config/kratos/kratos.yml par la ConfigMap `kratos-config`,
+# construite depuis config/common/kratos/ + config/prod/kratos/ par
+# playbooks/31-urbanlink-deploy.yml. Le pendant de developpement est
+# config/dev/kratos/kratos.yml, qui pointe sur localhost.
 #
-# ⚠️ Google OAuth : l'URI de redirection à déclarer dans la Google Console est
-#   https://kratos.urbanlink.fr/self-service/methods/oidc/callback/google
+# ⚠️ Google OAuth : l'URI de redirection a declarer dans la Google Console est
+#   https://auth.urbanlink.fr/self-service/methods/oidc/callback/google
 # ============================================================================
 
 dsn: env://DSN
 
 serve:
   public:
-    base_url: https://kratos.urbanlink.fr/
+    base_url: https://auth.urbanlink.fr/
     cors:
       enabled: true
       allowed_origins:
         - https://urbanlink.fr
         - https://api.urbanlink.fr
-        - https://kratos.urbanlink.fr
+        - https://auth.urbanlink.fr
       allowed_methods:
         - POST
         - GET

@@ -451,8 +451,14 @@ infra/
 Le cluster Kubernetes n'est pas vide : [`kube/`](kube/) contient le stack
 **UrbanLink** (27 composants) et la marche à suivre pour le déployer. Le rôle
 `kubernetes` fournit ce qu'un cluster kubeadm nu n'a pas et que ces manifests
-exigent : une StorageClass par défaut (`local-path`), les CRD Traefik, et
-CrowdSec pour les Middleware de sécurité.
+exigent : une StorageClass par défaut (`local-path`) et un ingress.
+
+**L'ingress est Istio** (mode ambient), qui a remplacé Traefik. Il apporte en
+plus le mTLS automatique entre pods et les `AuthorizationPolicy` — soit la
+réponse au constat K2 de l'audit. Le mode ambient n'est pas un choix de
+confort : ce stack a trois Jobs et un pod `hostNetwork`, que des sidecars
+casseraient. Détail de la correspondance Traefik → Istio, et des deux
+régressions assumées (CrowdSec, ACME), dans [`kube/README.md`](kube/README.md).
 
 ### Sécurité
 

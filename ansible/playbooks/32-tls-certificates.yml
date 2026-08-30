@@ -1,0 +1,23 @@
+---
+# Certificats TLS du noeud, par challenge DNS-01 Cloudflare.
+#
+# Remplace le montage HTTP-01 precedent, dont la validation devait traverser
+# Cloudflare, la box FAI, le MikroTik puis nginx -- et qui echouait depuis des
+# mois, laissant les quatre certificats expires.
+#
+# Premier passage, avec le token :
+#   ansible-playbook playbooks/32-tls-certificates.yml \
+#       -e tls_certificates_cloudflare_token=...
+#
+# Ensuite, le token est conserve dans /root/.secrets/cloudflare.ini (0600) :
+#   ansible-playbook playbooks/32-tls-certificates.yml
+#
+# Le token doit porter Zone:DNS:Edit sur les zones nbeny.fr et urbanlink.fr,
+# et rien d'autre.
+
+- name: Emettre et renouveler les certificats TLS
+  hosts: proxmox
+  gather_facts: true
+  become: true
+  roles:
+    - tls_certificates

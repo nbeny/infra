@@ -1,0 +1,290 @@
+# ============================================================================
+#  Routes -- remplacent les 8 IngressRoute Traefik
+# ----------------------------------------------------------------------------
+#  Un IngressRoute Traefik melange le routage et la politique edge. Istio
+#  separe les deux : le VirtualService route, l'AuthorizationPolicy applique la
+#  politique (voir authorization.yaml). C'est pour cela qu'il n'y a plus de
+#  reference aux chaines `uc-edge` / `uc-edge-auth` ici.
+# ============================================================================
+
+# ------------------------------------------------------- public : frontend
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-frontend
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  hosts:
+    - "urbanlink.fr"
+    - "www.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: frontend.urbanconnect.svc.cluster.local
+            port:
+              number: 3000
+---
+# ------------------------------------------------------------ public : API
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-api
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  hosts:
+    - "api.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    # La regle Traefik etait :
+    #   Host(`api.urbanlink.fr`) && !PathPrefix(`/metrics`) && !PathPrefix(`/health`)
+    # Le `!PathPrefix` retirait ces chemins de la ROUTE : ils n'etaient pas
+    # servis publiquement du tout. Istio n'a pas de negation dans un match,
+    # d'ou ces deux regles placees AVANT la route par defaut -- l'ordre est
+    # significatif, la premiere qui correspond gagne.
+    - match:
+        - uri:
+            prefix: /metrics
+        - uri:
+            prefix: /health
+      directResponse:
+        status: 404
+        body:
+          string: "not exposed publicly\n"
+    - route:
+        - destination:
+            host: backend.urbanconnect.svc.cluster.local
+            port:
+              number: 4000
+---
+# --------------------------------------------------------- public : Kratos
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-kratos
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  hosts:
+    - "auth.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: kratos.urbanconnect.svc.cluster.local
+            port:
+              number: 4433
+---
+# ------------------------------------------------------ public : Nominatim
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-nominatim
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  hosts:
+    - "nominatim.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: nominatim.urbanconnect.svc.cluster.local
+            port:
+              number: 8080
+---
+# --------------------------------------------- public : MinIO S3 (API objet)
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-s3
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: public
+spec:
+  hosts:
+    - "s3.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: minio.urbanconnect.svc.cluster.local
+            port:
+              number: 9000
+---
+# ------------------------------------------------------ interne : Directus
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-directus
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "directus.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: directus.urbanconnect.svc.cluster.local
+            port:
+              number: 8055
+---
+# ------------------------------------------- interne : console MinIO (9001)
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-minio-console
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "minio.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: minio.urbanconnect.svc.cluster.local
+            port:
+              number: 9001
+---
+# ------------------------------------------------------- interne : pgAdmin
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-pgadmin
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "pgadmin.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: pgadmin.urbanconnect.svc.cluster.local
+            port:
+              number: 80
+---
+# --------------------------------------------------- interne : Kafka UI
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-kafka-ui
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "kafka.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: kafka-ui.urbanconnect.svc.cluster.local
+            port:
+              number: 8080
+---
+# ------------------------------------------------ interne : Temporal UI
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-temporal-ui
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "temporal.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: temporal-ui.urbanconnect.svc.cluster.local
+            port:
+              number: 8080
+---
+# ---------------------------------------------------- interne : Kibana
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-kibana
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "kibana.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: kibana.urbanconnect.svc.cluster.local
+            port:
+              number: 5601
+---
+# ----------------------------------------- interne : Kiali (graphe du mesh)
+#  Kiali et Prometheus vivent dans istio-system, pas dans urbanconnect. Un
+#  `destination.host` en FQDN complet traverse les namespaces : Istio l'admet
+#  tant que le Service n'a pas d'`exportTo` restrictif, ce qui est le cas ici.
+#
+#  Ils tournaient depuis l'installation d'Istio (k8s_istio_observability) mais
+#  n'etaient joignables que par `kubectl port-forward`.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-kiali
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "kiali.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: kiali.istio-system.svc.cluster.local
+            port:
+              number: 20001
+---
+# ----------------------------------- interne : Prometheus (metriques du mesh)
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-prometheus
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "prometheus.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: prometheus.istio-system.svc.cluster.local
+            port:
+              number: 9090

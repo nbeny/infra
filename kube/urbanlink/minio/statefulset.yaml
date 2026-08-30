@@ -19,7 +19,12 @@ spec:
       containers:
         - name: minio
           image: minio/minio:latest
-          command: ["server", "/data", "--console-address", ":9001"]
+          # `command` REMPLACE l'entrypoint de l'image. Y mettre "server"
+          # revenait a chercher un executable nomme `server`, qui n'existe
+          # pas : "exec: \"server\": executable file not found in $PATH".
+          # `server` est un argument de `minio`, pas un programme.
+          command: ["minio"]
+          args: ["server", "/data", "--console-address", ":9001"]
           ports:
             - containerPort: 9000
               name: api
@@ -37,9 +42,9 @@ spec:
                   name: urbanconnect-secrets
                   key: MINIO_ROOT_PASSWORD
             - name: MINIO_BROWSER_REDIRECT_URL
-              value: "https://minio.urbanconnect.fr"
+              value: "https://minio.urbanlink.fr"
             - name: MINIO_API_CORS_ALLOW_ORIGIN
-              value: "https://urbanconnect.fr,https://api.urbanconnect.fr"
+              value: "https://urbanlink.fr,https://api.urbanlink.fr"
           volumeMounts:
             - name: minio-data
               mountPath: /data

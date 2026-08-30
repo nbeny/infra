@@ -71,26 +71,35 @@ spec:
             limits:
               cpu: 1000m
               memory: 2Gi
+          # `kafka-topics.sh` est une CLI Java : demarrer une JVM et se
+          # connecter depasse regulierement 10 secondes sur un noeud charge.
+          # La sonde expirait, tuait Kafka avant qu'il soit pret, et le
+          # redemarrage rechargeait le noeud -- une boucle qui s'entretenait
+          # elle-meme (326 echecs de readiness en 3 heures).
+          #
+          # La liveness devient une simple ouverture de socket : elle repond a
+          # la seule question qui compte pour un redemarrage -- le broker
+          # ecoute-t-il ? La readiness garde le test fonctionnel, avec un
+          # delai realiste pour une JVM.
           livenessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
-            initialDelaySeconds: 40
-            periodSeconds: 20
-            timeoutSeconds: 10
-            failureThreshold: 5
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Meme constat que pour la liveness, verifie sur la machine : meme
+          # avec 30 secondes de marge, kafka-topics.sh expire. Demarrer une
+          # JVM, charger les classes du client et negocier avec le broker
+          # coute plus que cela sur ce noeud. On s'en tient donc au signal
+          # qui a du sens ici : le broker accepte-t-il des connexions.
           readinessProbe:
-            exec:
-              command:
-                - sh
-                - -c
-                - /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
-            initialDelaySeconds: 30
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 45
             periodSeconds: 15
-            timeoutSeconds: 10
-            failureThreshold: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
   volumeClaimTemplates:
     - metadata:
         name: kafka-data

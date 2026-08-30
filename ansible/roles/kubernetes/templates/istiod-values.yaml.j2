@@ -1,0 +1,74 @@
+# {{ ansible_managed }}
+# Valeurs Helm d'istiod -- role kubernetes.
+
+# `ambient` active le plan de donnees sans sidecar : le trafic est intercepte
+# par un ztunnel par NOEUD plutot que par un conteneur dans chaque pod.
+profile: {{ k8s_istio_mode }}
+
+meshConfig:
+  # Sans access log, Kiali n'a pas de quoi dessiner le graphe de service.
+  accessLogFile: /dev/stdout
+
+  defaultConfig:
+    holdApplicationUntilProxyStarts: true
+
+  # mTLS automatique entre charges enrolees.
+  enableAutoMtls: true
+
+{% if k8s_istio_ext_authz | length > 0 %}
+  # ---------------------------------------------------------------------
+  #  Fournisseurs d'autorisation externe
+  # ---------------------------------------------------------------------
+  # Referencables depuis une AuthorizationPolicy en action CUSTOM. C'est
+  # l'equivalent Istio du `forwardAuth` de Traefik.
+  extensionProviders:
+{% for p in k8s_istio_ext_authz %}
+    - name: {{ p.name }}
+      envoyExtAuthzHttp:
+        service: {{ p.service }}
+        port: {{ p.port }}
+        pathPrefix: {{ p.path_prefix }}
+        # Sur echec du service d'autorisation, on REFUSE. Laisser passer
+        # transformerait une panne d'Oathkeeper en contournement complet de
+        # l'authentification.
+        failOpen: false
+        includeRequestHeadersInCheck:
+{% for h in p.include_headers %}
+          - {{ h }}
+{% endfor %}
+        # En-tetes que le service d'autorisation peut ajouter a la requete
+        # transmise en amont -- ici l'identite resolue par Kratos.
+        headersToUpstreamOnAllow:
+{% for h in p.headers_upstream %}
+          - {{ h }}
+{% endfor %}
+        headersToDownstreamOnDeny:
+          - content-type
+          - set-cookie
+          - www-authenticate
+{% endfor %}
+{% endif %}
+
+pilot:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  # Un seul noeud : inutile de prevoir plusieurs replicas.
+  autoscaleEnabled: false
+  replicaCount: 1
+
+global:
+  # Cluster mono-noeud : sans cela, les PodDisruptionBudget par defaut
+  # laissent des pods non planifiables.
+  defaultPodDisruptionBudget:
+    enabled: false
+  proxy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi

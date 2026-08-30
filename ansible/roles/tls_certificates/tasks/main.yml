@@ -1,0 +1,164 @@
+---
+- name: Installer certbot et le greffon Cloudflare
+  ansible.builtin.apt:
+    name:
+      - certbot
+      - python3-certbot-dns-cloudflare
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---------------------------------------------------------------------------
+#  Identifiants Cloudflare
+# ---------------------------------------------------------------------------
+- name: Creer le repertoire des identifiants
+  ansible.builtin.file:
+    path: "{{ tls_certificates_credentials_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Verifier si les identifiants existent deja
+  ansible.builtin.stat:
+    path: "{{ tls_certificates_credentials_path }}"
+  register: tls_creds
+
+# Le token n'est demande qu'au premier passage. Ensuite le fichier fait foi,
+# ce qui evite d'avoir a le retaper -- ou pire, a le ranger dans le depot.
+- name: Exiger le token au premier passage
+  ansible.builtin.assert:
+    that: tls_certificates_cloudflare_token | length > 0
+    fail_msg: >-
+      {{ tls_certificates_credentials_path }} n'existe pas et
+      tls_certificates_cloudflare_token est vide. Fournir un token limite a
+      Zone:DNS:Edit sur les zones concernees :
+      ansible-playbook playbooks/32-tls-certificates.yml
+      -e tls_certificates_cloudflare_token=...
+  when: not tls_creds.stat.exists
+
+- name: Deposer les identifiants Cloudflare
+  ansible.builtin.copy:
+    dest: "{{ tls_certificates_credentials_path }}"
+    content: "dns_cloudflare_api_token = {{ tls_certificates_cloudflare_token }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  when: tls_certificates_cloudflare_token | length > 0
+  no_log: true
+
+# ---------------------------------------------------------------------------
+#  Controle prealable du token, DEPUIS LE NOEUD
+# ---------------------------------------------------------------------------
+# Indispensable, et pas seulement par prudence : /user/tokens/verify est
+# EXEMPT du filtrage par IP du token. Un token restreint a d'autres adresses
+# s'y declare "valid and active" tout en refusant la moindre lecture de zone.
+#
+# Sans ce controle, certbot enchaine des echecs 9109 sur chaque domaine,
+# Cloudflare finit par repondre 10502 "Too many authentication failures", et
+# le diagnostic se perd dans une cascade d'erreurs sans rapport avec la cause.
+# Le token est lu sur la cible, pas sur le controleur : un `lookup` de fichier
+# s'evaluerait la ou tourne ansible-playbook, ce qui n'est pas forcement le
+# noeud -- et c'est bien depuis le noeud que la question se pose.
+- name: Verifier que le token peut lire les zones depuis ce noeud
+  ansible.builtin.shell:
+    cmd: >-
+      curl -s -m 20
+      -H "Authorization: Bearer $(awk -F'= *' '/dns_cloudflare_api_token/{print $2}'
+      {{ tls_certificates_credentials_path }})"
+      "https://api.cloudflare.com/client/v4/zones?name={{ tls_certificates_zone_probe }}"
+    executable: /bin/bash
+  register: tls_cf_probe
+  changed_when: false
+  no_log: true
+
+- name: Exiger un token utilisable depuis ce noeud
+  ansible.builtin.assert:
+    that: (tls_cf_probe.stdout | from_json).success | bool
+    fail_msg: >-
+      Le token Cloudflare est refuse depuis ce noeud :
+      {{ (tls_cf_probe.stdout | from_json).errors | default([]) | map(attribute='message') | join(' ; ') }}
+      >>> Si le message parle de "location", le token porte une restriction par
+      adresse IP qui n'inclut pas la sortie publique du noeud. La lever, ou y
+      ajouter cette adresse, dans le tableau de bord Cloudflare.
+    success_msg: "Token Cloudflare accepte depuis ce noeud"
+
+# ---------------------------------------------------------------------------
+#  Etat de chaque certificat
+# ---------------------------------------------------------------------------
+# Deux raisons de (re)demander un certificat : il n'existe pas, ou il existe
+# mais valide encore par HTTP-01. Dans le second cas certbot refuserait d'agir
+# -- "not yet due for renewal" -- et laisserait l'authenticateur inchange :
+# c'est precisement la migration qu'on veut faire, il faut donc forcer.
+- name: Relever l'authenticateur configure pour chaque certificat
+  ansible.builtin.shell:
+    cmd: >-
+      grep -E '^authenticator' /etc/letsencrypt/renewal/{{ item.name }}.conf
+      2>/dev/null | awk -F'= *' '{print $2}' || echo absent
+    executable: /bin/bash
+  loop: "{{ tls_certificates }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: tls_authenticators
+  changed_when: false
+
+- name: Obtenir ou migrer les certificats en DNS-01
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          'certbot', 'certonly', '--non-interactive', '--agree-tos',
+          '--email=' ~ tls_certificates_email,
+          '--dns-cloudflare',
+          '--dns-cloudflare-credentials=' ~ tls_certificates_credentials_path,
+          '--dns-cloudflare-propagation-seconds=' ~ tls_certificates_propagation_seconds,
+          '--deploy-hook=' ~ tls_certificates_deploy_hook,
+          '--cert-name=' ~ item.item.name,
+        ]
+        + (item.item.domains | map('regex_replace', '^', '--domains=') | list)
+        + (['--force-renewal'] if item.stdout | trim != 'dns-cloudflare' else [])
+      }}
+  loop: "{{ tls_authenticators.results }}"
+  loop_control:
+    label: "{{ item.item.name }} ({{ item.stdout | trim }})"
+  when: item.stdout | trim != 'dns-cloudflare'
+  register: tls_issue
+  changed_when: "'Successfully received certificate' in tls_issue.stdout"
+  notify: reload nginx
+
+# ---------------------------------------------------------------------------
+#  Verification -- on ne se fie pas au code de retour de certbot
+# ---------------------------------------------------------------------------
+- name: Relever la date d'expiration de chaque certificat
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -noout
+      - -checkend
+      - "2592000"          # 30 jours
+      - -in
+      - "/etc/letsencrypt/live/{{ item.name }}/fullchain.pem"
+  loop: "{{ tls_certificates }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: tls_validity
+  changed_when: false
+  failed_when: false
+
+- name: Echouer si un certificat expire dans moins de 30 jours
+  ansible.builtin.assert:
+    that: item.rc == 0
+    fail_msg: >-
+      Le certificat {{ item.item.name }} est expire ou expire sous 30 jours.
+      Verifier : certbot certificates --cert-name {{ item.item.name }}
+    success_msg: "{{ item.item.name }} : valide plus de 30 jours"
+  loop: "{{ tls_validity.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Verifier que le timer de renouvellement est actif
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    enabled: true
+    state: started

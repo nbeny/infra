@@ -1,6 +1,15 @@
-# Volume partagé entre geoipupdate (écriture) et frontend (lecture)
-# Nécessite un StorageClass avec accessMode ReadWriteMany (ex: NFS, EFS, GlusterFS)
-# Si un seul nœud : ReadWriteOnce suffit
+# Volume partagé entre geoipupdate (écriture) et frontend (lecture).
+#
+# ReadWriteOnce, PAS ReadWriteMany. Le provisionneur `local-path` du lab ne
+# sait faire que du RWO, et il ne le SIGNALE PAS : face à un RWX il n'échoue
+# pas, il n'approvisionne simplement jamais. Le PVC restait en Pending et
+# `frontend` restait en Pending avec lui, sans le moindre message d'erreur.
+#
+# Le cluster étant mono-nœud, RWO suffit : les deux consommateurs sont
+# planifiés sur la même machine et `local-path` est un bind mount local.
+#
+# Repasser à ReadWriteMany le jour où un stockage partagé (NFS, EFS) existe
+# ET où le cluster a plusieurs nœuds.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -8,7 +17,7 @@ metadata:
   namespace: urbanconnect
 spec:
   accessModes:
-    - ReadWriteMany  # Partagé entre geoipupdate et frontend
+    - ReadWriteOnce
   # storageClassName: "nfs"  # Adapter selon le provider
   resources:
     requests:

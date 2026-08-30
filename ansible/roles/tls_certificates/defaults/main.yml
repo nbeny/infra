@@ -1,0 +1,71 @@
+---
+# ============================================================================
+#  Certificats TLS du noeud -- Let's Encrypt par challenge DNS-01 Cloudflare
+# ============================================================================
+# Pourquoi DNS-01 et pas HTTP-01, qui etait en place :
+#
+#   Une validation HTTP-01 doit traverser Cloudflare, la box FAI, le MikroTik
+#   puis nginx. Les quatre maillons doivent cooperer sur le port 80, et au
+#   releve du 30/08/2026 ils ne le faisaient plus : les quatre certificats
+#   etaient expires depuis des mois et le timer certbot echouait a chaque
+#   passage sur "Some challenges have failed".
+#
+#   DNS-01 ne depend d'aucun de ces maillons. Il pose un enregistrement TXT
+#   dans la zone et le retire. Il est aussi le SEUL challenge qui delivre un
+#   certificat wildcard, ce dont *.urbanlink.fr a besoin.
+
+tls_certificates_email: ynebocin@gmail.com
+
+# Token Cloudflare limite a Zone:DNS:Edit sur les zones concernees.
+# Ne jamais l'ecrire ici. A passer une seule fois :
+#     -e tls_certificates_cloudflare_token=...
+# Il est ensuite conserve dans /root/.secrets/cloudflare.ini (0600) et les
+# executions suivantes n'en ont plus besoin.
+tls_certificates_cloudflare_token: ""
+
+tls_certificates_credentials_path: /root/.secrets/cloudflare.ini
+
+# Zone interrogee par le controle prealable du token. N'importe laquelle des
+# zones gerees fait l'affaire : le but est de prouver que le token est
+# accepte DEPUIS CE NOEUD, pas de lire quoi que ce soit d'utile.
+tls_certificates_zone_probe: nbeny.fr
+
+# Cloudflare propage vite, mais pas instantanement. Sans attente, certbot
+# interroge le serveur autoritatif avant que l'enregistrement TXT n'y soit et
+# le challenge echoue par intermittence -- le pire mode de panne possible.
+tls_certificates_propagation_seconds: 30
+
+# ATTENTION -- le serveur qui tourne est OPENRESTY, pas le nginx de Debian.
+# `nginx.service` est inactive et disabled ; c'est `openresty.service` qui
+# sert, avec /usr/local/openresty/nginx/sbin/nginx. Sa configuration inclut
+# /etc/nginx/conf.d/*.conf et /etc/nginx/sites-enabled/*.
+#
+# C'est aussi la cause racine des certificats expires : le greffon `nginx` de
+# certbot testait la configuration avec /usr/sbin/nginx, le binaire Debian,
+# qui ne connait pas la directive `lua_package_path` du bouncer CrowdSec. Son
+# `nginx -t` echouait, le greffon refusait de demarrer, et TOUS les
+# renouvellements echouaient depuis l'installation d'OpenResty.
+tls_certificates_service: openresty
+tls_certificates_binary: /usr/local/openresty/nginx/sbin/nginx
+
+# En `certonly` il n'y a pas d'installateur : sans ce hook, le serveur
+# continuerait de presenter l'ancien certificat jusqu'au prochain demarrage.
+tls_certificates_deploy_hook: "systemctl reload openresty"
+
+# `name` devient --cert-name : c'est le repertoire sous /etc/letsencrypt/live.
+# Conserver les noms existants, sinon certbot cree des doublons et les vhosts
+# pointent sur des chemins morts.
+tls_certificates:
+  - name: nbeny.fr
+    # www.nbeny.fr est declare dans le vhost mais etait ABSENT du certificat :
+    # les visiteurs de www prenaient une erreur TLS. Corrige ici.
+    domains: [nbeny.fr, www.nbeny.fr]
+  - name: folio.nbeny.fr
+    domains: [folio.nbeny.fr]
+  - name: francois.nbeny.fr
+    domains: [francois.nbeny.fr]
+  - name: proxmox.nbeny.fr
+    domains: [proxmox.nbeny.fr]
+  # Un wildcard ne couvre pas son propre apex : les deux noms sont requis.
+  - name: urbanlink.fr
+    domains: [urbanlink.fr, "*.urbanlink.fr"]
