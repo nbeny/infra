@@ -1,0 +1,7 @@
+# Secrets du routeur -- voir secrets.rsc.example
+secrets.env
+secrets.rsc
+
+# Artefacts Python
+__pycache__/
+*.pyc

@@ -1,0 +1,291 @@
+# Releve de la configuration vivante du MikroTik.
+# Genere par mikrotik/backup.sh -- ne pas editer a la main.
+# Compteurs et horodatages sont retires, secrets caviardes.
+
+==============================================================================
+## /system/routerboard/print
+==============================================================================
+  routerboard=true board-name=hAP ac^2 model=RBD52G-5HacD2HnD serial-number=D7160DC9D484 firmware-type=ipq4000L factory-firmware=6.44 current-firmware=6.45.9 upgrade-firmware=6.49.4
+
+==============================================================================
+## /system/package/print
+==============================================================================
+  .id=*1 name=routeros-arm version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= disabled=false
+  .id=*2 name=system version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*3 name=ipv6 version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=true
+  .id=*4 name=wireless version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*5 name=hotspot version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*6 name=mpls version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*7 name=routing version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*8 name=ppp version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*9 name=dhcp version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*A name=security version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+  .id=*B name=advanced-tools version=6.49.4 build-time=feb/25/2022 09:33:26 scheduled= bundle=routeros-arm disabled=false
+
+==============================================================================
+## /system/clock/print
+==============================================================================
+  time-zone-autodetect=true time-zone-name=Europe/Paris gmt-offset=+02:00 dst-active=true
+
+==============================================================================
+## /system/ntp/client/print
+==============================================================================
+  enabled=false primary-ntp=0.0.0.0 secondary-ntp=0.0.0.0 server-dns-names= mode=broadcast
+
+==============================================================================
+## /system/scheduler/print
+==============================================================================
+  .id=*0 name=CrowdsecUpdate interval=15m on-event=crowdsec_import owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon disabled=false
+
+==============================================================================
+## /system/script/print
+==============================================================================
+  (vide)
+
+==============================================================================
+## /interface/print
+==============================================================================
+  .id=*3 name=ether1 default-name=ether1 type=ether mtu=1500 max-l2mtu=9214 mac-address=08:55:31:9D:75:48 disabled=false
+  .id=*4 name=ether2 default-name=ether2 type=ether mtu=1500 max-l2mtu=9214 mac-address=08:55:31:9D:75:49 slave=true disabled=false
+  .id=*5 name=ether3 default-name=ether3 type=ether mtu=1500 max-l2mtu=9214 mac-address=08:55:31:9D:75:4A slave=true disabled=false
+  .id=*6 name=ether4 default-name=ether4 type=ether mtu=1500 max-l2mtu=9214 mac-address=08:55:31:9D:75:4B slave=true disabled=false
+  .id=*7 name=ether5 default-name=ether5 type=ether mtu=1500 max-l2mtu=9214 mac-address=08:55:31:9D:75:4C slave=true disabled=false
+  .id=*1 name=wlan1 default-name=wlan1 type=wlan mtu=1500 max-l2mtu=2290 mac-address=08:55:31:9D:75:4D slave=true disabled=false
+  .id=*2 name=wlan2 default-name=wlan2 type=wlan mtu=1500 max-l2mtu=2290 mac-address=08:55:31:9D:75:4E slave=true disabled=false
+  .id=*8 name=bridge1 type=bridge mtu=auto mac-address=08:55:31:9D:75:4D disabled=false
+
+==============================================================================
+## /interface/bridge/print
+==============================================================================
+  .id=*8 name=bridge1 mtu=auto arp=enabled arp-timeout=auto mac-address=08:55:31:9D:75:4D protocol-mode=rstp fast-forward=true igmp-snooping=false auto-mac=true ageing-time=5m priority=0x8000 max-message-age=20s forward-delay=15s transmit-hold-count=6 vlan-filtering=false dhcp-snooping=false disabled=false
+
+==============================================================================
+## /interface/bridge/port/print
+==============================================================================
+  .id=*0 interface=ether2 bridge=bridge1 priority=0x80 path-cost=10 internal-path-cost=10 edge=auto point-to-point=auto learn=auto horizon=none hw=true auto-isolate=false restricted-role=false restricted-tcn=false pvid=1 frame-types=admit-all ingress-filtering=false unknown-unicast-flood=true unknown-multicast-flood=true broadcast-flood=true tag-stacking=false bpdu-guard=false trusted=false multicast-router=temporary-query fast-leave=false edge-port-discovery=true hw-offload-group=switch1 dynamic=false disabled=false
+  .id=*1 interface=ether3 bridge=bridge1 priority=0x80 path-cost=10 internal-path-cost=10 edge=auto point-to-point=auto learn=auto horizon=none hw=true auto-isolate=false restricted-role=false restricted-tcn=false pvid=1 frame-types=admit-all ingress-filtering=false unknown-unicast-flood=true unknown-multicast-flood=true broadcast-flood=true tag-stacking=false bpdu-guard=false trusted=false multicast-router=temporary-query fast-leave=false edge-port-discovery=true hw-offload-group=switch1 dynamic=false disabled=false
+  .id=*2 interface=ether4 bridge=bridge1 priority=0x80 path-cost=10 internal-path-cost=10 edge=auto point-to-point=auto learn=auto horizon=none hw=true auto-isolate=false restricted-role=false restricted-tcn=false pvid=1 frame-types=admit-all ingress-filtering=false unknown-unicast-flood=true unknown-multicast-flood=true broadcast-flood=true tag-stacking=false bpdu-guard=false trusted=false multicast-router=temporary-query fast-leave=false edge-port-discovery=true hw-offload-group=switch1 dynamic=false disabled=false
+  .id=*3 interface=ether5 bridge=bridge1 priority=0x80 path-cost=10 internal-path-cost=10 edge=auto point-to-point=auto learn=auto horizon=none hw=true auto-isolate=false restricted-role=false restricted-tcn=false pvid=1 frame-types=admit-all ingress-filtering=false unknown-unicast-flood=true unknown-multicast-flood=true broadcast-flood=true tag-stacking=false bpdu-guard=false trusted=false multicast-router=temporary-query fast-leave=false edge-port-discovery=true hw-offload-group=switch1 dynamic=false disabled=false
+  .id=*4 interface=wlan2 bridge=bridge1 priority=0x80 path-cost=10 internal-path-cost=10 edge=auto point-to-point=auto learn=auto horizon=none auto-isolate=false restricted-role=false restricted-tcn=false pvid=1 frame-types=admit-all ingress-filtering=false unknown-unicast-flood=true unknown-multicast-flood=true broadcast-flood=true tag-stacking=false bpdu-guard=false trusted=false multicast-router=temporary-query fast-leave=false edge-port-discovery=true dynamic=false disabled=false
+  .id=*5 interface=wlan1 bridge=bridge1 priority=0x80 path-cost=10 internal-path-cost=10 edge=auto point-to-point=auto learn=auto horizon=none auto-isolate=false restricted-role=false restricted-tcn=false pvid=1 frame-types=admit-all ingress-filtering=false unknown-unicast-flood=true unknown-multicast-flood=true broadcast-flood=true tag-stacking=false bpdu-guard=false trusted=false multicast-router=temporary-query fast-leave=false edge-port-discovery=true dynamic=false disabled=false
+
+==============================================================================
+## /interface/wireless/print
+==============================================================================
+  .id=*1 default-name=wlan1 name=wlan1 mtu=1500 mac-address=08:55:31:9D:75:4D arp=enabled arp-timeout=auto disable-running-check=false interface-type=IPQ4019 radio-name=0855319D754D mode=ap-bridge ssid=MikroTik area= frequency-mode=regulatory-domain country=etsi installation=any antenna-gain=3 frequency=2412 band=2ghz-b/g channel-width=20mhz secondary-frequency= scan-list=default wireless-protocol=802.11 rate-set=default supported-rates-b=1Mbps,2Mbps,5.5Mbps,11Mbps supported-rates-a/g=6Mbps,9Mbps,12Mbps,18Mbps,24Mbps,36Mbps,48Mbps,54Mbps basic-rates-b=1Mbps basic-rates-a/g=6Mbps max-station-count=2007 distance=dynamic tx-power-mode=default vlan-mode=no-tag vlan-id=1 wds-mode=disabled wds-default-bridge=none wds-default-cost=100 wds-cost-range=50-150 wds-ignore-ssid=false update-stats-interval=disabled bridge-mode=enabled default-authentication=true default-forwarding=true default-ap-tx-limit=0 default-client-tx-limit=0 wmm-support=disabled hide-ssid=false security-profile=default interworking-profile=disabled wps-mode=push-button station-roaming=disabled disconnect-timeout=3s on-fail-retry-time=100ms preamble-mode=both compression=false allow-sharedkey=false station-bridge-clone-mac=00:00:00:00:00:00 ampdu-priorities=0 guard-interval=any ht-supported-mcs=mcs-0,mcs-1,mcs-2,mcs-3,mcs-4,mcs-5,mcs-6,mcs-7,mcs-8,mcs-9,mcs-10,mcs-11,mcs-12,mcs-13,mcs-14,mcs-15,mcs-16,mcs-17,mcs-18,mcs-19,mcs-20,mcs-21,mcs-22,mcs-23 ht-basic-mcs=mcs-0,mcs-1,mcs-2,mcs-3,mcs-4,mcs-5,mcs-6,mcs-7 tx-chains=0,1 rx-chains=0,1 amsdu-limit=8192 amsdu-threshold=8192 tdma-period-size=2 nv2-queue-count=2 nv2-qos=default nv2-cell-radius=30 nv2-security=disabled nv2-preshared-key=<SECRET> nv2-mode=dynamic-downlink nv2-downlink-ratio=50 nv2-sync-secret=<SECRET> hw-retries=7 frame-lifetime=0 adaptive-noise-immunity=none hw-fragmentation-threshold=disabled hw-protection-mode=none hw-protection-threshold=0 frequency-offset=0 rate-selection=advanced multicast-helper=default multicast-buffering=enabled keepalive-frames=enabled skip-dfs-channels=disabled disabled=false
+  .id=*2 default-name=wlan2 name=wlan2 mtu=1500 mac-address=08:55:31:9D:75:4E arp=enabled arp-timeout=auto disable-running-check=false interface-type=IPQ4019 radio-name=0855319D754E mode=ap-bridge ssid=MikroTik area= frequency-mode=regulatory-domain country=etsi installation=any antenna-gain=3 frequency=5180 band=5ghz-a channel-width=20mhz secondary-frequency= scan-list=default wireless-protocol=802.11 rate-set=default supported-rates-a/g=6Mbps,9Mbps,12Mbps,18Mbps,24Mbps,36Mbps,48Mbps,54Mbps basic-rates-a/g=6Mbps max-station-count=2007 distance=dynamic tx-power-mode=default vlan-mode=no-tag vlan-id=1 wds-mode=disabled wds-default-bridge=none wds-default-cost=100 wds-cost-range=50-150 wds-ignore-ssid=false update-stats-interval=disabled bridge-mode=enabled default-authentication=true default-forwarding=true default-ap-tx-limit=0 default-client-tx-limit=0 wmm-support=disabled hide-ssid=false security-profile=default interworking-profile=disabled wps-mode=push-button station-roaming=disabled disconnect-timeout=3s on-fail-retry-time=100ms preamble-mode=both compression=false allow-sharedkey=false station-bridge-clone-mac=00:00:00:00:00:00 ampdu-priorities=0 guard-interval=any ht-supported-mcs=mcs-0,mcs-1,mcs-2,mcs-3,mcs-4,mcs-5,mcs-6,mcs-7,mcs-8,mcs-9,mcs-10,mcs-11,mcs-12,mcs-13,mcs-14,mcs-15,mcs-16,mcs-17,mcs-18,mcs-19,mcs-20,mcs-21,mcs-22,mcs-23 ht-basic-mcs=mcs-0,mcs-1,mcs-2,mcs-3,mcs-4,mcs-5,mcs-6,mcs-7 vht-supported-mcs=mcs0-9,mcs0-9,mcs0-9 vht-basic-mcs=mcs0-7 tx-chains=0,1 rx-chains=0,1 amsdu-limit=8192 amsdu-threshold=8192 tdma-period-size=2 nv2-queue-count=2 nv2-qos=default nv2-cell-radius=30 nv2-security=disabled nv2-preshared-key=<SECRET> nv2-mode=dynamic-downlink nv2-downlink-ratio=50 nv2-sync-secret=<SECRET> hw-retries=7 frame-lifetime=0 adaptive-noise-immunity=none hw-fragmentation-threshold=disabled hw-protection-mode=none hw-protection-threshold=0 frequency-offset=0 rate-selection=advanced multicast-helper=default multicast-buffering=enabled keepalive-frames=enabled skip-dfs-channels=disabled disabled=false
+
+==============================================================================
+## /interface/wireless/security-profiles/print
+==============================================================================
+  .id=*0 name=default mode=dynamic-keys authentication-types=wpa-psk,wpa2-psk unicast-ciphers=aes-ccm group-ciphers=aes-ccm wpa-pre-shared-key=<SECRET> wpa2-pre-shared-key=<SECRET> supplicant-identity=MikroTik eap-methods=passthrough tls-mode=no-certificates tls-certificate=none mschapv2-username= mschapv2-password=<SECRET> disable-pmkid=false static-algo-0=none static-key-0=<SECRET> static-algo-1=none static-key-1= static-algo-2=none static-key-2= static-algo-3=none static-key-3= static-transmit-key=key-0 static-sta-private-algo=none static-sta-private-key= radius-mac-authentication=false radius-mac-accounting=false radius-eap-accounting=false interim-update=0s radius-mac-format=XX:XX:XX:XX:XX:XX radius-mac-mode=as-username radius-called-format=mac:ssid radius-mac-caching=disabled group-key-update=5m management-protection=disabled management-protection-key=<SECRET> default=true
+
+==============================================================================
+## /interface/list/print
+==============================================================================
+  .id=*2000000 name=all dynamic=false include= exclude= builtin=true comment=contains all interfaces
+  .id=*2000001 name=none dynamic=false include= exclude= builtin=true comment=contains no interfaces
+  .id=*2000002 name=dynamic dynamic=false include= exclude= builtin=true comment=contains dynamic interfaces
+  .id=*2000003 name=static dynamic=false include= exclude= builtin=true comment=contains static interfaces
+  .id=*2000010 name=WAN dynamic=false include= exclude= builtin=false
+  .id=*2000011 name=LAN dynamic=false include= exclude= builtin=false
+
+==============================================================================
+## /interface/list/member/print
+==============================================================================
+  .id=*3 list=WAN interface=ether1 dynamic=false disabled=false
+  .id=*4 list=LAN interface=bridge1 dynamic=false disabled=false
+
+==============================================================================
+## /ip/address/print
+==============================================================================
+  .id=*29 address=192.168.100.1/24 network=192.168.100.0 interface=bridge1 actual-interface=bridge1 invalid=false dynamic=false disabled=false comment=Gateway LAN
+  .id=*2A address=192.168.1.50/24 network=192.168.1.0 interface=ether1 actual-interface=ether1 invalid=false dynamic=true disabled=false
+
+==============================================================================
+## /ip/route/print
+==============================================================================
+  .id=*5 dst-address=0.0.0.0/0 gateway=192.168.1.254 distance=1 scope=30 target-scope=10 static=true disabled=false
+  .id=*1 dst-address=0.0.0.0/0 gateway=192.168.1.254 distance=1 scope=30 target-scope=10 static=true disabled=false
+  .id=*2 dst-address=0.0.0.0/0 gateway=192.168.1.254 distance=1 scope=30 target-scope=10 static=true disabled=false
+  .id=*3 dst-address=0.0.0.0/0 gateway=192.168.1.254 distance=1 scope=30 target-scope=10 static=true disabled=false
+  .id=*4 dst-address=0.0.0.0/0 gateway=192.168.1.254 distance=1 scope=30 target-scope=10 static=true disabled=false
+  .id=*30000001 dst-address=0.0.0.0/0 gateway=192.168.1.254 distance=1 scope=30 target-scope=10 vrf-interface=ether1 dynamic=true static=true disabled=false
+  .id=*6 dst-address=10.0.0.0/24 gateway=192.168.100.50 distance=1 scope=30 target-scope=10 static=true disabled=false
+  .id=*40061AB5 dst-address=192.168.1.0/24 pref-src=192.168.1.50 gateway=ether1 distance=0 scope=10 dynamic=true connect=true disabled=false
+  .id=*40060477 dst-address=192.168.100.0/24 pref-src=192.168.100.1 gateway=bridge1 distance=0 scope=10 dynamic=true connect=true disabled=false
+
+==============================================================================
+## /ip/pool/print
+==============================================================================
+  .id=*1 name=dhcp ranges=192.168.100.0-192.168.100.200
+  .id=*2 name=dhcp_pool-lan ranges=192.168.100.100-192.168.100.200
+
+==============================================================================
+## /ip/dhcp-server/print
+==============================================================================
+  .id=*1 name=dhcp-lan interface=bridge1 lease-time=10m address-pool=dhcp authoritative=yes use-radius=no lease-script= dynamic=false invalid=false disabled=false
+
+==============================================================================
+## /ip/dhcp-server/network/print
+==============================================================================
+  .id=*1 address=192.0.0.0/8 gateway=192.168.1.50 netmask=8 dns-server=192.168.100.1 wins-server= ntp-server= caps-manager= dhcp-option= dynamic=false
+  .id=*2 address=192.168.100.0/24 gateway=192.168.100.1 dns-server=192.168.100.1 wins-server= ntp-server= caps-manager= dhcp-option= dynamic=false
+
+==============================================================================
+## /ip/dhcp-server/lease/print
+==============================================================================
+  (vide)
+
+==============================================================================
+## /ip/dhcp-client/print
+==============================================================================
+  .id=*5 interface=ether1 add-default-route=yes default-route-distance=1 use-peer-dns=true use-peer-ntp=true dhcp-options=hostname,clientid address=192.168.1.50/24 gateway=192.168.1.254 dhcp-server=192.168.1.254 primary-dns=192.168.1.254 invalid=false dynamic=false disabled=false
+
+==============================================================================
+## /ip/dns/print
+==============================================================================
+  servers= dynamic-servers=192.168.1.254 use-doh-server= verify-doh-cert=false allow-remote-requests=false max-udp-packet-size=4096 query-server-timeout=2s query-total-timeout=10s max-concurrent-queries=100 max-concurrent-tcp-sessions=20 cache-size=2048 cache-max-ttl=1w
+
+==============================================================================
+## /ip/dns/static/print
+==============================================================================
+  (vide)
+
+==============================================================================
+## /ip/firewall/filter/print
+==============================================================================
+  .id=*16 chain=forward action=passthrough dynamic=true comment=special dummy rule to show fasttrack counters
+  .id=*14 chain=input action=accept protocol=tcp src-address=192.168.100.50 dst-port=179 invalid=false dynamic=false
+  .id=*15 chain=output action=accept protocol=tcp dst-address=192.168.100.50 dst-port=179 invalid=false dynamic=false
+  .id=*B chain=input action=accept src-address=10.0.0.0/24 invalid=false dynamic=false comment=Allow internal LAN to access router
+  .id=*F chain=forward action=accept src-address=10.0.0.0/24 invalid=false dynamic=false comment=Allow Proxmox internal LAN
+  .id=*11 chain=input action=accept protocol=icmp invalid=false dynamic=false comment=Allow ICMP ping
+  .id=*12 chain=forward action=fasttrack-connection connection-state=established,related invalid=false dynamic=false
+
+==============================================================================
+## /ip/firewall/nat/print
+==============================================================================
+  .id=*1 chain=srcnat action=masquerade out-interface=ether1 out-interface-list=WAN invalid=false dynamic=false disabled=false
+  .id=*2 chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
+  .id=*3 chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
+  .id=*4 chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
+  .id=*5 chain=srcnat action=masquerade out-interface=ether1 invalid=false dynamic=false
+  .id=*8 chain=srcnat action=masquerade src-address=10.0.0.0/24 out-interface=ether1 invalid=false dynamic=false comment=Proxmox NAT
+  .id=*9 chain=srcnat action=masquerade src-address=10.0.0.0/24 out-interface=ether1 invalid=false dynamic=false comment=NAT Proxmox LAN
+  .id=*A chain=srcnat action=masquerade src-address=10.0.0.0/24 out-interface=ether1 invalid=false dynamic=false comment=NAT Proxmox LAN
+  .id=*19 chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=443 protocol=tcp in-interface=ether1 dst-port=443 log=false log-prefix= invalid=false dynamic=false disabled=false
+  .id=*1F chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=22 protocol=tcp in-interface=ether1 dst-port=22 log=false log-prefix= invalid=false dynamic=false disabled=false
+  .id=*20 chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=80 protocol=tcp in-interface=ether1 dst-port=80 log=false log-prefix= invalid=false dynamic=false disabled=false
+  .id=*21 chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=4242 protocol=tcp in-interface=ether1 dst-port=4242 log=false log-prefix= invalid=false dynamic=false disabled=false
+  .id=*24 chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=41641 protocol=udp dst-address=192.168.1.50 in-interface=ether1 dst-port=52534 invalid=false dynamic=true disabled=false comment=upnp 192.168.100.50: tailscale-portmap
+  .id=*25 chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=41641 protocol=udp dst-address=192.168.1.50 in-interface=ether1 dst-port=32872 invalid=false dynamic=true disabled=false comment=upnp 192.168.100.50: tailscale-portmap
+
+==============================================================================
+## /ip/firewall/mangle/print
+==============================================================================
+  .id=*3 chain=prerouting action=passthrough dynamic=true comment=special dummy rule to show fasttrack counters
+  .id=*2 chain=forward action=passthrough dynamic=true comment=special dummy rule to show fasttrack counters
+  .id=*1 chain=postrouting action=passthrough dynamic=true comment=special dummy rule to show fasttrack counters
+
+==============================================================================
+## /ip/firewall/address-list/print
+==============================================================================
+  (vide)
+
+==============================================================================
+## /ip/service/print
+==============================================================================
+  .id=*0 name=telnet port=23 address= invalid=true disabled=true
+  .id=*1 name=ftp port=21 address= invalid=true disabled=true
+  .id=*2 name=www port=80 address= invalid=true disabled=true
+  .id=*4 name=ssh port=22 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
+  .id=*6 name=www-ssl port=443 address= certificate=none tls-version=any invalid=true disabled=true
+  .id=*7 name=api port=8728 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
+  .id=*8 name=winbox port=8291 address=192.168.100.0/24,192.168.1.0/24 invalid=false disabled=false
+  .id=*9 name=api-ssl port=8729 address=192.168.100.0/24,192.168.1.0/24 certificate=none tls-version=any invalid=false disabled=false
+
+==============================================================================
+## /ip/cloud/print
+==============================================================================
+  ddns-enabled=false ddns-update-interval=none update-time=true
+
+==============================================================================
+## /ip/upnp/print
+==============================================================================
+  enabled=true allow-disable-external-interface=false show-dummy-rule=true
+
+==============================================================================
+## /ip/upnp/interfaces/print
+==============================================================================
+  .id=*1 interface=bridge1 type=internal dynamic=false disabled=false
+  .id=*2 interface=ether1 type=external dynamic=false disabled=false
+
+==============================================================================
+## /ip/proxy/print
+==============================================================================
+  enabled=false src-address=:: port=8080 anonymous=false parent-proxy=:: parent-proxy-port=0 cache-administrator=webmaster max-cache-size=unlimited max-cache-object-size=2048 cache-on-disk=false max-client-connections=600 max-server-connections=600 max-fresh-time=3d serialize-connections=false always-from-cache=false cache-hit-dscp=4 cache-path=web-proxy
+
+==============================================================================
+## /ip/socks/print
+==============================================================================
+  enabled=false port=1080 connection-idle-timeout=2m max-connections=200 version=4 auth-method=none
+
+==============================================================================
+## /user/print
+==============================================================================
+  .id=*1 name=admin group=full address= expired=false disabled=false comment=system default user
+  .id=*2 name=crowdsec group=crowdsec address= expired=false disabled=false
+
+==============================================================================
+## /user/group/print
+==============================================================================
+  .id=*1 name=read policy=local,telnet,ssh,reboot,read,test,winbox,password,web,sniff,sensitive,api,romon,tikapp,!ftp,!write,!policy,!dude skin=default
+  .id=*2 name=write policy=local,telnet,ssh,reboot,read,write,test,winbox,password,web,sniff,sensitive,api,romon,tikapp,!ftp,!policy,!dude skin=default
+  .id=*3 name=full policy=local,telnet,ssh,ftp,reboot,read,write,policy,test,winbox,password,web,sniff,sensitive,api,romon,tikapp,!dude skin=default
+  .id=*4 name=crowdsec policy=read,write,test,api,!local,!telnet,!ssh,!ftp,!reboot,!policy,!winbox,!password,!web,!sniff,!sensitive,!romon,!dude,!tikapp skin=default
+
+==============================================================================
+## /tool/mac-server/print
+==============================================================================
+  allowed-interface-list=all
+
+==============================================================================
+## /tool/mac-server/mac-winbox/print
+==============================================================================
+  allowed-interface-list=all
+
+==============================================================================
+## /tool/romon/print
+==============================================================================
+  enabled=false id=00:00:00:00:00:00 secrets=<SECRET>
+
+==============================================================================
+## /tool/netwatch/print
+==============================================================================
+  (vide)
+
+==============================================================================
+## /snmp/print
+==============================================================================
+  enabled=false contact= location= engine-id= trap-target= trap-community=public trap-version=1 trap-generators=temp-exception
+
+==============================================================================
+## /certificate/print
+==============================================================================
+  (vide)
+
+==============================================================================
+## /routing/bgp/instance/print
+==============================================================================
+  .id=*0 name=default as=65002 router-id=192.168.100.1 redistribute-connected=false redistribute-static=false redistribute-rip=false redistribute-ospf=false redistribute-other-bgp=false out-filter= client-to-client-reflection=true ignore-as-path-len=false routing-table= default=true disabled=false
+
+==============================================================================
+## /routing/bgp/peer/print
+==============================================================================
+  .id=*0 name=CrowdSec-Bouncer instance=default remote-address=192.168.100.50 remote-as=65001 tcp-md5-key=<SECRET> nexthop-choice=default multihop=false route-reflect=false hold-time=10m keepalive-time=3m ttl=255 in-filter=crowdsec-in out-filter= address-families=ip default-originate=never remove-private-as=false as-override=false passive=false use-bfd=false disabled=false
+
+==============================================================================
+## /routing/filter/print
+==============================================================================
+  .id=*1 chain=crowdsec-in invert-match=false action=accept set-check-gateway=none set-type=blackhole set-bgp-weight=100 set-bgp-prepend-path= disabled=false
