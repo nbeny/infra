@@ -56,6 +56,22 @@ spec:
             # Crée la namespace `default` au premier boot (idempotent).
             - name: SKIP_DEFAULT_NAMESPACE_CREATION
               value: "false"
+            # ⚠️ **Sans ceci, Temporal n'écoute QUE sur l'IP du pod.**
+            # `BIND_ON_IP` non renseigné, l'image ne se lie ni à `0.0.0.0` ni à
+            # la boucle locale : mesuré dans le conteneur,
+            # `netstat -ltn` ne montre que `10.244.0.151:7233`. Une sonde visant
+            # `127.0.0.1` reçoit donc « connection refused » **alors que le
+            # serveur répond `SERVING` sur son IP de pod** — le symptôme accuse
+            # le serveur, la cause est l'adresse d'écoute.
+            #
+            # Deux façons de s'en sortir : injecter l'IP du pod par la downward
+            # API et faire viser `$POD_IP` aux sondes, ou écouter partout.
+            # La seconde est retenue : elle rend les sondes indépendantes de
+            # l'adressage, et « partout » se limite ici à la pile réseau du pod,
+            # dont l'IP est déjà joignable dans tout le cluster — la boucle
+            # locale n'ajoute aucune exposition.
+            - name: BIND_ON_IP
+              value: "0.0.0.0"
           resources:
             requests:
               cpu: 250m
@@ -77,13 +93,39 @@ spec:
           #
           # `localhost` interroge le conteneur directement, sans passer par le
           # routage du Service ni par sa condition de disponibilité.
+          # ⚠️ **`127.0.0.1` et non `localhost`.** Mesure sur la VM `urbanlink` :
+          # une tentative sur deux partait sur `[::1]:7233`, ou le serveur
+          # n'ecoute pas — `localhost` a deux resolutions et Temporal ne se lie
+          # qu'a IPv4. La sonde echouait donc en alternance, sans motif visible.
+          #
+          # ⚠️ **Le startupProbe n'est pas une ceinture de plus : c'est lui qui
+          # rend la vivacite utilisable.** `auto-setup` cree le schema,
+          # enregistre la namespace `default` et pose les attributs de recherche
+          # AVANT d'ouvrir le port 7233 — 4 minutes mesurees. Une vivacite qui
+          # frappe a 60 s tuait donc le conteneur en plein amorcage, indefiniment
+          # (1 redemarrage observe avant ce reglage). Tant qu'un startupProbe
+          # n'a pas reussi, Kubernetes suspend vivacite et disponibilite : c'est
+          # le mecanisme prevu pour un demarrage long, et il evite d'avoir a
+          # gonfler `initialDelaySeconds` de la vivacite — ce qui retarderait
+          # d'autant la detection d'un vrai blocage en regime etabli.
+          #
+          # 30 x 20 s = 10 min de patience au demarrage, puis la vivacite reprend
+          # avec sa reactivite normale.
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - temporal operator cluster health --address 127.0.0.1:7233
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - temporal operator cluster health --address localhost:7233
-            initialDelaySeconds: 60
+                - temporal operator cluster health --address 127.0.0.1:7233
             periodSeconds: 20
             timeoutSeconds: 10
             failureThreshold: 5
@@ -92,8 +134,7 @@ spec:
               command:
                 - sh
                 - -c
-                - temporal operator cluster health --address localhost:7233
-            initialDelaySeconds: 40
+                - temporal operator cluster health --address 127.0.0.1:7233
             periodSeconds: 15
             timeoutSeconds: 10
             failureThreshold: 5
