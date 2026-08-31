@@ -5,8 +5,8 @@
 #  CE QUE CE FICHIER NE TOUCHE PAS, ET POURQUOI C'EST L'ESSENTIEL
 #
 #  La zone ne contient PAS un enregistrement par outil : elle contient un
-#  WILDCARD `*.urbanlink.fr -> 192.168.100.50` en DNS-only, qui couvre les dix
-#  consoles internes (pgadmin, kibana, kiali, prometheus, minio, directus,
+#  WILDCARD `*.urbanlink.fr -> 192.168.100.50` en DNS-only, qui couvre les onze
+#  consoles internes (pgadmin, kibana, kiali, prometheus, argo, minio, directus,
 #  kafka, temporal) plus proxmox et router.
 #
 #  Publier un nom ne consiste donc pas a modifier le wildcard -- ce qui
@@ -170,7 +170,8 @@
     fail_msg: >-
       Le wildcard *.{{ edge_urbanlink_domain }} ne pointe plus sur
       192.168.100.50 en DNS-only. En l'etat, les consoles internes
-      (pgadmin, kibana, kiali, prometheus...) sont joignables depuis Internet.
+      (pgadmin, kibana, kiali, prometheus, argo...) sont joignables depuis
+      Internet.
       A corriger IMMEDIATEMENT dans le tableau de bord Cloudflare.
     success_msg: >-
       Wildcard *.{{ edge_urbanlink_domain }} intact : 192.168.100.50, DNS-only.

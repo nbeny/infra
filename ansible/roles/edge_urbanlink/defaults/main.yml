@@ -125,6 +125,18 @@ edge_urbanlink_services:
     hosts: ["kiali.urbanlink.fr"]
   - name: prometheus
     hosts: ["prometheus.urbanlink.fr"]
+  # Argo CD -- meme palier que Kiali et Prometheus, et pour la meme raison :
+  # une console qui a les pleins pouvoirs sur le cluster n'a rien a faire sur
+  # Internet. Elle etait jusqu'ici accessible par `kubectl port-forward`.
+  #
+  # ATTENTION -- ce nom ne fonctionne QUE si argocd-server tourne en
+  # `--insecure` (ConfigMap argocd-cmd-params-cm, pose par
+  # playbooks/32-argocd.yml). En mode par defaut, il repond 307 vers https:// a
+  # toute requete en clair ; or le chemin nginx -> passerelle Istio est en clair
+  # par construction (le TLS est termine ici), donc le navigateur reboucle
+  # indefiniment sur la meme URL.
+  - name: argo
+    hosts: ["argo.urbanlink.fr"]
   # --- hors cluster : amont explicite --------------------------------------
   - name: proxmox
     hosts: ["proxmox.urbanlink.fr"]

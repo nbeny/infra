@@ -1,6 +1,6 @@
 # `edge_urbanlink` — publication des outils sous `*.urbanlink.fr`
 
-Ce rôle décide, pour chacun des seize noms du lab, **qui a le droit de
+Ce rôle décide, pour chacun des dix-sept noms du lab, **qui a le droit de
 l'atteindre**. Il tourne sur le nœud Proxmox, qui termine le TLS et relaie vers
 la passerelle Istio.
 
@@ -13,7 +13,7 @@ Le drapeau `public` de `edge_urbanlink_services` est le seul commutateur.
 | Palier | Noms | DNS | Contrôle nginx |
 |---|---|---|---|
 | **Public** | `urbanlink.fr`, `www`, `api`, `auth`, `nominatim`, `s3` | enregistrement **explicite** → `82.65.87.60`, proxy Cloudflare | `403` si la requête ne vient ni de Cloudflare ni du LAN |
-| **Interne** | `directus`, `minio`, `pgadmin`, `kafka`, `temporal`, `kibana`, `kiali`, `prometheus`, `proxmox`, `router` | couverts par le **wildcard** `*.urbanlink.fr` → `192.168.100.50`, DNS-only | `allow` LAN, `deny all` |
+| **Interne** | `directus`, `minio`, `pgadmin`, `kafka`, `temporal`, `kibana`, `kiali`, `prometheus`, `argo`, `proxmox`, `router` | couverts par le **wildcard** `*.urbanlink.fr` → `192.168.100.50`, DNS-only | `allow` LAN, `deny all` |
 
 L'isolement des consoles ne repose pas sur une seule règle : leur nom résout en
 IP privée **et** leur vhost refuse tout hors LAN. Les publier par accident

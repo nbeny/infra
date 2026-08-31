@@ -182,6 +182,51 @@
       async: 600
       poll: 10
 
+    # ----------------------------------------------------------------------
+    #  Terminaison TLS -- deleguee a l'openresty du noeud
+    # ----------------------------------------------------------------------
+    # Par defaut, argocd-server sert son propre certificat auto-signe et repond
+    # `307 -> https://` a toute requete recue en clair. Or le chemin d'acces est
+    #
+    #   navigateur -> openresty (TLS termine ici) -> passerelle Istio -> argocd
+    #
+    # et le dernier saut est EN CLAIR par construction (cf. l'en-tete de
+    # kube/urbanlink/ingress/gateway.yaml). Le 307 renvoie donc le navigateur
+    # sur l'URL https qu'il vient deja de demander : boucle de redirection, et
+    # rien d'anormal dans les journaux d'aucun des trois composants.
+    #
+    # `server.insecure` supprime cette redirection ET la terminaison TLS du
+    # serveur. Ce n'est pas du trafic en clair sur le reseau : le TLS est
+    # termine en amont, le saut restant ne quitte pas l'hyperviseur.
+    - name: Relever le mode d'ecoute d'argocd-server
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+        get configmap argocd-cmd-params-cm
+        -o jsonpath={.data.server\.insecure}
+      register: ul_argo_insecure
+      changed_when: false
+
+    # Redemarrer a chaque passage remettrait l'interface hors service pour
+    # rien : le drapeau n'est pose que s'il manque.
+    - name: Servir Argo CD en clair derriere le proxy TLS
+      when: ul_argo_insecure.stdout | trim != 'true'
+      block:
+
+        - name: Poser server.insecure
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+            patch configmap argocd-cmd-params-cm --type merge
+            -p {{ '{"data":{"server.insecure":"true"}}' | quote }}
+          changed_when: true
+
+        # Le ConfigMap est lu au DEMARRAGE du processus, pas surveille : sans ce
+        # redemarrage le patch est visible dans le cluster et sans effet.
+        - name: Redemarrer argocd-server
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
+            rollout restart deploy/argocd-server
+          changed_when: true
+
     - name: Attendre que le serveur Argo CD soit pret
       ansible.builtin.command: >-
         kubectl --kubeconfig {{ kubeconfig }} -n {{ argocd_namespace }}
@@ -349,10 +394,18 @@
         msg:
           - "Application {{ argocd_app_name }} : {{ ul_argo_app.stdout | default('(pas encore evaluee)') }}"
           - ""
-          - "Interface (pas d'Ingress -- volontairement) :"
+          - "Interface -- https://argo.urbanlink.fr, depuis le LAN UNIQUEMENT."
+          - "  Le nom est couvert par le wildcard *.urbanlink.fr -> 192.168.100.50"
+          - "  (DNS-only) et par le bloc allow/deny du vhost ; il n'a pas"
+          - "  d'enregistrement public. Route posee par le role edge_urbanlink"
+          - "  et kube/urbanlink/ingress/."
+          - "  Repli hors LAN :"
           - "  kubectl -n {{ argocd_namespace }} port-forward svc/argocd-server 8081:443"
-          - "  https://localhost:8081   utilisateur: admin"
+          - "  https://localhost:8081"
+          - ""
+          - "  utilisateur: admin"
           - "  mot de passe initial : {{ ul_argo_pwd.stdout | default('(secret deja supprime)') }}"
+          - "  Client en ligne de commande : argocd login argo.urbanlink.fr --grpc-web"
           - ""
           - "Suivi :  kubectl -n {{ argocd_namespace }} get application -w"
           - "Forcer :  kubectl -n {{ argocd_namespace }} patch application {{ argocd_app_name }} --type merge -p '{\"operation\":{\"sync\":{}}}'"

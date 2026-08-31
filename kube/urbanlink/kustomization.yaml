@@ -41,7 +41,7 @@
 #   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
 #   9. frontend (après backend)
 #  10. coturn (DaemonSet hostNetwork sur nœuds publics), geoipupdate, pgadmin
-#  11. ingress Istio — Gateway (les 14 hosts) puis VirtualServices, et
+#  11. ingress Istio — Gateway (les 15 hosts) puis VirtualServices, et
 #      l'AuthorizationPolicy appliquée à part dans istio-ingress
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

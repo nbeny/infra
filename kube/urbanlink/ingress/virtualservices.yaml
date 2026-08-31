@@ -288,3 +288,40 @@ spec:
             host: prometheus.istio-system.svc.cluster.local
             port:
               number: 9090
+---
+# --------------------------------------------- interne : Argo CD (GitOps)
+#  Meme figure que Kiali : le Service vit dans un autre namespace (`argocd`),
+#  le FQDN complet traverse la frontiere.
+#
+#  ⚠️ PORT 80, PAS 443. Le Service argocd-server publie les deux, mais ils
+#  pointent le MEME port de conteneur (8080) : c'est le serveur qui detecte le
+#  protocole. Viser 443 en clair depuis la passerelle lui enverrait du HTTP sur
+#  un port qu'il traite en TLS.
+#
+#  ⚠️ Et ce nom ne repond correctement que si argocd-server tourne en
+#  `--insecure` (server.insecure dans argocd-cmd-params-cm, pose par
+#  playbooks/32-argocd.yml). Sinon il repond 307 vers https://argo.urbanlink.fr
+#  a chaque requete -- or nginx a DEJA termine le TLS et relaie en clair, donc
+#  la requete suivante est identique : boucle de redirection, sans erreur nulle
+#  part dans les journaux.
+#
+#  Le client `argocd` en ligne de commande passe par ce meme nom, mais son gRPC
+#  ne survit pas au relais HTTP/1.1 de nginx : utiliser `--grpc-web`.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-argocd
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "argo.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: argocd-server.argocd.svc.cluster.local
+            port:
+              number: 80
