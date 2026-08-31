@@ -1,0 +1,29 @@
+# Gere par Ansible (role kubernetes) -- ne pas editer sur le noeud.
+#
+# Le chart pose deja ses `defaultArgs` (--cert-dir, --kubelet-use-node-status-port,
+# --kubelet-preferred-address-types, --metric-resolution). Ce qui suit s'y AJOUTE.
+args:
+{% if k8s_metrics_server_insecure_tls | bool %}
+  # Le certificat de SERVICE du kubelet est auto-signe : kubeadm ne pose pas
+  # `serverTLSBootstrap: true` dans /var/lib/kubelet/config.yaml, donc ce
+  # certificat n'est pas emis par le CA du cluster et metrics-server ne peut pas
+  # le verifier. Sans ce drapeau il refuse chaque scrape en
+  # « x509: certificate signed by unknown authority » et l'APIService
+  # v1beta1.metrics.k8s.io reste indisponible -- meme symptome, au final, que
+  # s'il n'etait pas installe.
+  #
+  # La vraie alternative serait d'activer serverTLSBootstrap sur le kubelet et
+  # d'approuver les CSR `kubelet-serving` a chaque rotation. Sur un cluster a un
+  # seul noeud, ou le scrape ne quitte jamais la machine, ce n'est pas le bon
+  # compromis.
+  - --kubelet-insecure-tls
+{% endif %}
+  - --metric-resolution={{ k8s_metrics_server_resolution }}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 200Mi
+  limits:
+    cpu: 500m
+    memory: 500Mi

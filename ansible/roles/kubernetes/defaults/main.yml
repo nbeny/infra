@@ -16,6 +16,17 @@ k8s_extra_tools:
 k8s_helm_version: ""      # "" = derniere version stable
 k8s_k9s_version: ""       # "" = derniere version stable
 
+# --- Metriques -------------------------------------------------------------
+# Requis par tout HorizontalPodAutoscaler et par `kubectl top` : l'API
+# `metrics.k8s.io` est agregee, donc inexistante sans ce serveur.
+k8s_metrics_server_enabled: true
+k8s_metrics_server_namespace: kube-system
+k8s_metrics_server_chart_version: "3.14.0"
+k8s_metrics_server_resolution: 15s
+# Necessaire sous kubeadm, qui n'active pas `serverTLSBootstrap` : voir le
+# commentaire du fichier de valeurs.
+k8s_metrics_server_insecure_tls: true
+
 # --- Stockage --------------------------------------------------------------
 # `none` laisse le cluster sans provisionneur : tout PVC restera en Pending.
 k8s_storage_provisioner: local-path

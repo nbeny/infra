@@ -1,0 +1,84 @@
+---
+# ---------------------------------------------------------------------------
+#  metrics-server -- la source de metriques des HPA et de `kubectl top`
+# ---------------------------------------------------------------------------
+# Kubernetes ne mesure PAS la consommation des pods par lui-meme. L'API
+# `metrics.k8s.io` est une API AGREGEE : sans un serveur qui l'implemente, elle
+# n'existe pas, et tout ce qui en depend echoue en silence.
+#
+# Constate sur le cluster le 31/08/2026 : `backend-hpa` et `frontend-hpa`
+# existaient depuis 34 heures avec des cibles a `<unknown>`, donc figes a leur
+# `minReplicas` quelle que soit la charge -- un autoscaling decoratif. Et le
+# kube-controller-manager journalisait l'echec toutes les 15 secondes :
+#
+#   failed to get cpu utilization: unable to fetch metrics from resource
+#   metrics API: the server could not find the requested resource
+#   (get pods.metrics.k8s.io)
+#
+# `kubectl top` renvoyait la meme erreur. Rien dans ce depot n'installait
+# metrics-server : ce n'etait pas une panne, c'etait une absence.
+- name: Installer metrics-server
+  when: k8s_metrics_server_enabled | bool
+  block:
+
+    - name: Ajouter le depot Helm de metrics-server
+      ansible.builtin.command: >-
+        helm repo add metrics-server
+        https://kubernetes-sigs.github.io/metrics-server/
+      register: k8s_ms_repo
+      changed_when: "'has been added' in k8s_ms_repo.stdout"
+      environment: &msenv
+        KUBECONFIG: /etc/kubernetes/admin.conf
+
+    - name: Mettre a jour les depots Helm
+      ansible.builtin.command: helm repo update metrics-server
+      changed_when: false
+      environment: *msenv
+
+    - name: Deposer les valeurs Helm de metrics-server
+      ansible.builtin.template:
+        src: metrics-server-values.yaml.j2
+        dest: /root/metrics-server-values.yaml
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Installer metrics-server
+      ansible.builtin.include_tasks: helm_release.yml
+      vars:
+        hr_name: metrics-server
+        hr_chart: metrics-server/metrics-server
+        hr_namespace: "{{ k8s_metrics_server_namespace }}"
+        hr_version: "{{ k8s_metrics_server_chart_version }}"
+        hr_values: /root/metrics-server-values.yaml
+        hr_timeout: 5m
+
+    # `--wait` de Helm attend que le POD soit pret, pas que l'API agregee
+    # reponde : l'APIService met quelques secondes de plus a passer `Available`,
+    # et un HPA interroge entre-temps voit encore `<unknown>`.
+    - name: Attendre que l'API metrics.k8s.io reponde
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf top nodes --no-headers
+      register: k8s_ms_top
+      changed_when: false
+      failed_when: false
+      retries: 20
+      delay: 10
+      until: k8s_ms_top.rc == 0
+
+    - name: Signaler une API de metriques toujours muette
+      ansible.builtin.debug:
+        msg: >-
+          metrics-server est deploye mais `kubectl top nodes` echoue encore
+          apres 200 s : {{ k8s_ms_top.stderr | default('cause inconnue') }}.
+          Verifier l'APIService (kubectl get apiservices v1beta1.metrics.k8s.io)
+          et les journaux du pod dans {{ k8s_metrics_server_namespace }}.
+      when: k8s_ms_top.rc != 0
+
+    - name: Etat des metriques
+      ansible.builtin.debug:
+        msg:
+          - "metrics-server chart {{ k8s_metrics_server_chart_version }}"
+          - "{{ k8s_ms_top.stdout_lines | default(['API de metriques indisponible']) }}"
+          - "Les HPA de urbanconnect (backend, frontend) mesurent a nouveau."
+      when: k8s_ms_top.rc == 0

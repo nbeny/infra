@@ -21,8 +21,15 @@
   ansible.builtin.import_tasks: tools.yml
   tags: [k8s-tools]
 
-# Les deux blocs suivants ne concernent que le plan de controle et supposent un
-# cluster deja initialise. Helm, installe par tools.yml, est requis par l'edge.
+# Les blocs suivants ne concernent que le plan de controle et supposent un
+# cluster deja initialise. Helm, installe par tools.yml, leur est requis.
+- name: Installer le serveur de metriques
+  ansible.builtin.import_tasks: metrics.yml
+  when:
+    - not (k8s_install_only | bool)
+    - k8s_role == 'control_plane'
+  tags: [k8s-metrics]
+
 - name: Provisionner le stockage
   ansible.builtin.import_tasks: storage.yml
   when:
