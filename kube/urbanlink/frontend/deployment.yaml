@@ -108,6 +108,24 @@ spec:
             # navigateur. Le navigateur, lui, passe par auth.urbanlink.fr.
             - name: KRATOS_PUBLIC_URL
               value: http://kratos:4433
+            # Meme cible que NOMINATIM_PROXY_URL plus haut, sous le nom que
+            # lisent reellement les handlers -- et c'est la 4e occurrence du
+            # meme piege que GRAPHQL_ENDPOINT ci-dessus.
+            #
+            # `/api/geocode/route.ts` fait
+            # `process.env.NOMINATIM_INTERNAL_URL ?? 'http://127.0.0.1:8081'`.
+            # La variable etant absente ici, il appelait ce defaut de
+            # developpement : dans un pod, `127.0.0.1:8081` n'est personne. Le
+            # geocodage serveur (onglet Identite du profil) echouait donc en
+            # ECONNREFUSED, sans que rien ne le signale -- le repli code en dur
+            # transforme une variable oubliee en panne muette.
+            #
+            # C'est aussi le nom que prefere `/api/address/autocomplete`
+            # (autocompletion BAN puis Nominatim). Ce handler-la sait retomber
+            # sur NOMINATIM_PROXY_URL, donc il fonctionnait deja ; celui de
+            # `/api/geocode`, non.
+            - name: NOMINATIM_INTERNAL_URL
+              value: http://nominatim:8080
             # MaxMind GeoIP
             - name: GEOIP_DB_PATH
               value: /usr/share/GeoIP/GeoLite2-Country.mmdb
