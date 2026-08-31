@@ -55,7 +55,30 @@ spec:
               memory: 4Gi
             limits:
               cpu: 4000m
-              memory: 16Gi  # Import initial très gourmand
+              # ⚠️ 16Gi NE SUFFIT PAS a l'import de l'Europe. Mesure le
+              # 31/08/2026 : `osm2pgsql` a ete tue par le OOM killer du cgroup a
+              # 01:10 avec 14,2 Go de RSS, et le conteneur relance est reste
+              # colle a 16383 Mo -- exactement son plafond -- pendant des heures.
+              #
+              # Ce n'etait pas une pression memoire de la machine : la VM a 94 Go
+              # dont 80 disponibles. C'est la limite du conteneur, et elle seule,
+              # qui tuait l'import.
+              #
+              # Cette meme saturation explique les 89 et 93 redemarrages du
+              # kube-controller-manager et du kube-scheduler sur la meme periode :
+              # sous la pression, l'apiserver ne repondait plus dans les 5 s du
+              # renouvellement de bail, les deux perdaient l'election et
+              # sortaient en `leaderelection lost`.
+              #
+              # ⚠️ Modifier ce bloc RECREE le pod, donc REPART L'IMPORT DE ZERO
+              # (plusieurs heures). Pour relever la limite d'un import en cours,
+              # passer par le redimensionnement a chaud, qui ne redemarre pas le
+              # conteneur :
+              #   kubectl -n urbanconnect patch pod nominatim-0 \
+              #     --subresource resize --type merge \
+              #     -p '{"spec":{"containers":[{"name":"nominatim",
+              #          "resources":{"limits":{"memory":"32Gi"}}}]}}'
+              memory: 32Gi
           readinessProbe:
             httpGet:
               path: /search?q=paris&format=json
