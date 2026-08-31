@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kibana-setup
+  namespace: urbanconnect
+  labels:
+    app: kibana-setup
+spec:
+  # One-shot : importe les tableaux de bord UrbanLink dans Kibana. Miroir du
+  # service `kibana-setup` du docker-compose 10000 -- meme fichier, meme appel.
+  #
+  # ⚠️ Le contenu importe ne vient PAS de ce depot : `dashboards.ndjson` vit
+  # dans `config/common/kibana/` du depot APPLICATIF (UrbanConnct), aux cotes
+  # du docker-compose qui monte le meme fichier en dev. C'est ce qui empeche
+  # les tableaux de bord de diverger entre les deux environnements. La
+  # ConfigMap `kibana-dashboards` est creee par playbooks/31-urbanlink-deploy.yml.
+  #
+  # `overwrite=true` : le depot fait autorite a chaque deploiement. Corollaire
+  # assume -- une retouche faite a la main dans l'interface est perdue au
+  # passage suivant. Pour la garder, la reporter dans
+  # `config/common/kibana/build-dashboards.mjs` et regenerer le NDJSON.
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: kibana-setup
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kibana-setup
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - |
+              # ⚠️ `/api/status` repond 200 bien AVANT d'etre utilisable :
+              # Kibana sert un statut en annoncant `"level":"unavailable"`
+              # pendant la migration de ses objets sauvegardes, et un import
+              # lance a ce moment meurt en 503. C'est le niveau qu'on attend,
+              # pas le code HTTP.
+              until curl -s -u "elastic:$ELASTIC_PASSWORD" http://kibana:5601/api/status \
+                | grep -q '"level":"available"'; do
+                echo "En attente de Kibana..."; sleep 5;
+              done
+              curl -sf -u "elastic:$ELASTIC_PASSWORD" -X POST \
+                "http://kibana:5601/api/saved_objects/_import?overwrite=true" \
+                -H "kbn-xsrf: true" \
+                -F file=@/dashboards/dashboards.ndjson
+              echo
+              echo "tableaux de bord importes"
+          env:
+            # Le superuser, et non `kibana_system` : ce dernier est un compte
+            # INTERNE, reserve a la liaison Kibana <-> Elasticsearch. Il n'a pas
+            # le droit d'ecrire des objets sauvegardes, et l'import repondrait
+            # 403 sans que rien ne dise que le compte est en cause.
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: ELASTICSEARCH_PASSWORD
+          volumeMounts:
+            - name: dashboards
+              mountPath: /dashboards
+              readOnly: true
+      volumes:
+        - name: dashboards
+          configMap:
+            name: kibana-dashboards

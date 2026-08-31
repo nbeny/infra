@@ -21,6 +21,20 @@ spec:
           ports:
             - containerPort: 5601
           env:
+            # Kibana reclame l'URL par laquelle un navigateur l'atteint, et la
+            # deduire lui est impossible derriere une passerelle Istio : il ne
+            # voit que `kibana:5601`. Sans elle il avertit a chaque demarrage
+            # (« In a production environment, it is recommended that you
+            # configure server.publicBaseUrl ») et tout ce qui fabrique un lien
+            # absolu -- liens courts « Share », rapports, alertes -- rend une
+            # URL interne que le destinataire ne peut pas ouvrir.
+            #
+            # ⚠️ Doit suivre l'hote du VirtualService `uc-kibana`
+            # (ingress/virtualservices.yaml). Le TLS est termine par
+            # l'openresty du noeud Proxmox, d'ou `https` alors que la
+            # passerelle, elle, parle en clair.
+            - name: SERVER_PUBLICBASEURL
+              value: https://kibana.urbanlink.fr
             - name: ELASTICSEARCH_HOSTS
               value: http://elasticsearch:9200
             - name: ELASTICSEARCH_USERNAME

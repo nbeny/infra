@@ -236,6 +236,16 @@
         # pas une place dans celle-ci.
         - name: nominatim-config
           src: "--from-env-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/nominatim/nominatim.env"
+        # ⚠️ **Le FICHIER seul, pas le repertoire `common/kibana/`.** Celui-ci
+        # porte aussi `build-dashboards.mjs` (le generateur) et un README :
+        # `--from-file=<repertoire>` prend TOUT ce qu'il trouve et les
+        # embarquerait dans la ConfigMap, ou le Job monterait 3 fichiers pour
+        # n'en lire qu'un. Meme piege que `nominatim-config` ci-dessus.
+        #
+        # `--from-file` et non `--from-env-file` : le Job la monte en VOLUME et
+        # passe le fichier a `curl -F`, il ne la consomme pas en `envFrom`.
+        - name: kibana-dashboards
+          src: "--from-file={{ urbanlink_config_dest }}/common/kibana/dashboards.ndjson"
         # ⚠️ `observability-config` n'est PAS construite ici, volontairement :
         # aucun workload de ce depot ne la monterait. La pile LGTM (collecteur
         # OTLP, Tempo, Loki, Prometheus applicatif, Grafana) n'est pas encore
@@ -455,10 +465,12 @@
     # reste du stack avec lui. Or leur specification bouge a chaque livraison :
     # `kustomize edit set image` y reecrit le tag comme partout ailleurs.
     #
-    # Les quatre sont IDEMPOTENTS et courts, les supprimer avant d'appliquer ne
+    # Les cinq sont IDEMPOTENTS et courts, les supprimer avant d'appliquer ne
     # coute rien : migrations Prisma et Kratos deja jouees ne se rejouent pas,
-    # `mc mb --ignore-existing` non plus, et le mot de passe `kibana_system` se
-    # repose a l'identique. `--ignore-not-found` couvre le premier deploiement.
+    # `mc mb --ignore-existing` non plus, le mot de passe `kibana_system` se
+    # repose a l'identique, et l'import des tableaux de bord est un
+    # `_import?overwrite=true` qui converge sur le meme etat.
+    # `--ignore-not-found` couvre le premier deploiement.
     #
     # ⚠️ Ne pas remplacer par `--force` sur l'apply : ce drapeau supprime et
     # recree TOUT objet en conflit, y compris des StatefulSets — et donc leurs
@@ -472,6 +484,7 @@
         - kratos-migrate
         - minio-init
         - elasticsearch-setup
+        - kibana-setup
       changed_when: true
 
     - name: Appliquer le kustomize

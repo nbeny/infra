@@ -87,7 +87,7 @@
     # supprime exactement la garantie de reproductibilite qu'apporte `npm ci`.
     urbanlink_backend_relock: false
 
-    urbanlink_images:
+    urbanlink_images_base:
       - name: urbanconnect-backend
         context: backTs
         dockerfile: Dockerfile
@@ -100,6 +100,33 @@
         context: backTs
         dockerfile: Dockerfile.temporal-worker
         target: ""
+
+    # ⚠️ Image de SEED — hors du jeu par defaut, et pour deux raisons.
+    #
+    # Elle embarque les dependances COMPLETES (`npm ci` sans `--omit=dev`,
+    # ~1,5 Go) alors qu'elle ne sert qu'a une operation exceptionnelle : la
+    # construire a chaque livraison serait plusieurs minutes gachees.
+    #
+    # ⚠️ Son contexte est la RACINE du depot applicatif, seul endroit d'ou
+    # `backTs/` et `front/` sont visibles ensemble -- `prisma/seed.ts` importe
+    # `../../front/src/data/categoriesStructure`. Elle exige donc le
+    # `.dockerignore` racine, sans lequel `data/europe-latest.osm.pbf` (33 Go)
+    # part au demon. Detail complet dans l'en-tete de `Dockerfile.seed`.
+    #
+    #   ansible-playbook playbooks/30-urbanlink-images.yml -e urbanlink_build_seed_image=true
+    #
+    # Construire l'image ne seede RIEN : c'est le Job `backend-seed`, applique
+    # a la main, qui efface la base et repose les donnees de demonstration.
+    urbanlink_build_seed_image: false
+    urbanlink_seed_image:
+      - name: urbanconnect-seed
+        context: "."
+        dockerfile: Dockerfile.seed
+        target: ""
+
+    urbanlink_images: >-
+      {{ urbanlink_images_base
+         + (urbanlink_seed_image if urbanlink_build_seed_image | bool else []) }}
 
   tasks:
 

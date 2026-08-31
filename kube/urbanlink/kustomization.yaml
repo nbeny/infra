@@ -14,6 +14,7 @@
 #        postgres-init      common/postgres-init
 #        pgbouncer-config                        <env>/pgbouncer
 #        nominatim-config   common/nominatim   + <env>/nominatim
+#        kibana-dashboards  common/kibana/dashboards.ndjson
 #      Chacune fusionne deux répertoires, ce que kustomize ne sait pas faire et
 #      que `kubectl create configmap` fait (plusieurs --from-file).
 #      Carte complète : config/README.md du dépôt applicatif.
@@ -36,7 +37,8 @@
 #      elasticsearch-setup (après elasticsearch — fixe le mdp kibana_system)
 #   5. kratos (après kratos-migrate), temporal (auto-setup après postgres)
 #   6. oathkeeper (après kratos), directus, nominatim, kafka-ui, temporal-ui,
-#      kibana (après elasticsearch-setup)
+#      kibana (après elasticsearch-setup), puis kibana-setup (après kibana —
+#      il attend lui-même que le statut passe à `available`)
 #   7. backend (après pgbouncer, redis, kratos, minio, kafka, temporal, elasticsearch)
 #   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
 #   9. frontend (après backend)
@@ -88,6 +90,7 @@ resources:
   - elasticsearch/setup-job.yaml
   - kibana/deployment.yaml
   - kibana/service.yaml
+  - kibana/setup-job.yaml
 
   # Object storage
   - minio/statefulset.yaml
