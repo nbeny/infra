@@ -27,6 +27,31 @@ spec:
               value: kafka:9092
             - name: DYNAMIC_CONFIG_ENABLED
               value: "true"
+            # ----------------------------------------------------------------
+            #  Authentification -- cette console n'en avait AUCUNE
+            # ----------------------------------------------------------------
+            # Sans `AUTH_TYPE`, kafka-ui sert son interface a quiconque atteint
+            # le port : n'importe qui sur le LAN pouvait lire tous les topics et,
+            # `DYNAMIC_CONFIG_ENABLED` etant a true, modifier la configuration
+            # des clusters depuis le navigateur.
+            #
+            # `LOGIN_FORM` est le seul mode qui n'exige pas de fournisseur
+            # externe (les autres sont OAUTH2, LDAP, OIDC). Il s'appuie sur
+            # l'utilisateur unique de Spring Security, d'ou les deux variables
+            # `SPRING_SECURITY_USER_*` -- ce sont les noms que lit le produit,
+            # pas des noms choisis ici.
+            - name: AUTH_TYPE
+              value: LOGIN_FORM
+            - name: SPRING_SECURITY_USER_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: CONSOLE_ADMIN_USER
+            - name: SPRING_SECURITY_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: CONSOLE_ADMIN_PASSWORD
           resources:
             requests:
               cpu: 50m
