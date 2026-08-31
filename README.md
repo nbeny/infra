@@ -14,7 +14,7 @@ host principal.
 >
 > | VM | VMID | IP | État vérifié |
 > |---|---|---|---|
-> | `urbanlink` | 111 | 10.0.0.111 | 16 vCPU / 64 Go / 700 Go — k8s 1.36.4, `local-path`, Traefik + CrowdSec, **stack UrbanLink déployé** (62 objets, 16 pods `Running`) |
+> | `urbanlink` | 111 | 10.0.0.111 | 16 vCPU / 64 Go / 700 Go — k8s 1.36.4, `local-path`, Istio ambient (Traefik et CrowdSec retirés du cluster — CrowdSec vit sur l'openresty du nœud), **stack UrbanLink déployé** (62 objets, 16 pods `Running`) |
 > | `test-k8s` | 190 | 10.0.0.190 | Kubernetes 1.36.4 `Ready`, 8 pods `Running`, Docker 29.7, Helm 4.2, k9s |
 > | `kali-test` | 120 | 10.0.0.120 | 2899 paquets, `kali-linux-large` (nmap, metasploit, burpsuite, bloodhound, impacket…) |
 >
