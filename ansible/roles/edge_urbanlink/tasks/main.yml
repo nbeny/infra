@@ -75,6 +75,79 @@
   when: edge_urbanlink_cloudflare_only | bool
   notify: reload openresty
 
+# ---------------------------------------------------------------------------
+#  Fichier de mots de passe des consoles sans authentification native
+# ---------------------------------------------------------------------------
+# Rien ici si aucun service ne porte `basic_auth: true`.
+- name: Etablir la liste des services proteges au bord
+  ansible.builtin.set_fact:
+    edge_basic_services: >-
+      {{ edge_urbanlink_services
+         | selectattr('basic_auth', 'defined') | selectattr('basic_auth') | list }}
+
+- name: Preparer l'authentification au bord
+  when: edge_basic_services | length > 0
+  block:
+
+    # Le meme couple que les comptes natifs des autres consoles. La source est
+    # secrets.env, NON VERSIONNE, lu sur le noeud de controle -- c'est deja lui
+    # qui alimente le Secret Kubernetes, il n'y a donc qu'une verite.
+    - name: Lire le compte console dans secrets.env
+      ansible.builtin.set_fact:
+        edge_basic_user: >-
+          {{ lookup('file', edge_urbanlink_secrets_env)
+             | regex_search('^CONSOLE_ADMIN_USER=(.*)$', '\1', multiline=True)
+             | first | default('') | trim }}
+        edge_basic_password: >-
+          {{ lookup('file', edge_urbanlink_secrets_env)
+             | regex_search('^CONSOLE_ADMIN_PASSWORD=(.*)$', '\1', multiline=True)
+             | first | default('') | trim }}
+      no_log: true
+
+    # Sans ce garde-fou, un secrets.env incomplet produirait un htpasswd vide :
+    # nginx repondrait 401 a TOUT LE MONDE sur ces trois noms, sans qu'aucun mot
+    # de passe ne fonctionne -- une panne, pas une protection.
+    - name: Exiger un compte console utilisable
+      ansible.builtin.assert:
+        that:
+          - edge_basic_user | length > 0
+          - edge_basic_password | length >= 8
+        fail_msg: >-
+          CONSOLE_ADMIN_USER / CONSOLE_ADMIN_PASSWORD sont absents ou trop
+          courts dans {{ edge_urbanlink_secrets_env }}. Les renseigner avant de
+          proteger
+          {{ edge_basic_services | map(attribute='name') | join(', ') }}.
+
+    # ⚠️ `$2y$` et non le `$2b$` que produit python-bcrypt. Les deux designent
+    # le meme algorithme, mais `$2y$` est le prefixe historiquement reconnu par
+    # nginx et Apache ; certaines implementations de crypt(3) ignorent `$2b$` et
+    # renvoient alors NULL, ce que nginx traduit par un refus systematique.
+    - name: Calculer l'empreinte bcrypt
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import bcrypt, sys
+            h = bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(rounds=10)).decode()
+            print(h.replace('$2b$', '$2y$', 1))
+          - "{{ edge_basic_password }}"
+      register: edge_basic_hash
+      changed_when: false
+      no_log: true
+
+    # Lisible par les workers (www-data) et par personne d'autre : un hash
+    # bcrypt reste une cible hors ligne s'il fuite.
+    - name: Deposer le fichier de mots de passe
+      ansible.builtin.copy:
+        content: "{{ edge_basic_user }}:{{ edge_basic_hash.stdout | trim }}\n"
+        dest: "{{ edge_urbanlink_htpasswd }}"
+        owner: root
+        group: www-data
+        mode: "0640"
+      no_log: true
+      notify: reload openresty
+
 # Le port 80 avait deja son hote par defaut (20-default-deny.conf, hors de ce
 # role) ; le 443 n'en avait aucun. Voir l'en-tete du template.
 - name: Deposer l'hote par defaut en TLS

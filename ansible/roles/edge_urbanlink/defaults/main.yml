@@ -36,6 +36,30 @@ edge_urbanlink_allow:
   - 192.168.1.0/24
   - 192.168.100.0/24
 
+# --- Authentification au bord, pour les consoles qui n'en ont pas -----------
+# TROIS consoles n'ont AUCUN moyen natif de demander un mot de passe :
+#
+#   kiali       ses seules strategies sont anonymous, token (ServiceAccount)
+#               et openid -- pas de compte local.
+#   temporal    en 2.31.2, l'authentification passe exclusivement par OIDC.
+#   prometheus  sait faire du basic_auth (--web.config.file), mais l'activer
+#               ici casserait ses deux sondes (/-/healthy, /-/ready), le
+#               sidecar configmap-reload qui appelle /-/reload sans pouvoir
+#               s'authentifier, et les graphes de Kiali, dont la
+#               configuration n'a aucun bloc `auth`.
+#
+# Elles sont donc protegees ICI. Il n'y a pas de double invite : n'ayant pas de
+# login propre, cette invite-ci est la seule. Les six autres consoles ont un
+# VRAI compte dans l'outil (playbooks/34-console-accounts.yml) et ne passent
+# pas par ce mecanisme -- leur imposer les deux serait s'identifier deux fois
+# pour rien.
+#
+# Le couple identifiant/mot de passe est celui des autres consoles : il est lu
+# dans secrets.env, sur le noeud de controle, jamais ecrit dans ce depot.
+edge_urbanlink_basic_realm: "Consoles UrbanLink"
+edge_urbanlink_htpasswd: /etc/nginx/.htpasswd-consoles
+edge_urbanlink_secrets_env: "{{ playbook_dir }}/../../kube/urbanlink/secrets.env"
+
 # --- Publication Internet ---------------------------------------------------
 # L'IP publique de la ligne. Le chemin entrant existe deja et sert nbeny.fr :
 #   Internet -> Freebox:443 -> MikroTik dstnat (dst-address=192.168.1.50)
@@ -118,13 +142,16 @@ edge_urbanlink_services:
     hosts: ["kafka.urbanlink.fr"]
   - name: temporal
     hosts: ["temporal.urbanlink.fr"]
+    basic_auth: true            # OIDC uniquement en 2.31.2
   - name: kibana
     hosts: ["kibana.urbanlink.fr"]
     read_timeout: 300s
   - name: kiali
     hosts: ["kiali.urbanlink.fr"]
+    basic_auth: true            # aucun compte local dans le produit
   - name: prometheus
     hosts: ["prometheus.urbanlink.fr"]
+    basic_auth: true            # son basic_auth natif casserait sondes + Kiali
   # Argo CD -- meme palier que Kiali et Prometheus, et pour la meme raison :
   # une console qui a les pleins pouvoirs sur le cluster n'a rien a faire sur
   # Internet. Elle etait jusqu'ici accessible par `kubectl port-forward`.

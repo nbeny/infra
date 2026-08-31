@@ -21,48 +21,82 @@ spec:
           ports:
             - containerPort: 8055
           env:
-            - name: DIRECTUS_DATABASE_CLIENT
+            # ================================================================
+            #  ⚠️⚠️ LE PREFIXE `DIRECTUS_` N'EXISTE PAS. Mesure du 31/08/2026.
+            # ----------------------------------------------------------------
+            # Ces variables s'appelaient `DIRECTUS_DATABASE_*` et
+            # `DIRECTUS_STORAGE_LOCATIONS__default__*`. L'image officielle ne
+            # lit AUCUN de ces noms : elle lit `DB_*` et `STORAGE_*` bruts. Ce
+            # prefixe est une convention de chart Helm, pas du produit -- et le
+            # detail qui trahissait l'erreur etait juste en dessous, ADMIN_EMAIL
+            # et ADMIN_PASSWORD n'en ayant jamais eu.
+            #
+            # Consequence, constatee sur le cluster : `env` dans le pod montrait
+            # `DB_CLIENT=sqlite3` et `DB_FILENAME=/directus/database/database.sqlite`
+            # -- les DEFAUTS de l'image -- a cote des six DIRECTUS_DATABASE_*
+            # ignorees. Directus tournait donc sur un SQLite pose dans la couche
+            # inscriptible du conteneur, SANS volume : zero table dans la base
+            # PostgreSQL `directus` qui l'attendait, et la totalite de son
+            # contenu -- comptes, collections, reglages -- effacee a chaque
+            # redemarrage de pod. `directus bootstrap` repondait « Database
+            # already initialized » en parlant du SQLite.
+            #
+            # Le meme prefixe rendait la configuration S3 inerte : les fichiers
+            # televerses allaient dans /directus/uploads, ephemere lui aussi, au
+            # lieu de MinIO.
+            # ================================================================
+            - name: DB_CLIENT
+              value: pg
+            - name: DB_HOST
               value: postgres
-            - name: DIRECTUS_DATABASE_HOST
-              value: postgres
-            - name: DIRECTUS_DATABASE_PORT
+            - name: DB_PORT
               value: "5432"
-            - name: DIRECTUS_DATABASE_USER
+            - name: DB_USER
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: DIRECTUS_DB_USER
-            - name: DIRECTUS_DATABASE_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: DIRECTUS_DB_PASSWORD
-            - name: DIRECTUS_DATABASE_DATABASE
+            - name: DB_DATABASE
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: DIRECTUS_DB_NAME
-            - name: DIRECTUS_STORAGE_LOCATIONS__default__driver
+            # `STORAGE_LOCATIONS` nomme les emplacements ; chacun se configure
+            # ensuite sous son propre prefixe, d'ou `STORAGE_S3_*`.
+            - name: STORAGE_LOCATIONS
               value: s3
-            - name: DIRECTUS_STORAGE_LOCATIONS__default__key
+            - name: STORAGE_S3_DRIVER
+              value: s3
+            - name: STORAGE_S3_KEY
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: MINIO_ROOT_USER
-            - name: DIRECTUS_STORAGE_LOCATIONS__default__secret
+            - name: STORAGE_S3_SECRET
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: MINIO_ROOT_PASSWORD
-            - name: DIRECTUS_STORAGE_LOCATIONS__default__bucket
+            - name: STORAGE_S3_BUCKET
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: MINIO_BUCKET_NAME
-            - name: DIRECTUS_STORAGE_LOCATIONS__default__endpoint
+            - name: STORAGE_S3_ENDPOINT
               value: http://minio:9000
-            - name: DIRECTUS_STORAGE_LOCATIONS__default__use_ssl
-              value: "false"
+            # MinIO n'a pas de region, mais le SDK AWS en EXIGE une : sans elle
+            # le client refuse de signer la requete.
+            - name: STORAGE_S3_REGION
+              value: us-east-1
+            # Indispensable avec MinIO : sans lui le SDK construit des URL de
+            # type `http://<bucket>.minio:9000`, un nom d'hote qui n'existe pas.
+            - name: STORAGE_S3_FORCE_PATH_STYLE
+              value: "true"
             - name: ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:

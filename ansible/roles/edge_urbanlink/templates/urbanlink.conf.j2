@@ -54,6 +54,18 @@ server {
 {% endfor %}
     deny all;
 {% endif %}
+{% if svc.basic_auth | default(false) %}
+
+    # Cette console n'a aucun moyen natif de demander un mot de passe (voir
+    # defaults/main.yml). L'invite ci-dessous est donc la SEULE : il n'y a pas
+    # de double authentification, contrairement aux consoles qui ont un compte.
+    #
+    # `satisfy` reste a sa valeur par defaut (`all`) : le bloc allow/deny
+    # ci-dessus continue de s'appliquer EN PLUS. Le passer a `any` ferait de ce
+    # mot de passe une alternative au filtre LAN, donc l'ouvrirait a Internet.
+    auth_basic           "{{ edge_urbanlink_basic_realm }}";
+    auth_basic_user_file {{ edge_urbanlink_htpasswd }};
+{% endif %}
 
     client_max_body_size {{ svc.max_body | default('64m') }};
 

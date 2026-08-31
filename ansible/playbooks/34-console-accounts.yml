@@ -32,27 +32,18 @@
 #                 reglage de deploiement (AUTH_TYPE=LOGIN_FORM), pas un compte
 #                 stocke. Voir kube/urbanlink/kafka-ui/deployment.yaml.
 #
-#   kiali      -- IMPOSSIBLE. Ses seules strategies d'authentification sont
-#                 `anonymous`, `token` (jeton de ServiceAccount Kubernetes) et
-#                 `openid`. Il n'a pas de notion de compte local.
+#   kiali        -- pas de compte local possible : ses seules strategies sont
+#   temporal-ui     `anonymous`, `token` et `openid`. Temporal UI 2.31.2 est
+#   prometheus      OIDC uniquement. Prometheus sait faire du basic_auth, mais
+#                   l'activer casserait ses sondes /-/healthy et /-/ready, le
+#                   sidecar configmap-reload qui appelle /-/reload sans pouvoir
+#                   s'authentifier, et les graphes de Kiali, dont la
+#                   configuration n'a aucun bloc `auth`.
 #
-#   temporal-ui -- IMPOSSIBLE en 2.31.2 : l'authentification y passe
-#                 exclusivement par un fournisseur OIDC.
-#
-#   directus   -- BLOQUE par un defaut anterieur : le deploiement lui passe des
-#                 variables `DIRECTUS_DATABASE_*` que l'image officielle NE LIT
-#                 PAS (ce prefixe est une convention de chart Helm). Directus
-#                 tourne donc sur son SQLite par defaut
-#                 (`/directus/database/database.sqlite`), sans volume monte --
-#                 autrement dit tout son contenu, comptes compris, disparait a
-#                 chaque redemarrage de pod. Y creer un compte serait sans
-#                 effet durable. A corriger d'abord : renommer ces variables en
-#                 `DB_CLIENT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`,
-#                 `DB_DATABASE`.
-#
-#   prometheus -- hors de ce playbook : il vit dans istio-system, depose par
-#                 l'addon Istio via le role `kubernetes`. Son basic_auth se
-#                 configure la-bas, sinon le prochain passage du role l'ecrase.
+#                   Ces TROIS-la sont donc protegees au BORD, par le role
+#                   `edge_urbanlink` (`basic_auth: true`), avec le meme couple
+#                   identifiant/mot de passe. N'ayant aucun login propre, il n'y
+#                   a pas de double invite.
 # ============================================================================
 
 - name: Poser le compte d'administration commun sur les consoles internes
@@ -326,6 +317,149 @@
       no_log: true
 
     # ----------------------------------------------------------------------
+    #  Directus -- utilisateur administrateur
+    # ----------------------------------------------------------------------
+    # Suppose que le deploiement a bien `DB_*` (et non `DIRECTUS_DATABASE_*`) :
+    # tant que Directus tourne sur son SQLite par defaut, tout compte cree ici
+    # disparait au prochain redemarrage de pod. Voir l'en-tete de
+    # kube/urbanlink/directus/deployment.yaml.
+    #
+    # Le schema est cree par l'entrypoint de l'image (`bootstrap`) au demarrage,
+    # pas par ce playbook : on l'ATTEND, on ne le declenche pas.
+    - name: Attendre que Directus ait cree son schema dans PostgreSQL
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig }}"
+          - -n
+          - "{{ app_namespace }}"
+          - exec
+          - postgres-0
+          - --
+          - psql
+          - -U
+          - directus
+          - -d
+          - directus
+          - -tAc
+          - select count(*) from directus_roles
+      register: uc_directus_ready
+      changed_when: false
+      failed_when: false
+      retries: 30
+      delay: 10
+      until: uc_directus_ready.rc == 0
+
+    - name: Signaler un Directus non amorce
+      ansible.builtin.debug:
+        msg: >-
+          Le schema Directus est absent de PostgreSQL apres 5 minutes d'attente.
+          Le compte n'est PAS cree. Verifier que le pod porte bien DB_CLIENT=pg
+          (et non DIRECTUS_DATABASE_CLIENT) : kubectl -n {{ app_namespace }}
+          exec deploy/directus -- env | grep ^DB_
+      when: uc_directus_ready.rc != 0
+
+    - name: Poser le compte Directus
+      when: uc_directus_ready.rc == 0
+      block:
+
+        # Le role administrateur est celui cree par le bootstrap depuis
+        # ADMIN_EMAIL. On le REUTILISE plutot que d'en fabriquer un : en
+        # Directus 11+, les droits ne sont plus portes par le role mais par les
+        # policies qui lui sont rattachees, et recreer cette chaine a la main
+        # donnerait un compte aux permissions vides.
+        - name: Relever le role de l'administrateur existant
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - --kubeconfig
+              - "{{ kubeconfig }}"
+              - -n
+              - "{{ app_namespace }}"
+              - exec
+              - postgres-0
+              - --
+              - psql
+              - -U
+              - directus
+              - -d
+              - directus
+              - -tAc
+              - select role from directus_users where role is not null order by id limit 1
+          register: uc_directus_role
+          changed_when: false
+
+        - name: Verifier si le compte existe deja
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - --kubeconfig
+              - "{{ kubeconfig }}"
+              - -n
+              - "{{ app_namespace }}"
+              - exec
+              - postgres-0
+              - --
+              - psql
+              - -U
+              - directus
+              - -d
+              - directus
+              - -tAc
+              - "select count(*) from directus_users where email = '{{ console_email }}'"
+          register: uc_directus_exists
+          changed_when: false
+
+        - name: Creer le compte Directus
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - --kubeconfig
+              - "{{ kubeconfig }}"
+              - -n
+              - "{{ app_namespace }}"
+              - exec
+              - deploy/directus
+              - --
+              - node
+              - /directus/cli.js
+              - users
+              - create
+              - --email
+              - "{{ console_email }}"
+              - --password
+              - "{{ console_password }}"
+              - --role
+              - "{{ uc_directus_role.stdout | trim }}"
+          when: uc_directus_exists.stdout | trim | int == 0
+          changed_when: true
+          no_log: true
+
+        - name: Remettre le mot de passe du compte Directus existant
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - --kubeconfig
+              - "{{ kubeconfig }}"
+              - -n
+              - "{{ app_namespace }}"
+              - exec
+              - deploy/directus
+              - --
+              - node
+              - /directus/cli.js
+              - users
+              - passwd
+              - --email
+              - "{{ console_email }}"
+              - --password
+              - "{{ console_password }}"
+          when: uc_directus_exists.stdout | trim | int > 0
+          changed_when: true
+          no_log: true
+
+    # ----------------------------------------------------------------------
     #  Compte rendu
     # ----------------------------------------------------------------------
 
@@ -338,9 +472,9 @@
           - "  kibana.urbanlink.fr      {{ console_user }}   (role superuser ES)"
           - "  kafka.urbanlink.fr       {{ console_user }}   (par le manifeste, pas ce playbook)"
           - "  pgadmin.urbanlink.fr     {{ console_email }}  <- E-MAIL, pas le nom court"
+          - "  directus.urbanlink.fr    {{ console_email }}  <- E-MAIL, pas le nom court"
           - ""
-          - "Sans compte, et pourquoi -- voir l'en-tete de ce fichier :"
+          - "Protegees au BORD par edge_urbanlink (memes identifiants, invite unique) :"
           - "  kiali.urbanlink.fr       pas de compte local dans le produit"
           - "  temporal.urbanlink.fr    OIDC uniquement en 2.31.2"
-          - "  directus.urbanlink.fr    tourne sur un SQLite ephemere (defaut a corriger)"
-          - "  prometheus.urbanlink.fr  se configure dans le role kubernetes"
+          - "  prometheus.urbanlink.fr  son basic_auth natif casserait sondes et Kiali"
