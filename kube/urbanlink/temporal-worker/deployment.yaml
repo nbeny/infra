@@ -152,6 +152,21 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: STRIPE_CONNECT_WEBHOOK_SECRET
+            # Mêmes price IDs que le backend, et c'est le point : le worker
+            # démarre sur `AppModule` (`temporal:worker:nest`), il instancie donc
+            # `SubscriptionService` lui aussi. Aucune activité ne le sollicite
+            # aujourd'hui — mais la divergence Stripe backend/worker est un défaut
+            # déjà payé ici (le worker a tourné en mode fictif pendant que le
+            # backend parlait au vrai Stripe, sans une erreur). Une activité qui
+            # appellerait `getMySubscription` sans ces IDs ne mapperait `priceId`
+            # sur aucun plan, et `syncFromStripe` remettrait à zéro les boosts
+            # d'un abonné à jour de ses paiements.
+            - name: STRIPE_PRICE_STARTER_ID
+              value: "price_1TDV5JKqEapb7zc8eV1moGrg"
+            - name: STRIPE_PRICE_PREMIUM_ID
+              value: "price_1TDV5oKqEapb7zc8S5ZzejG2"
+            - name: STRIPE_PRICE_ENTERPRISE_ID
+              value: "price_1TDV64KqEapb7zc8NDoS6Zox"
             # Google OAuth
             - name: GOOGLE_CLIENT_ID
               valueFrom:

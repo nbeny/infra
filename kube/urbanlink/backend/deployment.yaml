@@ -160,6 +160,27 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: STRIPE_CONNECT_WEBHOOK_SECRET
+            # Identifiants de prix des trois plans payants (mode TEST).
+            #
+            # En clair et non dans le Secret : un price ID n'est pas un secret —
+            # il part chez le navigateur dans l'URL du Checkout hébergé. C'est de
+            # la configuration propre à l'environnement, au même titre que
+            # FRONTEND_URL et CORS_ORIGIN ci-dessus. Le poser ici le fait
+            # réconcilier par Argo CD ; dans le Secret il exigerait de rejouer le
+            # playbook Ansible 31 à chaque changement de tarif.
+            #
+            # ⚠️ Absents, ces trois-là ne cassent RIEN de visible : `listPlans()`
+            # ne lit un montant que si `this.stripe && priceId`, donc le prix sort
+            # à `null` et l'écran affiche « Tarif indisponible » sans une ligne de
+            # journal. Pire, `syncFromStripe` mappe `priceId → plan` par cette même
+            # table : sans elle, un abonnement réellement payé n'est rattaché à
+            # aucun plan. Constaté en production le 2026-08-31.
+            - name: STRIPE_PRICE_STARTER_ID
+              value: "price_1TDV5JKqEapb7zc8eV1moGrg"
+            - name: STRIPE_PRICE_PREMIUM_ID
+              value: "price_1TDV5oKqEapb7zc8S5ZzejG2"
+            - name: STRIPE_PRICE_ENTERPRISE_ID
+              value: "price_1TDV64KqEapb7zc8NDoS6Zox"
             # SMS
             - name: SMSAPI_TOKEN
               valueFrom:
