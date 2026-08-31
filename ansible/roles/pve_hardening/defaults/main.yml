@@ -68,14 +68,66 @@ pve_hardening_crowdsec_nginx_files:
   - /usr/local/openresty/nginx/logs/*.log
   - /var/log/nginx/*.log
 
+# --- Detection des echecs de login applicatif (Ory Kratos) -----------------
+# Aucun parseur du hub ne pose `sub_type: auth_fail` sur ce noeud, ce qui rend
+# `crowdsecurity/http-generic-bf` structurellement inerte. Les deux fichiers
+# maison ci-dessous le reveillent et ajoutent un seuil lent. Detail et mesures
+# en tete des templates kratos-logs.yaml.j2 et kratos-bf.yaml.j2.
+pve_hardening_crowdsec_kratos: true
+
+# Mesure : un echec d'identifiants rend 400, un succes 303. Un CSRF invalide
+# rend 403 et un flow expire 410 -- ni l'un ni l'autre n'est un echec de
+# credentials, et aucun des deux ne doit compter.
+pve_hardening_crowdsec_kratos_status: "400"
+
+# Le prefixe optionnel couvre le second chemin d'acces a Kratos, proxifie par
+# le frontend : urbanlink.fr/api/kratos/self-service/login.
+#
+# Le point d'interrogation litteral s'ecrit `[?]` et NON `\?` : expr traite les
+# chaines entre apostrophes comme du Go, ou `\?` n'est pas une echappement
+# valide. CrowdSec refuse alors de demarrer, pas seulement de charger la regle
+#   FATAL crowdsec init: while loading parsers: ... invalid char escape
+# La classe de caracteres dit la meme chose sans echappement du tout.
+pve_hardening_crowdsec_kratos_path_re: '^(/api/kratos)?/self-service/login/?([?]|$)'
+
+# ~10 echecs en ~50 min. Volontairement tolerant : une IP bannie perd l'acces
+# a TOUS les vhosts du noeud, le bouncer openresty repondant avant le cluster.
+pve_hardening_crowdsec_kratos_capacity: 10
+pve_hardening_crowdsec_kratos_leakspeed: "5m"
+
 # Lignes de reference passees a `cscli explain` en fin de role. Une chaine de
 # parsing qui echoue sur l'une d'elles fait echouer le play : c'est le seul
 # moyen de constater que la detection marche sans attendre un vrai attaquant.
-pve_hardening_crowdsec_probes:
+# `expect` va plus loin que « ca parse » : il exige que l'evenement atteigne
+# bien le scenario cense l'attraper.
+pve_hardening_crowdsec_probes_base:
   - name: "SSH (OpenSSH >= 9.8, programme sshd-session)"
+    type: syslog
     log: "2026-01-01T00:00:00.000000+01:00 pve sshd-session[1]: Invalid user admin from 203.0.113.1 port 4242"
+    expect: crowdsecurity/ssh-bf
   - name: "Authentification Proxmox (pvedaemon)"
+    type: syslog
     log: "2026-01-01T00:00:00.000000+01:00 pve pvedaemon[1]: authentication failure; rhost=203.0.113.1 user=root@pam msg=Authentication failure"
+    expect: fulljackz/proxmox-bf
+
+# Les deux chemins d'acces a Kratos sont sondes separement : ils passent par
+# des vhosts differents et le second porte le prefixe du frontend. Le second
+# vise http-generic-bf, ce qui verifie du meme coup que `sub_type: auth_fail`
+# est bien pose -- le scenario du hub qui etait inerte.
+pve_hardening_crowdsec_probes_kratos:
+  - name: "Echec de login Kratos, chemin direct"
+    type: nginx
+    log: '203.0.113.1 - - [01/Jan/2026:00:00:00 +0100] "POST /self-service/login?flow=00000000-0000-0000-0000-000000000000 HTTP/1.1" 400 2019 "-" "curl/8.14.1"'
+    expect: alesio/kratos-bf
+  - name: "Echec de login Kratos, chemin proxifie par le frontend"
+    type: nginx
+    log: '203.0.113.1 - - [01/Jan/2026:00:00:00 +0100] "POST /api/kratos/self-service/login/?flow=00000000-0000-0000-0000-000000000000 HTTP/1.1" 400 2019 "-" "curl/8.14.1"'
+    expect: crowdsecurity/http-generic-bf
+
+pve_hardening_crowdsec_probes: >-
+  {{ pve_hardening_crowdsec_probes_base
+     + (pve_hardening_crowdsec_probes_kratos
+        if pve_hardening_crowdsec_kratos | bool else []) }}
 
 # --- Constats 7 et 9 : services exposes inutilises -------------------------
 pve_hardening_disable_unused: false

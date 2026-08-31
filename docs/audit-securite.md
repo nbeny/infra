@@ -297,6 +297,58 @@ si une ligne SSH ou `pvedaemon` de référence ne parse pas.
 
 ---
 
+## 🟠 5 ter. Aucun échec de login applicatif n'est détecté
+
+`crowdsecurity/http-generic-bf` est installé et **structurellement incapable de
+se déclencher** : il filtre sur un champ que rien ne pose.
+
+```console
+$ grep -n filter /etc/crowdsec/scenarios/http-generic-bf.yaml
+filter: "evt.Meta.service == 'http' && evt.Meta.sub_type == 'auth_fail'"
+
+$ grep -r auth_fail /etc/crowdsec/parsers/
+(rien)
+```
+
+`sub_type: auth_fail` est le contrat que posent les parseurs applicatifs du hub
+(Nextcloud, WordPress…). Aucun n'est installé ici, et Ory Kratos n'en a pas.
+Conséquence : **du credential stuffing contre `auth.urbanlink.fr` depuis des IP
+sans mauvaise réputation ne déclenche rien.**
+
+Nuance mesurée : ce n'est pas un trou total. `crowdsecurity/http-probing`
+accepte le statut 400 avec `distinct: evt.Meta.http_path`, et comme chaque
+tentative porte un `?flow=<uuid>` différent, onze échecs en moins de deux
+minutes le déclenchent — par accident, et étiquetés « scan » au lieu de
+« bruteforce ». Deux façons de passer à côté : espacer les tentatives, ou
+rejouer le **même** flow, ce que Kratos autorise et qui fait tomber le
+`distinct` à 1.
+
+Le discriminant, relevé en soumettant de vrais identifiants invalides à travers
+Cloudflare puis en relisant `/var/log/nginx/access.log` :
+
+```
+échec  : "POST /self-service/login?flow=784213ef-… HTTP/1.1" 400 2019
+succès : "POST /self-service/login?flow=a77631bc-… HTTP/1.1" 303 0
+```
+
+**Correctif** — inclus dans `pve_hardening_crowdsec_acquis: true`, réglable par
+`pve_hardening_crowdsec_kratos*` :
+
+- `alesio/kratos-logs` (parseur `s02-enrich`) pose `sub_type: auth_fail` sur ces
+  400, ce qui **remet `crowdsecurity/http-generic-bf` en service** — 5 échecs en
+  50 s ;
+- `alesio/kratos-bf` (scénario) couvre le cas que la rafale laisse passer, et
+  qui est le mode normal du credential stuffing : 10 échecs en ~50 min.
+
+Les deux chemins d'accès à Kratos sont couverts (`auth.urbanlink.fr` en direct
+et `urbanlink.fr/api/kratos/…` proxifié par le frontend).
+
+> Une IP bannie perd l'accès à **tous** les vhosts du nœud, le bouncer lua
+> d'openresty répondant avant le cluster. D'où un seuil volontairement
+> tolérant. Pour lever une décision : `cscli decisions delete --ip <IP>`.
+
+---
+
 ## 🟠 6. Aucun 2FA sur `root@pam`
 
 ```console

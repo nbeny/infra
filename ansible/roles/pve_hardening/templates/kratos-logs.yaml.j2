@@ -1,0 +1,57 @@
+# {{ ansible_managed }}
+# ---------------------------------------------------------------------------
+#  alesio/kratos-logs -- reconnaitre un echec de login Ory Kratos
+# ---------------------------------------------------------------------------
+# Pourquoi ce fichier existe : aucun parseur du hub ne pose
+# `evt.Meta.sub_type = 'auth_fail'` sur ce noeud.
+#
+#   $ grep -r auth_fail /etc/crowdsec/parsers/
+#   (rien)
+#
+# Or c'est exactement ce que `crowdsecurity/http-generic-bf` attend :
+#   filter: "evt.Meta.service == 'http' && evt.Meta.sub_type == 'auth_fail'"
+# Le scenario etait donc installe et structurellement incapable de se
+# declencher. Le poser ici le remet en service, gratuitement.
+#
+# CE QUE VOIT L'EDGE. Mesure le 2026-08-31 en soumettant de vrais identifiants
+# invalides a travers Cloudflare, puis en relisant /var/log/nginx/access.log :
+#
+#   echec :  "POST /self-service/login?flow=784213ef-... HTTP/1.1" 400 2019
+#   succes : "POST /self-service/login?flow=a77631bc-... HTTP/1.1" 303 0
+#
+# 400 contre 303 : le discriminant est net, et il n'exige pas de lire le corps
+# de la reponse. A noter, un CSRF invalide repond 403 et un flow expire 410 --
+# ni l'un ni l'autre ne sont comptes comme un echec d'identifiants.
+#
+# LES DEUX CHEMINS. Kratos est joignable de deux facons, et un attaquant
+# choisira celle qu'il veut :
+#   auth.urbanlink.fr/self-service/login          (Kratos en direct)
+#   urbanlink.fr/api/kratos/self-service/login    (proxifie par le frontend)
+# Le format de log est `combined`, qui ne porte PAS l'en-tete Host : on ne peut
+# pas distinguer les vhosts. Ce n'est pas genant ici, le chemin
+# `/self-service/login` suffit a identifier Kratos sans ambiguite -- et c'est
+# aussi pour ca que le motif accepte le prefixe optionnel du frontend.
+#
+# CE QUI ETAIT DEJA COUVERT, ET MAL. `crowdsecurity/http-probing` accepte le
+# statut 400 avec `distinct: evt.Meta.http_path`. Comme chaque tentative porte
+# un `?flow=<uuid>` different, onze echecs en moins de deux minutes le
+# declenchent -- par accident, et etiquetes « scan » au lieu de « bruteforce ».
+# Deux facons de passer a cote : espacer les tentatives, ou rejouer le MEME
+# flow, ce que Kratos autorise et qui fait collapser le `distinct` a 1.
+
+filter: >-
+  evt.Meta.service == 'http' &&
+  evt.Meta.http_verb == 'POST' &&
+  evt.Meta.http_status == '{{ pve_hardening_crowdsec_kratos_status }}' &&
+  evt.Meta.http_path matches '{{ pve_hardening_crowdsec_kratos_path_re }}'
+name: alesio/kratos-logs
+description: "Marque les echecs d'authentification Ory Kratos vus par l'edge nginx"
+statics:
+  # Le contrat du hub : c'est ce champ, et lui seul, qui reveille
+  # crowdsecurity/http-generic-bf (5 echecs en 50 s).
+  - meta: sub_type
+    value: auth_fail
+  # Champ maison, pour que alesio/kratos-bf ne vise que Kratos et n'herite pas
+  # d'un futur parseur qui poserait auth_fail pour un autre service.
+  - meta: auth_backend
+    value: kratos

@@ -1,0 +1,49 @@
+# {{ ansible_managed }}
+# ---------------------------------------------------------------------------
+#  alesio/kratos-bf -- credential stuffing lent contre Ory Kratos
+# ---------------------------------------------------------------------------
+# Le parseur alesio/kratos-logs reveille deja `crowdsecurity/http-generic-bf`,
+# qui coupe une rafale : 5 echecs en 50 secondes. Ce scenario-ci couvre le cas
+# que la rafale laisse passer, et qui est le mode normal du credential
+# stuffing : des identifiants voles, essayes lentement, sous le seuil de tout
+# ce qui compte en secondes.
+#
+#   http-generic-bf   capacity 5,  leakspeed 10s  -> ~5 echecs / 50 s
+#   alesio/kratos-bf  capacity {{ pve_hardening_crowdsec_kratos_capacity }}, leakspeed {{ pve_hardening_crowdsec_kratos_leakspeed }}  -> ~{{ pve_hardening_crowdsec_kratos_capacity }} echecs / {{ pve_hardening_crowdsec_kratos_capacity * 5 }} min
+#
+# LE SEUIL EST UN COMPROMIS, PAS UNE VERITE. Trop bas, il bannit un utilisateur
+# qui a oublie son mot de passe ; trop haut, il ne sert a rien. {{ pve_hardening_crowdsec_kratos_capacity }} echecs en
+# ~{{ pve_hardening_crowdsec_kratos_capacity * 5 }} minutes est volontairement tolerant : personne ne se trompe {{ pve_hardening_crowdsec_kratos_capacity }} fois de
+# suite de bonne foi, et une IP partagee (CGNAT, reseau d'entreprise) garde de
+# la marge. Se regle par pve_hardening_crowdsec_kratos_capacity et
+# ..._leakspeed, sans toucher a ce fichier.
+#
+# QUI PAIE UN FAUX POSITIF. La decision remonte a la LAPI, donc au bouncer lua
+# d'openresty, qui repond avant que la requete n'atteigne le cluster. Une IP
+# bannie perd l'acces a TOUS les vhosts du noeud, pas seulement a la page de
+# login. C'est la raison du seuil large ci-dessus. Pour lever une decision :
+#   cscli decisions delete --ip <IP>
+#
+# `groupby` sur la seule IP source : l'access-log ne porte ni l'identifiant
+# tente ni l'en-tete Host, on ne peut donc pas grouper plus finement -- et
+# c'est sans importance, l'IP est ce qu'on bannit.
+
+type: leaky
+name: alesio/kratos-bf
+description: "Credential stuffing lent contre Ory Kratos (auth.urbanlink.fr)"
+filter: "evt.Meta.sub_type == 'auth_fail' && evt.Meta.auth_backend == 'kratos'"
+groupby: evt.Meta.source_ip
+capacity: {{ pve_hardening_crowdsec_kratos_capacity }}
+leakspeed: "{{ pve_hardening_crowdsec_kratos_leakspeed }}"
+# Sans blackhole, un attaquant deja banni reglemente la LAPI d'alertes
+# identiques toutes les {{ pve_hardening_crowdsec_kratos_leakspeed }}.
+blackhole: 10m
+labels:
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110.004
+  behavior: "http:bruteforce"
+  label: "Kratos Credential Stuffing"
+  service: kratos
+  remediation: true

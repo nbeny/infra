@@ -167,26 +167,110 @@
       loop: [sshd.yaml, pveproxy.yaml]
       register: h_cs_acquis_d
 
+    # ------------------------------------------- 4) detection des logins rates
+    # Deux fichiers maison, deposes a cote des items du hub. Ils ne sont PAS
+    # geres par cscli : un item local n'est jamais ecrase par `hub upgrade`,
+    # c'est ce qu'on veut ici. Le « pourquoi » est en tete de chaque template.
+    - name: Deployer la detection des echecs de login Kratos
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - src: kratos-logs.yaml.j2
+          dest: /etc/crowdsec/parsers/s02-enrich/kratos-logs.yaml
+        - src: kratos-bf.yaml.j2
+          dest: /etc/crowdsec/scenarios/kratos-bf.yaml
+      loop_control:
+        label: "{{ item.dest }}"
+      when: pve_hardening_crowdsec_kratos | bool
+      register: h_cs_kratos
+
+    # Repasser la bascule a false doit reellement retirer la regle, sinon un
+    # « je desactive » laisserait des bannissements se produire.
+    - name: Retirer la detection Kratos si elle est desactivee
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/crowdsec/parsers/s02-enrich/kratos-logs.yaml
+        - /etc/crowdsec/scenarios/kratos-bf.yaml
+      when: not (pve_hardening_crowdsec_kratos | bool)
+      register: h_cs_kratos_off
+
+    # Une regle refusee ne degrade pas CrowdSec, elle l'EMPECHE DE DEMARRER :
+    #   FATAL crowdsec init: while loading parsers: ... failed to compile node
+    # Le moteur tombe alors entierement -- plus de detection, plus de decisions
+    # fraiches pour les bouncers. Constate en ecrivant ce role, avec un `\?`
+    # qu'expr refuse dans une chaine entre apostrophes.
+    #
+    # `crowdsec -t` compile toute la configuration sans toucher au service et
+    # sort en 1 si quoi que ce soit cloche. Le passer AVANT le redemarrage
+    # transforme une panne totale en echec de play.
+    - name: Valider la configuration avant tout redemarrage
+      block:
+        - name: Compiler la configuration a blanc
+          ansible.builtin.command: crowdsec -t -c /etc/crowdsec/config.yaml
+          changed_when: false
+
+      rescue:
+        # Sans ce retrait, le fichier fautif reste sur le disque : le service
+        # tourne encore sur sa configuration en memoire, mais le prochain
+        # redemarrage -- une mise a jour, un reboot -- le tuerait.
+        - name: Retirer la detection Kratos qui vient d'etre ecrite
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/crowdsec/parsers/s02-enrich/kratos-logs.yaml
+            - /etc/crowdsec/scenarios/kratos-bf.yaml
+
+        - name: Recompiler sans la detection Kratos
+          ansible.builtin.command: crowdsec -t -c /etc/crowdsec/config.yaml
+          register: h_cs_retest
+          changed_when: false
+          failed_when: false
+
+        - name: Echouer en disant ce qui a ete retire
+          ansible.builtin.fail:
+            msg: >-
+              La configuration CrowdSec ne compile pas ; le service n'a PAS ete
+              redemarre, il tourne toujours sur sa configuration precedente.
+              {{ 'Les deux fichiers Kratos ont ete retires et la configuration
+              recompile : la regle est en cause.'
+                 if h_cs_retest.rc == 0 else
+                 'Elle ne compile toujours pas apres retrait des fichiers
+              Kratos : chercher ailleurs.' }}
+              Erreur d'origine : {{ ansible_failed_result.stderr | default('') }}
+
     - name: Redemarrer CrowdSec
       ansible.builtin.systemd_service:
         name: crowdsec
         state: restarted
       when: h_cs_unlinked.changed or h_cs_collections.changed
             or h_cs_hub_upgrade.changed or h_cs_acquis.changed
-            or h_cs_acquis_d.changed
+            or h_cs_acquis_d.changed or h_cs_kratos.changed
+            or h_cs_kratos_off.changed
 
-    # ------------------------------------------------------- 4) verification
+    # ------------------------------------------------------- 5) verification
     # `cscli explain` fait tourner la chaine de parsing complete sur une ligne
-    # fournie. C'est la seule facon d'affirmer que la detection marche sans
-    # attendre un vrai attaquant -- et c'est ce qui manquait a la version
-    # precedente de ce role, qui se contentait d'afficher des metriques.
+    # fournie, puis affiche les scenarios qu'elle alimente. C'est la seule
+    # facon d'affirmer que la detection marche sans attendre un vrai attaquant
+    # -- et c'est ce qui manquait a la version precedente de ce role, qui se
+    # contentait d'afficher des metriques.
+    #
+    # `item.expect` est la moitie qui compte : une ligne peut tres bien parser
+    # et n'atteindre aucun bucket. C'etait le cas de tous les echecs de login
+    # Kratos avant alesio/kratos-logs.
     - name: Verifier le parsing des sources critiques
       ansible.builtin.command:
         argv:
           - cscli
           - explain
           - --type
-          - syslog
+          - "{{ item.type }}"
           - --log
           - "{{ item.log }}"
       loop: "{{ pve_hardening_crowdsec_probes }}"
@@ -194,7 +278,8 @@
         label: "{{ item.name }}"
       register: h_cs_probe
       changed_when: false
-      failed_when: "'parser success' not in h_cs_probe.stdout"
+      failed_when: "'parser success' not in h_cs_probe.stdout
+                    or item.expect not in h_cs_probe.stdout"
 
     - name: Etat de CrowdSec
       ansible.builtin.debug:
