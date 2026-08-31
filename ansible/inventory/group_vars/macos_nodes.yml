@@ -1,0 +1,33 @@
+---
+# ============================================================================
+#  VMs macOS
+# ----------------------------------------------------------------------------
+#  Ces hotes n'ont RIEN en commun avec les autres invites du lab :
+#    - pas de cloud-init  -> l'IP est saisie a la main dans l'invite
+#    - pas d'agent QEMU   -> Proxmox ne remonte aucune adresse
+#    - pas d'apt          -> le role `common` ne s'y applique pas
+#
+#  Ils sont donc volontairement HORS du groupe `guests`, qui sert de cible aux
+#  playbooks Debian/Kali. Les y mettre casserait 90-update.yml des la premiere
+#  tache.
+# ============================================================================
+
+# Fourni par les Command Line Tools. Avant leur installation, /usr/bin/python3
+# est une amorce qui ouvre une fenetre d'installation graphique au lieu de
+# lancer Python : c'est pourquoi le role macos_ci amorce en `raw`.
+ansible_python_interpreter: /usr/bin/python3
+
+ansible_user: "{{ lab_admin_user }}"
+ansible_become: true
+ansible_become_method: ansible.builtin.sudo
+
+# Les VMs du lab ne sont pas routables depuis le LAN : tout passe par le noeud.
+ansible_ssh_common_args: >-
+  -o ProxyJump=root@{{ pve_lan_ip }}
+  -o StrictHostKeyChecking=accept-new
+
+# macOS ne rend jamais sa memoire (pas de virtio-balloon). Rappel utile quand
+# on dimensionne : le noeud est deja surengage.
+lab_macos_note: >-
+  Plafond materiel : ce noeud n'a pas AVX2, donc Monterey (12) au maximum,
+  donc Xcode 14.2 et SDK iOS 16.2. Voir docs/macos-ci.md.

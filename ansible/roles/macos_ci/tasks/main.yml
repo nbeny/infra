@@ -1,0 +1,43 @@
+---
+# Configuration jour-2 d'une VM macOS, en SSH.
+#
+# Prerequis cote invite, faits UNE FOIS pendant l'installation graphique
+# (docs/macos-ci.md) : session ouverte, Partage > Connexion a distance active,
+# cle publique deposee, sudo sans mot de passe.
+
+- name: Amorcer les outils de compilation
+  ansible.builtin.include_tasks: bootstrap_clt.yml
+  when: macos_ci_install_clt | bool
+
+# Impossible de collecter les faits avant l'amorcage : sans les Command Line
+# Tools, /usr/bin/python3 n'est qu'une amorce qui ouvre une fenetre graphique
+# au lieu de lancer Python. `gather_facts: false` dans le playbook, puis ici.
+- name: Collecter les faits maintenant que Python existe
+  ansible.builtin.setup:
+
+- name: Verifier que l'hote est bien un macOS
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} rapporte {{ ansible_system }} et non Darwin.
+      Ce role ne s'applique qu'aux VMs macOS -- verifier le groupe
+      macos_nodes de l'inventaire.
+  when: ansible_system != 'Darwin'
+
+- name: Appliquer les reglages systeme d'un runner
+  ansible.builtin.include_tasks: system_tuning.yml
+
+- name: Installer Homebrew et les outils
+  ansible.builtin.include_tasks: homebrew.yml
+  when: macos_ci_install_homebrew | bool
+
+- name: Enregistrer le runner GitHub Actions
+  ansible.builtin.include_tasks: github_runner.yml
+  when: macos_ci_github_runner_token | length > 0
+
+- name: Rappeler le plafond Xcode
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} tourne macOS
+      {{ ansible_distribution_version | default('?') }}. Ce noeud n'a pas
+      AVX2 : Monterey est le maximum, donc Xcode 14.2 et SDK iOS 16.2. On
+      peut compiler et tester ; on ne peut pas soumettre a l'App Store.

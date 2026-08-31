@@ -1,0 +1,67 @@
+---
+# ============================================================================
+#  Template macOS sur le noeud Proxmox
+# ----------------------------------------------------------------------------
+#  ATTENTION -- ce noeud est un Xeon E5-2680 (Sandy Bridge, 2012) : il n'a PAS
+#  AVX2. Depuis macOS Ventura (13), le cache dyld d'Apple n'est compile QUE
+#  pour AVX2 et QEMU ne sait pas emuler cette seule instruction en gardant le
+#  reste en materiel. Ventura et tout ce qui suit sont donc IMPOSSIBLES ici.
+#  Monterey (12) est le plafond, et il plafonne lui-meme a Xcode 14.2.
+#  Verifier avant de changer `pve_macos_shortname` :
+#      grep -o avx2 /proc/cpuinfo   (aucune sortie = pas d'AVX2)
+# ============================================================================
+
+# --- Identite du template ---------------------------------------------------
+# 9000/9001 = socles cloud-init, 9100/9101 = golden Packer. 9200 = macOS, qui
+# ne passe par aucune de ces deux chaines (ni cloud-init, ni Packer).
+pve_macos_vmid: 9200
+pve_macos_name: tpl-macos-monterey
+
+# pool1 est vide et dispose de 3,5 To ; pool2 est a 47 %. Une image macOS avec
+# Xcode et les simulateurs depasse vite les 150 Go.
+pve_macos_storage: pool1
+
+# --- Version de macOS -------------------------------------------------------
+# Valeurs acceptees par fetch-macOS-v2.py : big-sur, monterey, ventura, sonoma.
+# Les deux dernieres ne demarreront pas sur ce noeud (AVX2).
+pve_macos_shortname: monterey
+
+# --- OSK --------------------------------------------------------------------
+# macOS refuse de demarrer sans le SMC d'Apple, qui repond une cle de 64
+# caracteres. Elle s'extrait d'un vrai Mac (voir docs/macos-ci.md) et n'est
+# volontairement pas versionnee ici. Sans elle, le role s'arrete.
+#
+#   ansible-playbook playbooks/11-macos-template.yml -e pve_macos_osk='...'
+pve_macos_osk: ""
+
+# --- Sources amont ----------------------------------------------------------
+# OpenCore est le bootloader : l'OVMF de Proxmox seul ne sait pas demarrer
+# macOS. La version est figee -- une release OpenCore plus recente peut casser
+# une version de macOS plus ancienne.
+pve_macos_opencore_release: v21
+pve_macos_opencore_url: >-
+  https://github.com/thenickdude/KVM-Opencore/releases/download/{{ pve_macos_opencore_release }}/OpenCore-{{ pve_macos_opencore_release }}.iso.gz
+pve_macos_fetch_script_url: https://raw.githubusercontent.com/kholia/OSX-KVM/master/fetch-macOS-v2.py
+
+pve_macos_work_dir: /var/lib/vz/template/macos
+
+# --- Dimensionnement du template --------------------------------------------
+# macOS veut un nombre de coeurs en puissance de 2 (1, 2, 4, 8) : une valeur
+# comme 6 provoque un kernel panic au demarrage.
+pve_macos_cores: 4
+pve_macos_sockets: 1
+pve_macos_memory: 8192
+
+# 64 Go est le minimum pour l'installeur ; Xcode seul pese ~40 Go et chaque
+# runtime de simulateur ajoute 8 a 12 Go.
+pve_macos_disk_size: 200
+
+# macOS embarque un pilote VirtIO reseau depuis Big Sur. Si l'interface
+# n'apparait pas dans Preferences Systeme apres l'installation, basculer sur
+# `vmxnet3` : c'est le repli connu.
+pve_macos_net_model: virtio
+
+# --- Comportement -----------------------------------------------------------
+# `true` detruit et reconstruit le template. Sans effet utile apres
+# l'installation graphique : la reconstruction la fait recommencer a zero.
+pve_macos_force: false

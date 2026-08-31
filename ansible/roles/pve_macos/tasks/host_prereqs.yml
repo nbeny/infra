@@ -1,0 +1,59 @@
+---
+# Prerequis du noeud pour heberger un invite macOS.
+
+# macOS lit des MSR que QEMU ne connait pas. Avec le defaut (ignore_msrs=N),
+# KVM renvoie une exception et l'invite panique tres tot au demarrage -- avant
+# meme le logo Apple, donc sans aucun message exploitable.
+- name: Autoriser KVM a ignorer les MSR inconnus (immediat)
+  ansible.builtin.copy:
+    content: "1\n"
+    dest: /sys/module/kvm/parameters/ignore_msrs
+    unsafe_writes: true
+  changed_when: true
+
+# Le fichier /sys ci-dessus ne survit pas au redemarrage : il faut aussi
+# l'option de module.
+- name: Rendre ignore_msrs persistant
+  ansible.builtin.copy:
+    content: |
+      # Requis par les invites macOS : sans cela KVM leve une exception sur
+      # les MSR qu'il ne connait pas et l'invite panique au demarrage.
+      # Pose par le role pve_macos.
+      options kvm ignore_msrs=Y
+    dest: /etc/modprobe.d/kvm-macos.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: pve_macos_modprobe
+
+- name: Regenerer l'initramfs
+  ansible.builtin.command: update-initramfs -k all -u
+  when: pve_macos_modprobe is changed
+  changed_when: true
+
+# dmg2img convertit le BaseSystem.dmg d'Apple en image brute attachable a une
+# VM. python3-requests sert a fetch-macOS-v2.py, qui interroge les serveurs de
+# recuperation d'Apple.
+- name: Installer les outils de conversion d'image
+  ansible.builtin.apt:
+    name:
+      - dmg2img
+      - python3-requests
+      - gzip
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Creer le repertoire de travail macOS
+  ansible.builtin.file:
+    path: "{{ pve_macos_work_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Verifier que le stockage cible existe
+  ansible.builtin.command: "pvesm status --storage {{ pve_macos_storage }}"
+  register: pve_macos_storage_check
+  changed_when: false
+  failed_when: pve_macos_storage_check.rc != 0

@@ -1,0 +1,36 @@
+---
+# Homebrew et les quelques outils utiles a une CI Apple.
+#
+# `become: false` PARTOUT dans ce fichier : ansible.cfg active become par
+# defaut, et Homebrew refuse categoriquement de s'executer en root. Sans ces
+# lignes, l'installation echoue sur
+# "Don't run this as root!".
+
+- name: Verifier si Homebrew est deja installe
+  ansible.builtin.stat:
+    path: /usr/local/bin/brew          # Intel : /usr/local, pas /opt/homebrew
+  register: macos_ci_brew
+  become: false
+
+- name: Installer Homebrew
+  ansible.builtin.shell:
+    cmd: >-
+      NONINTERACTIVE=1 /bin/bash -c
+      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    creates: /usr/local/bin/brew
+  become: false
+  when: not macos_ci_brew.stat.exists
+  timeout: 1800
+
+- name: Installer les paquets
+  community.general.homebrew:
+    name: "{{ macos_ci_brew_packages }}"
+    state: present
+    path: /usr/local/bin
+  become: false
+  environment:
+    # Sans cela, chaque execution part en mise a jour complete du depot
+    # Homebrew et le playbook prend dix minutes de plus pour rien.
+    HOMEBREW_NO_AUTO_UPDATE: "1"
+    HOMEBREW_NO_ANALYTICS: "1"
+  when: macos_ci_brew_packages | length > 0

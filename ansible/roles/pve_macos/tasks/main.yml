@@ -1,0 +1,43 @@
+---
+# Prepare le noeud puis construit la VM template macOS.
+#
+# Ce role s'arrete AVANT l'installation de macOS : celle-ci est graphique
+# (partitionnement dans Utilitaire de disque, clics dans l'installeur) et
+# aucun outil ne la rend non-attendue. Voir docs/macos-ci.md pour la suite.
+
+- name: Verifier que l'OSK a ete fournie
+  ansible.builtin.fail:
+    msg: >-
+      pve_macos_osk est vide. macOS ne demarre pas sans la reponse du SMC
+      Apple. Extraire la cle depuis un vrai Mac (docs/macos-ci.md), puis :
+      ansible-playbook playbooks/11-macos-template.yml -e pve_macos_osk='...'
+  when: pve_macos_osk | length != 64
+
+# Le garde-fou qui compte : sans AVX2, tout ce qui est >= Ventura installera
+# peut-etre mais ne demarrera jamais. Autant echouer ici que trois heures
+# plus tard devant une pomme figee.
+- name: Lire les drapeaux CPU du noeud
+  ansible.builtin.command: grep -c '^flags.*\bavx2\b' /proc/cpuinfo
+  register: pve_macos_avx2
+  changed_when: false
+  failed_when: false
+
+- name: Refuser une version de macOS qui exige AVX2
+  ansible.builtin.fail:
+    msg: >-
+      {{ pve_macos_shortname }} exige AVX2, absent de ce CPU
+      ({{ ansible_processor[2] | default('inconnu') }}). Seuls big-sur et
+      monterey peuvent demarrer ici. Passer outre donnerait une VM qui
+      s'installe puis reste bloquee au demarrage.
+  when:
+    - pve_macos_shortname in ['ventura', 'sonoma']
+    - (pve_macos_avx2.stdout | int) == 0
+
+- name: Preparer le noeud (ignore_msrs, outils)
+  ansible.builtin.include_tasks: host_prereqs.yml
+
+- name: Recuperer OpenCore et l'image de recuperation macOS
+  ansible.builtin.include_tasks: images.yml
+
+- name: Construire la VM template
+  ansible.builtin.include_tasks: build_vm.yml

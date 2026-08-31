@@ -102,3 +102,43 @@ vms = {
   #   description = "Host principal reconstruit depuis le template golden."
   # }
 }
+
+# ---------------------------------------------------------------------------
+#  Machines macOS
+# ---------------------------------------------------------------------------
+# CHAINE DIFFERENTE des VMs Linux -- ni Packer, ni cloud-init :
+#   1. ansible-playbook playbooks/11-macos-template.yml -e pve_macos_osk='...'
+#   2. installation GRAPHIQUE manuelle, une seule fois (docs/macos-ci.md)
+#   3. qm template 9200
+#   4. terraform apply
+#
+# PLAFOND MATERIEL -- le noeud est un Xeon E5-2680 (Sandy Bridge, 2012) sans
+# AVX2. macOS Ventura et au-dela ne demarrent pas : le cache dyld d'Apple n'est
+# compile que pour AVX2. Monterey (12) est le maximum, donc Xcode 14.2 et le
+# SDK iOS 16.2. Suffisant pour compiler et tester, insuffisant pour soumettre
+# a l'App Store.
+#
+# BUDGET MEMOIRE -- macOS n'a pas de ballooning : la VM prend ses 8 Go et ne
+# les rend jamais. Les ajouter au total deja surengage decrit plus haut :
+#   urbanlink 96 + macos-ci 8 = 104 Go sur 110 Go physiques.
+# Il ne reste alors plus rien pour test-k8s ni kali-test.
+
+# Cle de 64 caracteres renvoyee par le SMC des Macs Apple, sans laquelle macOS
+# ne demarre pas. A extraire d'un vrai Mac -- voir docs/macos-ci.md.
+# macos_osk = "................................................................"
+
+macos_vms = {
+
+  # --- Runner de compilation Apple ------------------------------------------
+  # "macos-ci" = {
+  #   vm_id     = 140
+  #   ip        = "10.0.0.140"   # INFORMATIF : saisi a la main dans macOS
+  #   cores     = 4              # puissance de 2 obligatoire
+  #   memory    = 8192
+  #   disk_size = 200            # Xcode ~40 Go + simulateurs 8-12 Go chacun
+  #   datastore = "pool1"        # pool1 est vide et a 3,5 To
+  #   on_boot   = false
+  #   tags      = ["ci", "macos"]
+  #   description = "Runner de compilation Xcode. Plafonne a Xcode 14.2."
+  # }
+}

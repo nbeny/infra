@@ -1,0 +1,27 @@
+---
+# Configure les VMs macOS en runners de compilation Apple.
+#
+#   ansible-playbook playbooks/22-macos-ci.yml
+#
+#   # avec enregistrement d'un runner GitHub Actions (jeton valable 1 h) :
+#   ansible-playbook playbooks/22-macos-ci.yml \
+#     -e macos_ci_github_url=https://github.com/<org>/<repo> \
+#     -e macos_ci_github_runner_token=AXXXX...
+#
+# PREREQUIS cote invite, faits une seule fois pendant l'installation graphique
+# (docs/macos-ci.md) :
+#   - IP statique saisie a la main (il n'y a pas de DHCP sur vmbr1)
+#   - Partage > Connexion a distance active
+#   - cle publique du lab dans ~/.ssh/authorized_keys
+#   - sudo sans mot de passe pour le compte admin
+#
+# `gather_facts: false` est OBLIGATOIRE : sur une VM neuve, les Command Line
+# Tools ne sont pas encore la, donc il n'y a pas de Python et la collecte des
+# faits echouerait avant meme la premiere tache. Le role les installe en `raw`
+# puis collecte les faits lui-meme.
+
+- name: Configurer les runners macOS
+  hosts: macos_nodes
+  gather_facts: false
+  roles:
+    - role: macos_ci

@@ -25,6 +25,22 @@ locals {
 
   debian_vms = { for k, v in var.vms : k => v if v.profile == "debian-k8s" }
   kali_vms   = { for k, v in var.vms : k => v if v.profile == "kali" }
+
+  # Ligne d'arguments QEMU des VMs macOS, construite ici pour que l'OSK ne
+  # soit saisie qu'une fois dans terraform.tfvars.
+  #
+  # `-device isa-applesmc` emule le SMC d'Apple : macOS interroge cette puce
+  # au demarrage et s'arrete si elle ne repond pas la bonne cle.
+  # Le `-cpu` final ecrase celui que Proxmox genere -- c'est voulu, macOS a
+  # besoin de ces drapeaux precis.
+  macos_kvm_arguments = join(" ", [
+    "-device isa-applesmc,osk=\"${var.macos_osk}\"",
+    "-smbios type=2",
+    "-device usb-kbd,bus=ehci.0,port=2",
+    "-global nec-usb-xhci.msi=off",
+    "-global ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
+    "-cpu host,kvm=on,vendor=GenuineIntel,+kvm_pv_unhalt,+kvm_pv_eoi,+hypervisor,+invtsc",
+  ])
 }
 
 module "vm" {
@@ -65,6 +81,50 @@ module "vm" {
 }
 
 # ---------------------------------------------------------------------------
+#  VMs macOS
+#
+#  Module distinct : macOS n'a ni cloud-init, ni agent QEMU, ni template
+#  Packer. Voir modules/vm-macos/main.tf pour le detail du raisonnement.
+#
+#  Le template source (9200) est construit par Ansible puis installe A LA MAIN
+#  une seule fois -- `ansible-playbook playbooks/11-macos-template.yml` puis
+#  docs/macos-ci.md. Tant qu'il n'est pas converti en template, l'apply echoue
+#  sur un clone impossible.
+# ---------------------------------------------------------------------------
+
+module "macos_vm" {
+  source   = "./modules/vm-macos"
+  for_each = var.macos_vms
+
+  name           = each.key
+  vm_id          = each.value.vm_id
+  node_name      = local.node_name
+  template_vm_id = var.macos_template
+  datastore_id   = coalesce(each.value.datastore, local.datastore)
+
+  cores     = each.value.cores
+  sockets   = each.value.sockets
+  memory    = each.value.memory
+  disk_size = each.value.disk_size
+
+  bridge    = local.bridge
+  net_model = each.value.net_model
+  ip        = each.value.ip
+
+  kvm_arguments = local.macos_kvm_arguments
+
+  on_boot  = each.value.on_boot
+  started  = each.value.started
+  firewall = each.value.firewall
+  tags     = concat(each.value.tags, ["terraform", "macos"])
+
+  description = coalesce(
+    each.value.description != "" ? each.value.description : null,
+    "macOS. Clone du template ${var.macos_template}. L'IP est configuree DANS l'invite, pas par Terraform."
+  )
+}
+
+# ---------------------------------------------------------------------------
 #  Inventaire Ansible
 #
 #  Les noms de groupes correspondent a ceux de inventory/00-static.yml :
@@ -97,8 +157,17 @@ resource "local_file" "ansible_inventory" {
           vm_id        = v.vm_id
         } }
       }
+      # Rappel : cette IP est celle SAISIE A LA MAIN dans macOS. Terraform ne
+      # la configure pas -- si elle ne correspond pas, Ansible tombera sur un
+      # hote injoignable et c'est ici qu'il faudra chercher.
+      macos_nodes = {
+        hosts = { for k, v in var.macos_vms : k => {
+          ansible_host = v.ip
+          vm_id        = v.vm_id
+        } }
+      }
     }),
   ])
 
-  depends_on = [module.vm]
+  depends_on = [module.vm, module.macos_vm]
 }

@@ -1,0 +1,73 @@
+---
+# Installe les Command Line Tools d'Xcode.
+#
+# Tout passe par `raw` : tant que les CLT sont absents, il n'y a pas de Python
+# utilisable sur l'hote, donc aucun module Ansible ne peut s'executer.
+#
+# `xcode-select --install` ouvre une fenetre graphique et rendrait la main
+# immediatement sans rien installer. Le detour ci-dessous est la seule methode
+# non-attendue connue : le fichier temoin dans /tmp fait apparaitre les CLT
+# dans le catalogue de softwareupdate, qui sait, lui, installer sans interface.
+
+- name: Verifier si les Command Line Tools sont deja installes
+  ansible.builtin.raw: /usr/bin/xcode-select -p
+  register: macos_ci_clt_check
+  changed_when: false
+  failed_when: false
+  become: false
+
+- name: Installer les Command Line Tools
+  when: macos_ci_clt_check.rc != 0
+  block:
+
+    - name: Declarer une installation de CLT en cours
+      ansible.builtin.raw: >-
+        touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+      changed_when: true
+      become: false
+
+    # `tail -n1` prend la version la plus recente quand le catalogue en
+    # propose plusieurs.
+    - name: Identifier le paquet CLT propose par Apple
+      ansible.builtin.raw: >-
+        softwareupdate -l 2>/dev/null
+        | grep -E 'Label: Command Line Tools'
+        | tail -n1
+        | sed -E 's/^.*Label: //'
+      register: macos_ci_clt_label
+      changed_when: false
+
+    - name: Echouer si Apple ne propose aucun paquet CLT
+      ansible.builtin.fail:
+        msg: >-
+          Aucun paquet "Command Line Tools" dans le catalogue softwareupdate.
+          Cela arrive quand la VM n'a pas d'acces reseau sortant -- rappel :
+          il n'y a pas de DHCP sur vmbr1, l'IP se saisit a la main dans
+          Preferences Systeme.
+      when: macos_ci_clt_label.stdout | trim | length == 0
+
+    - name: "Installer {{ macos_ci_clt_label.stdout | trim }} (long)"
+      ansible.builtin.raw: >-
+        softwareupdate -i '{{ macos_ci_clt_label.stdout | trim }}' --verbose
+      changed_when: true
+      timeout: 3600
+
+    - name: Retirer le fichier temoin
+      ansible.builtin.raw: >-
+        rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+      changed_when: true
+      become: false
+
+    - name: Verifier que les CLT repondent
+      ansible.builtin.raw: /usr/bin/xcode-select -p && /usr/bin/python3 --version
+      register: macos_ci_clt_verify
+      changed_when: false
+      become: false
+
+    - name: Echouer si les CLT ne sont toujours pas utilisables
+      ansible.builtin.fail:
+        msg: >-
+          Les Command Line Tools se disent installes mais xcode-select ou
+          python3 ne repondent pas. Ouvrir la console noVNC : une fenetre
+          d'installation graphique attend peut-etre une validation.
+      when: macos_ci_clt_verify.rc != 0

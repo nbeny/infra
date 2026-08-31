@@ -1,0 +1,31 @@
+---
+# Reglages sans lesquels une VM macOS fait un mauvais runner.
+
+# Un runner endormi ne repond plus : les jobs partent en timeout cote GitHub
+# sans qu'aucune trace n'apparaisse cote machine. `disablesleep 1` est le seul
+# reglage qui tienne sur une VM sans gestion d'energie reelle.
+- name: Empecher la mise en veille
+  ansible.builtin.command: pmset -a sleep 0 disablesleep 1 displaysleep 0 womp 1
+  when: macos_ci_disable_sleep | bool
+  changed_when: true
+
+# Il n'existe pas d'agent QEMU pour macOS : personne ne peut relancer la VM
+# proprement a distance apres une coupure.
+- name: Redemarrer automatiquement apres une coupure de courant
+  ansible.builtin.command: systemsetup -setrestartpowerfailure on
+  when: macos_ci_restart_on_power_failure | bool
+  changed_when: true
+  failed_when: false      # refuse parfois sans acces disque complet, non bloquant
+
+- name: Aligner le nom de la machine sur l'inventaire
+  ansible.builtin.command: "scutil --set {{ item }} {{ inventory_hostname }}"
+  loop:
+    - ComputerName
+    - LocalHostName
+    - HostName
+  changed_when: true
+
+- name: Fixer le fuseau horaire du lab
+  ansible.builtin.command: "systemsetup -settimezone {{ lab_timezone }}"
+  changed_when: true
+  failed_when: false

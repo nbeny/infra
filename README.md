@@ -38,6 +38,7 @@ host principal.
 - [Démarrage rapide](#démarrage-rapide)
 - [Accès SSH](#accès-ssh)
 - [Ajouter une VM](#ajouter-une-vm)
+- [Ajouter une VM macOS](#ajouter-une-vm-macos)
 - [Mettre à jour le lab](#mettre-à-jour-le-lab)
 - [Reprendre en main une VM existante](#reprendre-en-main-une-vm-existante)
 - [Reconstruire le host principal](#reconstruire-le-host-principal)
@@ -310,6 +311,59 @@ Pour supprimer une VM : retire son entrée et `terraform apply`.
 
 ---
 
+## Ajouter une VM macOS
+
+Chaîne **différente** des VMs Linux, et volontairement séparée : macOS n'a ni
+cloud-init, ni agent QEMU, ni template Packer. Runbook complet dans
+[`docs/macos-ci.md`](docs/macos-ci.md).
+
+### Le plafond matériel, à connaître avant de commencer
+
+Le nœud est un **Xeon E5-2680** (Sandy Bridge, 2012) : il n'a **pas AVX2**.
+Depuis **macOS Ventura (13)**, le cache `dyld` d'Apple n'est compilé que pour
+AVX2, et QEMU ne peut pas émuler cette seule instruction. Ventura et au-delà
+ne démarreront jamais ici — il faudrait du Haswell (2013) minimum.
+
+**Monterey (12) est le maximum**, ce qui plafonne **Xcode à 14.2** (SDK iOS
+16.2) : de quoi compiler et lancer des tests, mais **pas de quoi soumettre à
+l'App Store**, qui exige un SDK récent.
+
+macOS n'a pas non plus de ballooning : la VM prend ses 8 Go et ne les rend
+jamais. Sur un nœud déjà surengagé, ça se planifie (voir le commentaire de
+budget dans `terraform.tfvars.example`).
+
+### Les quatre étapes
+
+```bash
+# 1. Construire le template (automatisé)
+cd ansible
+ansible-playbook playbooks/11-macos-template.yml -e pve_macos_osk='<64 caractères>'
+
+# 2. Installer macOS -- MANUEL, une seule fois, via la console noVNC
+#    puis, sur le nœud :  qm stop 9200 && qm set 9200 --delete ide0 && qm template 9200
+
+# 3. Déployer (automatisé) -- après avoir rempli macos_vms dans terraform.tfvars
+cd ../terraform && terraform apply
+
+# 4. Configurer le runner (automatisé)
+cd ../ansible && ansible-playbook playbooks/22-macos-ci.yml
+```
+
+Seule l'étape 2 est manuelle, et elle est irréductible : le partitionnement
+passe par Utilitaire de disque et l'installeur attend des clics. C'est ce que
+Packer fait pour Debian et Kali, et qu'il ne peut pas faire ici.
+
+**L'OSK** est la chaîne de 64 caractères que renvoie le SMC des Macs Apple ;
+macOS ne démarre pas sans elle. Elle n'est pas versionnée : elle se passe en
+variable à Ansible et se pose dans `terraform.tfvars`.
+
+**L'IP est saisie à la main** dans macOS pendant l'installation : il n'y a pas
+de DHCP sur `vmbr1` et pas de cloud-init. Le champ `ip` de `macos_vms` est
+purement informatif — il ne sert qu'à générer l'inventaire Ansible, et rien ne
+vérifie qu'il correspond à l'invité.
+
+---
+
 ## Mettre à jour le lab
 
 ```bash
@@ -441,8 +495,10 @@ infra/
 │   │   ├── 00-proxmox-host.yml      le nœud
 │   │   ├── 05-adopt-existing.yml    adopter une VM créée à la main
 │   │   ├── 10-templates.yml         socles cloud-init 9000/9001
+│   │   ├── 11-macos-template.yml    template macOS 9200 (install manuelle)
 │   │   ├── 20-debian-k8s.yml        VMs Debian → cluster k8s + storage + edge
 │   │   ├── 21-kali.yml              VMs Kali → outils
+│   │   ├── 22-macos-ci.yml          VMs macOS → Xcode CLT + runner
 │   │   ├── 30-urbanlink-images.yml  build des images applicatives
 │   │   ├── 31-urbanlink-deploy.yml  déploiement du stack UrbanLink
 │   │   ├── 90-update.yml            mises à jour système
@@ -452,11 +508,13 @@ infra/
 │   └── roles/                       pve_host · pve_templates · pve_hardening
 │                                    common · docker · kubernetes
 │                                    kali_tools · image_cleanup
+│                                    pve_macos · macos_ci
 ├── kube/
 │   ├── README.md                    provenance, déploiement, résultats
 │   └── urbanlink/                   manifests du stack UrbanConnect
 ├── docs/
-│   └── audit-securite.md            audit DevOps & sécurité du nœud
+│   ├── audit-securite.md            audit DevOps & sécurité du nœud
+│   └── macos-ci.md                  runbook macOS — plafond AVX2, install manuelle
 ├── packer/                          builds des templates golden
 ├── terraform/                       description des VMs
 └── ssh/config.example               ProxyJump pour ton poste
@@ -492,7 +550,7 @@ ansible-playbook playbooks/95-hardening.yml --check --diff   # voir sans rien ch
 |---|---|
 | 10.0.0.1 | Passerelle (le nœud Proxmox) |
 | 10.0.0.100-103 | VMs préexistantes |
-| 10.0.0.110-189 | VMs Terraform |
+| 10.0.0.110-189 | VMs Terraform (dont 10.0.0.140 macOS, **saisie à la main**) |
 | 10.0.0.190 | VM de test |
 | 10.0.0.240-241 | IP temporaires des builds Packer |
 
@@ -502,6 +560,7 @@ ansible-playbook playbooks/95-hardening.yml --check --diff   # voir sans rien ch
 | 110-899 | VMs Terraform |
 | 9000-9001 | Socles cloud-init |
 | 9100-9101 | Templates golden |
+| 9200 | Template macOS (installé à la main) |
 
 ### Fichiers de configuration
 
@@ -511,7 +570,8 @@ ansible-playbook playbooks/95-hardening.yml --check --diff   # voir sans rien ch
 | `ansible/inventory/group_vars/proxmox.yml` | Options du nœud : mises à jour, réseau, token |
 | `ansible/inventory/group_vars/debian_nodes.yml` | Version de Kubernetes, CNI, options Docker |
 | `ansible/inventory/group_vars/kali_nodes.yml` | Métapaquet Kali, interface graphique |
-| `terraform/terraform.tfvars` | Token API et liste des VMs — **non versionné** |
+| `ansible/inventory/group_vars/macos_nodes.yml` | VMs macOS — hors du groupe `guests` (ni apt, ni cloud-init) |
+| `terraform/terraform.tfvars` | Token API, liste des VMs et **OSK macOS** — **non versionné** |
 | `packer/lab.auto.pkrvars.hcl` | Secret du token API — **non versionné** |
 
 ### Choix par défaut

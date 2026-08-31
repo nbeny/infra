@@ -1,0 +1,89 @@
+---
+# Recupere les deux images necessaires au demarrage de l'installeur :
+#   OpenCore.iso    le bootloader (l'OVMF de Proxmox ne sait pas demarrer macOS)
+#   BaseSystem.img  l'installeur de recuperation, telecharge chez Apple
+#
+# Les deux etapes sont idempotentes via `creates` : rejouer le playbook ne
+# retelecharge rien.
+
+# --- OpenCore ---------------------------------------------------------------
+
+- name: Telecharger OpenCore {{ pve_macos_opencore_release }}
+  ansible.builtin.get_url:
+    url: "{{ pve_macos_opencore_url }}"
+    dest: "{{ pve_macos_work_dir }}/OpenCore-{{ pve_macos_opencore_release }}.iso.gz"
+    owner: root
+    group: root
+    mode: "0644"
+    timeout: 60
+  register: pve_macos_oc_dl
+  retries: 3
+  delay: 10
+  until: pve_macos_oc_dl is succeeded
+
+- name: Decompresser OpenCore
+  ansible.builtin.shell:
+    cmd: >-
+      gzip -dc '{{ pve_macos_work_dir }}/OpenCore-{{ pve_macos_opencore_release }}.iso.gz'
+      > '{{ pve_macos_work_dir }}/OpenCore.iso'
+    creates: "{{ pve_macos_work_dir }}/OpenCore.iso"
+
+# --- Image de recuperation macOS -------------------------------------------
+
+- name: Deposer le script de recuperation d'Apple
+  ansible.builtin.get_url:
+    url: "{{ pve_macos_fetch_script_url }}"
+    dest: "{{ pve_macos_work_dir }}/fetch-macOS-v2.py"
+    owner: root
+    group: root
+    mode: "0755"
+    timeout: 60
+  register: pve_macos_fetch_dl
+  retries: 3
+  delay: 10
+  until: pve_macos_fetch_dl is succeeded
+
+# Interroge les serveurs de recuperation d'Apple. C'est une image de
+# RECUPERATION (~700 Mio) : elle telechargera le reste du systeme depuis
+# Internet pendant l'installation, donc la VM doit avoir un acces reseau
+# sortant fonctionnel avant de lancer l'installeur.
+- name: "Telecharger l'image de recuperation {{ pve_macos_shortname }} (peut etre long)"
+  ansible.builtin.command:
+    cmd: >-
+      python3 fetch-macOS-v2.py
+        --action download
+        --shortname {{ pve_macos_shortname }}
+        --outdir {{ pve_macos_work_dir }}
+        --basename BaseSystem
+    chdir: "{{ pve_macos_work_dir }}"
+    creates: "{{ pve_macos_work_dir }}/BaseSystem.dmg"
+  register: pve_macos_fetch
+  timeout: 3600
+
+# Proxmox ne sait pas attacher un .dmg : il faut une image brute.
+- name: Convertir le DMG en image brute
+  ansible.builtin.command:
+    cmd: >-
+      dmg2img -i '{{ pve_macos_work_dir }}/BaseSystem.dmg'
+              -o '{{ pve_macos_work_dir }}/BaseSystem.img'
+    creates: "{{ pve_macos_work_dir }}/BaseSystem.img"
+  timeout: 1800
+
+- name: Verifier que les deux images sont presentes
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: pve_macos_images
+  loop:
+    - "{{ pve_macos_work_dir }}/OpenCore.iso"
+    - "{{ pve_macos_work_dir }}/BaseSystem.img"
+
+- name: Echouer si une image manque ou est vide
+  ansible.builtin.fail:
+    msg: >-
+      {{ item.item }} est absent ou vide. Le telechargement amont a echoue
+      (release OpenCore retiree, ou serveurs de recuperation Apple
+      injoignables depuis le noeud).
+  when: not item.stat.exists or item.stat.size == 0
+  loop: "{{ pve_macos_images.results }}"
+  loop_control:
+    label: "{{ item.item }}"

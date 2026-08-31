@@ -1,0 +1,42 @@
+---
+# --- Outils de compilation --------------------------------------------------
+# Les Command Line Tools apportent clang, git, make et /usr/bin/python3. Xcode
+# COMPLET (avec les simulateurs iOS) ne s'installe pas sans authentification
+# Apple : il se pose a la main une fois, depuis l'App Store ou un .xip.
+#
+# PLAFOND -- macOS Monterey n'accepte pas Xcode au-dela de 14.2 (SDK iOS 16.2).
+# Suffisant pour `xcodebuild`, les tests unitaires et la CI de branche.
+# Insuffisant pour une soumission App Store, qui exige un SDK recent.
+macos_ci_install_clt: true
+
+# --- Homebrew ---------------------------------------------------------------
+# Le dernier Homebrew supportant Monterey. `HOMEBREW_NO_AUTO_UPDATE` evite
+# qu'une execution Ansible parte en mise a jour de dix minutes.
+macos_ci_install_homebrew: true
+macos_ci_brew_packages:
+  - xcbeautify
+  - jq
+
+# --- Reglages systeme d'un runner -------------------------------------------
+# Une machine de CI qui s'endort ne repond plus au runner : les jobs partent en
+# timeout sans erreur exploitable.
+macos_ci_disable_sleep: true
+
+# Redemarrer tout seul apres une coupure : la VM n'a pas d'agent QEMU, donc
+# personne ne peut la relancer a distance proprement.
+macos_ci_restart_on_power_failure: true
+
+# --- Runner GitHub Actions --------------------------------------------------
+# Optionnel : laisser le jeton vide desactive toute cette partie. Le jeton
+# d'enregistrement s'obtient dans Settings > Actions > Runners > New runner,
+# et n'est valable qu'une heure.
+#
+#   ansible-playbook playbooks/22-macos-ci.yml \
+#     -e macos_ci_github_url=https://github.com/<org>/<repo> \
+#     -e macos_ci_github_runner_token=AXXXX...
+macos_ci_github_runner_token: ""
+macos_ci_github_url: ""
+macos_ci_runner_version: "2.321.0"
+macos_ci_runner_arch: osx-x64          # le noeud est un Xeon : jamais arm64
+macos_ci_runner_dir: "/Users/{{ ansible_user }}/actions-runner"
+macos_ci_runner_labels: "macos,monterey,xcode-14,self-hosted"

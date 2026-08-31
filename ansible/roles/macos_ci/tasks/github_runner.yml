@@ -1,0 +1,81 @@
+---
+# Enregistre la VM comme runner auto-heberge GitHub Actions.
+#
+# Entierement optionnel : sans `macos_ci_github_runner_token`, ce fichier
+# n'est jamais inclus.
+#
+# `become: false` partout : le runner tourne sous le compte utilisateur, et
+# son service launchd est un LaunchAgent lie a cette session. L'installer en
+# root le rendrait invisible a l'utilisateur.
+
+- name: Verifier que l'URL du depot est fournie
+  ansible.builtin.fail:
+    msg: >-
+      macos_ci_github_runner_token est renseigne mais macos_ci_github_url est
+      vide. Fournir les deux :
+      -e macos_ci_github_url=https://github.com/<org>/<repo>
+  when: macos_ci_github_url | length == 0
+
+- name: Creer le repertoire du runner
+  ansible.builtin.file:
+    path: "{{ macos_ci_runner_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    mode: "0755"
+  become: false
+
+- name: Telecharger le runner {{ macos_ci_runner_version }}
+  ansible.builtin.unarchive:
+    src: >-
+      https://github.com/actions/runner/releases/download/v{{ macos_ci_runner_version }}/actions-runner-{{ macos_ci_runner_arch }}-{{ macos_ci_runner_version }}.tar.gz
+    dest: "{{ macos_ci_runner_dir }}"
+    remote_src: true
+    creates: "{{ macos_ci_runner_dir }}/config.sh"
+  become: false
+
+# `.runner` n'existe qu'une fois l'enregistrement reussi : c'est le temoin
+# d'idempotence. Sans lui, chaque execution creerait un runner en double cote
+# GitHub.
+- name: Verifier si le runner est deja enregistre
+  ansible.builtin.stat:
+    path: "{{ macos_ci_runner_dir }}/.runner"
+  register: macos_ci_runner_registered
+  become: false
+
+- name: Enregistrer le runner
+  ansible.builtin.command:
+    cmd: >-
+      ./config.sh --unattended
+        --url {{ macos_ci_github_url }}
+        --token {{ macos_ci_github_runner_token }}
+        --name {{ inventory_hostname }}
+        --labels {{ macos_ci_runner_labels }}
+        --replace
+    chdir: "{{ macos_ci_runner_dir }}"
+  become: false
+  when: not macos_ci_runner_registered.stat.exists
+  changed_when: true
+  no_log: true          # le jeton d'enregistrement ne doit pas etre journalise
+
+- name: Installer le service launchd du runner
+  ansible.builtin.command:
+    cmd: ./svc.sh install
+    chdir: "{{ macos_ci_runner_dir }}"
+    creates: "/Users/{{ ansible_user }}/Library/LaunchAgents/actions.runner.{{ inventory_hostname }}.plist"
+  become: false
+
+- name: Demarrer le service du runner
+  ansible.builtin.command:
+    cmd: ./svc.sh start
+    chdir: "{{ macos_ci_runner_dir }}"
+  become: false
+  register: macos_ci_runner_start
+  changed_when: "'started' in macos_ci_runner_start.stdout | lower"
+
+- name: Rappeler la limite du runner
+  ansible.builtin.debug:
+    msg: >-
+      Runner enregistre sur {{ macos_ci_github_url }} avec les etiquettes
+      {{ macos_ci_runner_labels }}. Il ne dispose que de Xcode 14.2 au
+      maximum : cibler ce runner depuis un workflow qui exige un SDK plus
+      recent echouera a la compilation.

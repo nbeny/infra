@@ -36,7 +36,18 @@ all:
           # VM Kali existante (arretee au moment de l'ecriture de ce fichier).
           # A demarrer + adopter avant utilisation, ou a remplacer par une VM Terraform.
 
+    # VMs macOS
+    # Declare vide a dessein : les hotes arrivent par 20-terraform.yml. Sans
+    # ce groupe, `ansible-playbook playbooks/22-macos-ci.yml` avertirait que
+    # le motif d'hotes ne correspond a rien.
+    macos_nodes:
+      hosts: {}
+
     # Groupe parapluie : tout ce qui est une VM invitee (pas le noeud PVE)
+    #
+    # macos_nodes en est volontairement ABSENT : ces hotes n'ont ni apt, ni
+    # cloud-init, ni agent QEMU. Les inclure ferait echouer 90-update.yml et
+    # 95-hardening.yml des leur premiere tache.
     guests:
       children:
         debian_nodes:

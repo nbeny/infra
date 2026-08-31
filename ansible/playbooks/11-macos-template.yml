@@ -1,0 +1,18 @@
+---
+# Construit la VM template macOS (9200) sur le noeud Proxmox.
+#
+# Ce playbook s'arrete a une VM amorcable mais VIDE : l'installation de macOS
+# est graphique et se fait une seule fois, a la main, via la console noVNC.
+# La procedure complete est dans docs/macos-ci.md.
+#
+#   ansible-playbook playbooks/11-macos-template.yml -e pve_macos_osk='<64 car.>'
+#   ansible-playbook playbooks/11-macos-template.yml -e pve_macos_osk='...' -e pve_macos_force=true
+#
+# Prerequis materiel : ce noeud n'a pas AVX2, donc Monterey (12) est la
+# derniere version qui demarre. Le role refuse ventura et sonoma.
+
+- name: Construire le template macOS
+  hosts: proxmox
+  gather_facts: true
+  roles:
+    - role: pve_macos

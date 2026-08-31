@@ -1,0 +1,123 @@
+---
+# Cree la VM {{ pve_macos_vmid }} prete a recevoir l'installeur macOS.
+#
+# Disposition retenue (celle des guides Nick Sherlock, la seule reellement
+# eprouvee sur Proxmox) :
+#   ide2      OpenCore     -- premier dans l'ordre de demarrage
+#   ide0      BaseSystem   -- l'installeur, a retirer une fois macOS installe
+#   virtio0   disque systeme
+#
+# Les deux images sont attachees comme DISQUES et non comme lecteurs CD
+# (`media=cdrom`) : macOS refuse de s'installer depuis un CD-ROM emule.
+
+- name: "Verifier si le VMID {{ pve_macos_vmid }} existe deja"
+  ansible.builtin.command: "qm config {{ pve_macos_vmid }}"
+  register: pve_macos_existing
+  changed_when: false
+  failed_when: false
+
+- name: Template macOS deja present, rien a faire
+  ansible.builtin.debug:
+    msg: >-
+      La VM {{ pve_macos_vmid }} ({{ pve_macos_name }}) existe deja.
+      Utiliser -e pve_macos_force=true pour la reconstruire -- ce qui DETRUIT
+      l'installation de macOS deja faite et impose de la refaire a la main.
+  when:
+    - pve_macos_existing.rc == 0
+    - not (pve_macos_force | bool)
+
+- name: Construction de la VM macOS
+  when: pve_macos_existing.rc != 0 or (pve_macos_force | bool)
+  block:
+
+    - name: Detruire l'ancienne VM macOS
+      ansible.builtin.command: >-
+        qm destroy {{ pve_macos_vmid }} --purge 1 --destroy-unreferenced-disks 1
+      when: pve_macos_existing.rc == 0
+      changed_when: true
+
+    # ostype `other` : Proxmox n'a pas de profil macOS et tout autre choix lui
+    # ferait ajouter des options (hyperv enlightenments notamment) qui font
+    # paniquer le noyau XNU.
+    - name: "Creer la VM {{ pve_macos_vmid }}"
+      ansible.builtin.command: >-
+        qm create {{ pve_macos_vmid }}
+          --name {{ pve_macos_name }}
+          --description "macOS {{ pve_macos_shortname }}. Installation graphique -- voir docs/macos-ci.md."
+          --ostype other
+          --machine q35
+          --bios ovmf
+          --cpu host
+          --cores {{ pve_macos_cores }}
+          --sockets {{ pve_macos_sockets }}
+          --memory {{ pve_macos_memory }}
+          --balloon 0
+          --numa 0
+          --vga vmware
+          --scsihw virtio-scsi-pci
+          --net0 {{ pve_macos_net_model }},bridge={{ lab_bridge }}
+          --onboot 0
+          --tablet 1
+      changed_when: true
+
+    # pre-enrolled-keys=0 : avec les cles Microsoft pre-chargees, le Secure
+    # Boot d'OVMF refuse de lancer OpenCore, qui n'est signe par personne.
+    - name: Ajouter le disque EFI
+      ansible.builtin.command: >-
+        qm set {{ pve_macos_vmid }}
+          --efidisk0 {{ pve_macos_storage }}:1,efitype=4m,pre-enrolled-keys=0
+      changed_when: true
+
+    - name: Importer OpenCore sur ide2
+      ansible.builtin.command: >-
+        qm set {{ pve_macos_vmid }}
+          --ide2 {{ pve_macos_storage }}:0,import-from={{ pve_macos_work_dir }}/OpenCore.iso,cache=unsafe
+      changed_when: true
+
+    - name: Importer l'installeur sur ide0
+      ansible.builtin.command: >-
+        qm set {{ pve_macos_vmid }}
+          --ide0 {{ pve_macos_storage }}:0,import-from={{ pve_macos_work_dir }}/BaseSystem.img,cache=unsafe
+      changed_when: true
+
+    - name: "Creer le disque systeme de {{ pve_macos_disk_size }} Go"
+      ansible.builtin.command: >-
+        qm set {{ pve_macos_vmid }}
+          --virtio0 {{ pve_macos_storage }}:{{ pve_macos_disk_size }},cache=unsafe,discard=on
+      changed_when: true
+
+    - name: Demarrer sur OpenCore
+      ansible.builtin.command: >-
+        qm set {{ pve_macos_vmid }} --boot order=ide2
+      changed_when: true
+
+    # Passe par `argv` a dessein : l'OSK contient des parentheses et la valeur
+    # doit garder ses guillemets dans /etc/pve/qemu-server/<vmid>.conf. Une
+    # commande shell classique les mangerait et QEMU refuserait de demarrer.
+    #
+    # Le `-cpu` de cette ligne ecrase celui que Proxmox genere depuis `--cpu` :
+    # c'est voulu, macOS a besoin des drapeaux ci-dessous.
+    - name: Poser les arguments QEMU specifiques a macOS
+      ansible.builtin.command:
+        argv:
+          - qm
+          - set
+          - "{{ pve_macos_vmid }}"
+          - --args
+          - >-
+            -device isa-applesmc,osk="{{ pve_macos_osk }}"
+            -smbios type=2
+            -device usb-kbd,bus=ehci.0,port=2
+            -global nec-usb-xhci.msi=off
+            -global ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off
+            -cpu host,kvm=on,vendor=GenuineIntel,+kvm_pv_unhalt,+kvm_pv_eoi,+hypervisor,+invtsc
+      changed_when: true
+      no_log: true          # l'OSK ne doit pas finir dans les journaux
+
+    - name: VM prete pour l'installation graphique
+      ansible.builtin.debug:
+        msg: >-
+          VM {{ pve_macos_vmid }} ({{ pve_macos_name }}) creee sur
+          {{ pve_macos_storage }}. Elle est ARRETEE et macOS n'est PAS encore
+          installe : la suite est graphique et se fait une seule fois.
+          Ouvrir la console noVNC et suivre docs/macos-ci.md.
