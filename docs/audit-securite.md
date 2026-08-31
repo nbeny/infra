@@ -250,11 +250,50 @@ $ cscli metrics
 lignes lues, aucune analysée, donc aucun bannissement possible sur un bruteforce
 de l'interface d'administration.
 
+### Cause réelle, mesurée le 2026-08-31
+
+La première version de ce constat accusait l'acquisition (« il manque un
+`labels.type` »). C'était faux : `acquis.yaml` déclarait déjà `type: syslog`
+sur `auth.log`. La cause est ailleurs, et elle est unique pour les deux
+sources.
+
+`hub_dir` vaut `/etc/crowdsec/hub`, mais **49 des items installés étaient des
+liens symboliques vers `/var/lib/crowdsec/hub`**, l'emplacement qu'utilisait
+l'ancien paquet Debian. Une cible hors de `hub_dir` fait classer l'item
+« local » : `cscli` refuse de le mettre à jour (« not downloading local
+item ») et `cscli hub upgrade` passe à côté **sans rien signaler**. Ces 49
+items étaient figés depuis le 21/12/2025.
+
+Parmi eux, `crowdsecurity/sshd-logs`, resté sur :
+
+```yaml
+filter: "evt.Parsed.program == 'sshd'"
+```
+
+Or Debian 13 embarque OpenSSH 10, qui journalise sous le nom `sshd-session` :
+
+```
+2026-08-31T14:57:12+02:00 pve sshd-session[1822459]: Invalid user admin from ...
+```
+
+Plus une seule ligne de `auth.log` ne franchissait l'étape `s01-parse`. Le hub
+courant dit `filter: "evt.Parsed.program in ['sshd-session', 'sshd']"` — le
+correctif était publié, il n'arrivait simplement plus jusqu'ici.
+
+`pveproxy/access.log`, lui, ne sera jamais lisible : Proxmox y écrit un mois
+**en chiffres** (`[31/08/2026:14:57:11 +0200]`) là où `%{HTTPDATE}` attend
+`Aug`, et sans les champs referer/user-agent qu'exige `crowdsecurity/nginx-logs`.
+Les échecs d'authentification Proxmox sont en revanche écrits par `pvedaemon`
+dans `/var/log/syslog`, et la collection `fulljackz/proxmox` sait les lire :
+c'est par là que passe désormais la détection.
+
 **Correctif** — `pve_hardening_ssh: true` passe `PermitRootLogin` à
 `prohibit-password` et coupe l'authentification par mot de passe (tes 4 clés
 publiques sont déjà en place, l'accès est donc préservé).
-`pve_hardening_crowdsec_acquis: true` ajoute l'acquisition manquante pour
-`pveproxy` et corrige celle de `auth.log`.
+`pve_hardening_crowdsec_acquis: true` rebranche les items orphelins sur le hub
+courant, installe `fulljackz/proxmox`, réduit l'acquisition aux trois sources
+qui servent, puis **vérifie le résultat avec `cscli explain`** — le play échoue
+si une ligne SSH ou `pvedaemon` de référence ne parse pas.
 
 ---
 

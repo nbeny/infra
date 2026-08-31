@@ -1,0 +1,346 @@
+---
+# Pose un compte HUMAIN commun sur les consoles internes du lab.
+#
+#   ansible-playbook playbooks/34-console-accounts.yml
+#
+# Les identifiants ne sont PAS dans ce fichier : ils sont lus dans le Secret
+# `urbanconnect-secrets` du cluster (cles CONSOLE_ADMIN_USER,
+# CONSOLE_ADMIN_EMAIL, CONSOLE_ADMIN_PASSWORD), lui-meme construit depuis
+# `kube/urbanlink/secrets.env`, qui n'est pas versionne. Changer le mot de
+# passe = le changer la-bas et rejouer ce playbook.
+#
+# ============================================================================
+#  Pourquoi un playbook et pas des manifestes
+# ============================================================================
+#
+# Ces comptes vivent dans l'ETAT des outils (base SQLite de pgAdmin sur son
+# PVC, base interne de MinIO, index `.security` d'Elasticsearch, ConfigMap et
+# Secret d'Argo CD), pas dans leur configuration de deploiement. Un Job
+# Kubernetes ferait l'affaire une fois, mais son `spec.template` est IMMUABLE :
+# changer le mot de passe demanderait de le supprimer puis de le recreer, et
+# Argo CD (`Replace=false`) echouerait entre les deux. Un playbook rejouable
+# est le bon outil.
+#
+# Chaque tache est idempotente : la rejouer REMET le mot de passe a la valeur
+# du Secret, elle n'echoue pas sur un compte deja present.
+#
+# ============================================================================
+#  Ce que ce playbook ne couvre PAS, et pourquoi
+# ============================================================================
+#
+#   kafka-ui   -- couvert, mais par le manifeste : son authentification est un
+#                 reglage de deploiement (AUTH_TYPE=LOGIN_FORM), pas un compte
+#                 stocke. Voir kube/urbanlink/kafka-ui/deployment.yaml.
+#
+#   kiali      -- IMPOSSIBLE. Ses seules strategies d'authentification sont
+#                 `anonymous`, `token` (jeton de ServiceAccount Kubernetes) et
+#                 `openid`. Il n'a pas de notion de compte local.
+#
+#   temporal-ui -- IMPOSSIBLE en 2.31.2 : l'authentification y passe
+#                 exclusivement par un fournisseur OIDC.
+#
+#   directus   -- BLOQUE par un defaut anterieur : le deploiement lui passe des
+#                 variables `DIRECTUS_DATABASE_*` que l'image officielle NE LIT
+#                 PAS (ce prefixe est une convention de chart Helm). Directus
+#                 tourne donc sur son SQLite par defaut
+#                 (`/directus/database/database.sqlite`), sans volume monte --
+#                 autrement dit tout son contenu, comptes compris, disparait a
+#                 chaque redemarrage de pod. Y creer un compte serait sans
+#                 effet durable. A corriger d'abord : renommer ces variables en
+#                 `DB_CLIENT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`,
+#                 `DB_DATABASE`.
+#
+#   prometheus -- hors de ce playbook : il vit dans istio-system, depose par
+#                 l'addon Istio via le role `kubernetes`. Son basic_auth se
+#                 configure la-bas, sinon le prochain passage du role l'ecrase.
+# ============================================================================
+
+- name: Poser le compte d'administration commun sur les consoles internes
+  hosts: urbanlink
+  gather_facts: true
+  become: true
+
+  vars:
+    kubeconfig: /etc/kubernetes/admin.conf
+    app_namespace: urbanconnect
+    argocd_namespace: argocd
+
+  tasks:
+
+    # ----------------------------------------------------------------------
+    #  Les identifiants, depuis la seule source de verite
+    # ----------------------------------------------------------------------
+
+    - name: Lire le compte console dans le Secret applicatif
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          K="kubectl --kubeconfig {{ kubeconfig }} -n {{ app_namespace }}"
+          for k in CONSOLE_ADMIN_USER CONSOLE_ADMIN_EMAIL CONSOLE_ADMIN_PASSWORD \
+                   ELASTICSEARCH_PASSWORD; do
+            $K get secret urbanconnect-secrets -o jsonpath="{.data.$k}" | base64 -d
+            echo
+          done
+        executable: /bin/bash
+      register: uc_creds
+      changed_when: false
+      no_log: true
+
+    - name: Nommer les valeurs lues
+      ansible.builtin.set_fact:
+        console_user: "{{ uc_creds.stdout_lines[0] | trim }}"
+        console_email: "{{ uc_creds.stdout_lines[1] | trim }}"
+        console_password: "{{ uc_creds.stdout_lines[2] | trim }}"
+        elastic_password: "{{ uc_creds.stdout_lines[3] | trim }}"
+      no_log: true
+
+    # Un mot de passe vide ne ferait pas echouer les commandes ci-dessous : il
+    # creerait des comptes ouverts. Mieux vaut s'arreter ici.
+    - name: Exiger un compte console renseigne
+      ansible.builtin.assert:
+        that:
+          - console_user | length > 0
+          - console_email | length > 0
+          - console_password | length >= 8
+        fail_msg: >-
+          CONSOLE_ADMIN_USER / _EMAIL / _PASSWORD sont absents ou trop courts
+          dans le Secret urbanconnect-secrets. Les renseigner dans
+          kube/urbanlink/secrets.env puis rejouer
+          playbooks/31-urbanlink-deploy.yml, ou corriger le Secret a la main.
+        success_msg: "Compte console lu : {{ console_user }} / {{ console_email }}"
+
+    # ----------------------------------------------------------------------
+    #  Argo CD -- compte local
+    # ----------------------------------------------------------------------
+    # Argo CD ne stocke pas ses comptes locaux au meme endroit que leur
+    # declaration : le compte s'ouvre dans argocd-cm, son mot de passe vit dans
+    # argocd-secret, et ses droits dans argocd-rbac-cm. Les trois sont
+    # necessaires -- il en manque un et le compte existe sans pouvoir se
+    # connecter, ou se connecte sans rien voir.
+
+    - name: Calculer l'empreinte bcrypt du mot de passe
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import bcrypt, sys
+            print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(rounds=10)).decode())
+          - "{{ console_password }}"
+      delegate_to: localhost
+      become: false
+      register: uc_bcrypt
+      changed_when: false
+      no_log: true
+
+    - name: Declarer le compte local dans argocd-cm
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig }}"
+          - -n
+          - "{{ argocd_namespace }}"
+          - patch
+          - configmap
+          - argocd-cm
+          - --type
+          - merge
+          - -p
+          - '{"data":{"accounts.{{ console_user }}":"login"}}'
+      changed_when: true
+
+    # ⚠️ `passwordMtime` n'est pas decoratif. Argo CD refuse tout jeton emis
+    # AVANT cette date : sans elle, le champ reste absent et le comportement
+    # depend de la version. On la pose a chaque passage, ce qui a l'effet
+    # voulu -- changer le mot de passe invalide les sessions ouvertes.
+    - name: Poser le mot de passe du compte dans argocd-secret
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig }}"
+          - -n
+          - "{{ argocd_namespace }}"
+          - patch
+          - secret
+          - argocd-secret
+          - -p
+          - >-
+            {"stringData":{"accounts.{{ console_user }}.password":"{{ uc_bcrypt.stdout | trim }}",
+            "accounts.{{ console_user }}.passwordMtime":"{{ ansible_date_time.iso8601 }}"}}
+      changed_when: true
+      no_log: true
+
+    - name: Relever la politique RBAC actuelle
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig }}"
+          - -n
+          - "{{ argocd_namespace }}"
+          - get
+          - configmap
+          - argocd-rbac-cm
+          - -o
+          - jsonpath={.data.policy\.csv}
+      register: uc_rbac
+      changed_when: false
+
+    # On AJOUTE une ligne a la politique existante au lieu de la remplacer :
+    # ecraser `policy.csv` retirerait silencieusement toute regle deja posee.
+    - name: Donner les droits admin au compte
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig }}"
+          - -n
+          - "{{ argocd_namespace }}"
+          - patch
+          - configmap
+          - argocd-rbac-cm
+          - --type
+          - merge
+          - -p
+          - >-
+            {"data":{"policy.csv":{{ ((uc_rbac.stdout | trim ~ "\n" if uc_rbac.stdout | trim
+            else "") ~ "g, " ~ console_user ~ ", role:admin") | to_json }}}}
+      when: "'g, ' ~ console_user ~ ', role:admin' not in uc_rbac.stdout"
+      changed_when: true
+
+    # argocd-cm est relu a chaud pour la plupart des cles, mais PAS pour
+    # l'ouverture d'un compte : le serveur construit sa liste de comptes au
+    # demarrage. Sans ce redemarrage, la connexion repond « invalid username or
+    # password » avec un compte pourtant correctement declare.
+    - name: Redemarrer argocd-server
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, "{{ kubeconfig }}", -n, "{{ argocd_namespace }}",
+               rollout, restart, deploy/argocd-server]
+      changed_when: true
+
+    - name: Attendre le redemarrage d'argocd-server
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig, "{{ kubeconfig }}", -n, "{{ argocd_namespace }}",
+               rollout, status, deploy/argocd-server, --timeout=300s]
+      changed_when: false
+
+    # ----------------------------------------------------------------------
+    #  MinIO -- utilisateur + policy consoleAdmin
+    # ----------------------------------------------------------------------
+    # `mc` est present dans l'image du serveur (/usr/bin/mc), et les
+    # identifiants racine sont deja dans l'environnement du pod : rien a
+    # transporter. `mc admin user add` MET A JOUR le mot de passe si
+    # l'utilisateur existe -- c'est ce qui rend la tache rejouable.
+    #
+    # `consoleAdmin` est la policy integree qui ouvre la console ; `readwrite`
+    # donnerait l'acces S3 mais une interface vide.
+    - name: Creer l'utilisateur MinIO et lui attacher consoleAdmin
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig }}"
+          - -n
+          - "{{ app_namespace }}"
+          - exec
+          - minio-0
+          - --
+          - sh
+          - -c
+          - >-
+            mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null &&
+            mc admin user add local {{ console_user | quote }} {{ console_password | quote }} >/dev/null &&
+            mc admin policy attach local consoleAdmin --user {{ console_user | quote }} 2>/dev/null;
+            mc admin user info local {{ console_user | quote }}
+      register: uc_minio
+      changed_when: true
+      no_log: true
+
+    # ----------------------------------------------------------------------
+    #  Elasticsearch / Kibana -- utilisateur natif
+    # ----------------------------------------------------------------------
+    # Kibana n'a pas de comptes propres : il delegue a Elasticsearch. Un
+    # utilisateur natif ES suffit donc pour les deux.
+    #
+    # `PUT _security/user/<nom>` cree OU remplace : idempotent par nature.
+    - name: Creer l'utilisateur Elasticsearch
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubeconfig }}"
+          - -n
+          - "{{ app_namespace }}"
+          - exec
+          - elasticsearch-0
+          - -c
+          - elasticsearch
+          - --
+          - curl
+          - -sS
+          - -u
+          - "elastic:{{ elastic_password }}"
+          - -X
+          - PUT
+          - http://127.0.0.1:9200/_security/user/{{ console_user }}
+          - -H
+          - "Content-Type: application/json"
+          - -d
+          - >-
+            {"password":{{ console_password | to_json }},
+            "roles":["superuser"],
+            "full_name":"Compte d'administration du lab"}
+      register: uc_elastic
+      changed_when: true
+      no_log: true
+
+    # ----------------------------------------------------------------------
+    #  pgAdmin -- utilisateur interne
+    # ----------------------------------------------------------------------
+    # ⚠️ pgAdmin VALIDE le format e-mail de l'identifiant : `alesio` seul est
+    # refuse. C'est la seule console, avec Directus, ou la connexion se fait
+    # avec CONSOLE_ADMIN_EMAIL.
+    #
+    # ⚠️ L'interpreteur est celui du VENV, pas `python3` : `/usr/local/bin/python3`
+    # existe mais n'a pas `typer`, et setup.py s'arrete sur un ModuleNotFoundError.
+    #
+    # `add-user` echoue si le compte existe ; `update-user` le remet a jour.
+    # Enchainer les deux rend la tache rejouable sans la rendre bavarde.
+    - name: Creer ou mettre a jour l'utilisateur pgAdmin
+      ansible.builtin.shell:
+        cmd: >-
+          kubectl --kubeconfig {{ kubeconfig }} -n {{ app_namespace }}
+          exec deploy/pgadmin --
+          /venv/bin/python3 /pgadmin4/setup.py add-user
+          {{ console_email | quote }} {{ console_password | quote }} --admin
+          ||
+          kubectl --kubeconfig {{ kubeconfig }} -n {{ app_namespace }}
+          exec deploy/pgadmin --
+          /venv/bin/python3 /pgadmin4/setup.py update-user
+          {{ console_email | quote }} --password {{ console_password | quote }} --admin
+        executable: /bin/bash
+      register: uc_pgadmin
+      changed_when: true
+      no_log: true
+
+    # ----------------------------------------------------------------------
+    #  Compte rendu
+    # ----------------------------------------------------------------------
+
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "Compte pose sur :"
+          - "  argo.urbanlink.fr        {{ console_user }}   (role admin)"
+          - "  minio.urbanlink.fr       {{ console_user }}   (policy consoleAdmin)"
+          - "  kibana.urbanlink.fr      {{ console_user }}   (role superuser ES)"
+          - "  kafka.urbanlink.fr       {{ console_user }}   (par le manifeste, pas ce playbook)"
+          - "  pgadmin.urbanlink.fr     {{ console_email }}  <- E-MAIL, pas le nom court"
+          - ""
+          - "Sans compte, et pourquoi -- voir l'en-tete de ce fichier :"
+          - "  kiali.urbanlink.fr       pas de compte local dans le produit"
+          - "  temporal.urbanlink.fr    OIDC uniquement en 2.31.2"
+          - "  directus.urbanlink.fr    tourne sur un SQLite ephemere (defaut a corriger)"
+          - "  prometheus.urbanlink.fr  se configure dans le role kubernetes"

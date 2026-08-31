@@ -1,15 +1,21 @@
 ---
+# `tags: always` sur ces trois taches : sans lui, un appel cible
+# (`--tags crowdsec`) saute la resolution des bascules et chaque `when:
+# h_*` echoue sur « is undefined ».
 - name: Verifier que la cible est bien un noeud Proxmox
   ansible.builtin.stat:
     path: /usr/bin/pveversion
   register: pve_hardening_check
+  tags: always
 
 - name: Echouer si ce n'est pas un noeud Proxmox
   ansible.builtin.fail:
     msg: "{{ inventory_hostname }} n'est pas un noeud Proxmox VE."
   when: not pve_hardening_check.stat.exists
+  tags: always
 
 - name: Resoudre les bascules
+  tags: always
   ansible.builtin.set_fact:
     h_backup: "{{ pve_hardening_backup or pve_hardening_all }}"
     h_cloudflare: "{{ pve_hardening_cloudflare_only or pve_hardening_all }}"

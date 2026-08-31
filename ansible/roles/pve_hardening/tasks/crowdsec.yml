@@ -1,12 +1,47 @@
 ---
-# Constat 5 bis : CrowdSec lit auth.log et pveproxy/access.log, mais n'en parse
-# rien.
+# Constat 5 bis -- CrowdSec lit auth.log et pveproxy/access.log sans rien en
+# tirer. Reecrit le 2026-08-31 : la premiere version de ce fichier se trompait
+# de cause, et son correctif n'aurait rien change.
 #
-#   | file:/var/log/auth.log            | 1.43k lues  | 0 parsees |
-#   | file:/var/log/pveproxy/access.log | 39.27k lues | 0 parsees |
+# Ce qui etait mesure :
 #
-# Consequence : aucun bannissement possible sur un bruteforce SSH ni sur
-# l'interface d'administration Proxmox.
+#   | file:/var/log/auth.log            | 1.55k lues  | 0 parsees |
+#   | file:/var/log/pveproxy/access.log | 24.21k lues | 0 parsees |
+#
+# Le diagnostic d'origine -- « l'acquisition ne declare pas de `type` » -- etait
+# faux : /etc/crowdsec/acquis.yaml declarait deja `type: syslog` sur auth.log.
+# Reecrire la meme acquisition dans acquis.d/ n'aurait fait que lire les
+# fichiers DEUX fois. Les vraies causes sont au nombre de trois.
+#
+#  1. LE HUB EST COUPE EN DEUX. `hub_dir` vaut /etc/crowdsec/hub, mais 49 des
+#     items installes etaient des liens symboliques vers /var/lib/crowdsec/hub,
+#     l'ancien emplacement du paquet Debian. cscli ne reconnait pas une cible
+#     hors de hub_dir : il classe l'item « local », refuse de le mettre a jour
+#     (« not downloading local item ») et `cscli hub upgrade` passe a cote sans
+#     rien dire. Ces 49 items etaient donc figes depuis le 21/12/2025.
+#
+#  2. D'OU LA PANNE SSH. Parmi eux, crowdsecurity/sshd-logs, reste sur
+#         filter: "evt.Parsed.program == 'sshd'"
+#     alors que Debian 13 embarque OpenSSH 10, qui journalise sous le nom
+#     `sshd-session`. Plus une seule ligne de auth.log ne franchissait s01 :
+#     aucun bruteforce SSH n'etait detectable. Le hub actuel dit
+#         filter: "evt.Parsed.program in ['sshd-session', 'sshd']"
+#     -- rebrancher l'item sur le hub suffit donc a le reparer.
+#
+#  3. pveproxy/access.log N'EST PAS DU NGINX. Proxmox y ecrit
+#         ::ffff:192.168.1.89 - root@pam [31/08/2026:14:57:11 +0200] "GET ..." 200 59
+#     soit un mois EN CHIFFRES la ou %{HTTPDATE} attend `Aug`, et sans les
+#     champs referer/user-agent que reclame crowdsecurity/nginx-logs. Aucun
+#     `labels.type` ne rendra ce fichier parsable. Les echecs
+#     d'authentification Proxmox, eux, sont journalises par pvedaemon dans
+#     /var/log/syslog et la collection fulljackz/proxmox sait les lire : c'est
+#     par la que passe la detection, pas par l'access-log.
+#
+# Au passage, l'acquisition lisait /var/log/kern.log ET /var/log/syslog. Sur
+# Debian 13 la regle rsyslog est `*.*;auth,authpriv.none -/var/log/syslog` :
+# kern.log est un sous-ensemble strict de syslog. Chaque ligne iptables
+# remplissait donc deux fois son bucket, et les scenarios se declenchaient a la
+# moitie de leur seuil affiche.
 
 - name: Verifier que CrowdSec est installe
   ansible.builtin.command: cscli version
@@ -19,73 +54,153 @@
     msg: "CrowdSec n'est pas installe sur ce noeud : rien a faire."
   when: h_cs_version.rc != 0
 
-- name: Configurer les acquisitions CrowdSec
+- name: Reparer et configurer CrowdSec
   when: h_cs_version.rc == 0
   block:
 
-    - name: Installer la collection sshd
-      ansible.builtin.command: cscli collections install crowdsecurity/sshd
-      register: h_cs_sshd
-      changed_when: "'nothing to do' not in h_cs_sshd.stdout | lower"
-      failed_when: false
+    # ---------------------------------------------------------------- 1) hub
+    - name: Lire le hub_dir declare par CrowdSec
+      ansible.builtin.command: cscli config show --key Config.Hub.HubDir
+      register: h_cs_hub_dir
+      changed_when: false
 
-    # Le fichier d'acquisition doit declarer un `type` que les parseurs
-    # reconnaissent. Sans `type: syslog`, auth.log est lu mais jamais analyse :
-    # c'est exactement ce qui se passe aujourd'hui.
-    - name: Declarer l'acquisition SSH
-      ansible.builtin.copy:
-        dest: /etc/crowdsec/acquis.d/sshd.yaml
+    # Un item dont le lien pointe ailleurs que dans hub_dir est invisible pour
+    # cscli : ni mise a jour, ni reinstallation. C'est la panne silencieuse a
+    # detecter, et le seul symptome visible est la colonne « local » de
+    # `cscli hub list`.
+    - name: Reperer les items relies hors du hub courant
+      ansible.builtin.shell:
+        # Les repertoires absents sont ecartes avant l'appel : `find` sortirait
+        # en 1 sur le premier manquant et, avec pipefail, ferait echouer la
+        # tache alors qu'il n'y a rien a signaler.
+        cmd: |
+          set -o pipefail
+          dirs=""
+          for d in parsers scenarios collections postoverflows contexts \
+                   appsec-configs appsec-rules; do
+            [ -d "/etc/crowdsec/$d" ] && dirs="$dirs /etc/crowdsec/$d"
+          done
+          [ -n "$dirs" ] || exit 0
+          find $dirs -type l |
+          while read -r link; do
+            case "$(readlink "$link")" in
+              "{{ h_cs_hub_dir.stdout | trim }}"/*) ;;
+              *) echo "$link" ;;
+            esac
+          done
+        executable: /bin/bash
+      register: h_cs_orphans
+      changed_when: false
+
+    - name: Annoncer les items orphelins
+      ansible.builtin.debug:
+        msg:
+          - "{{ h_cs_orphans.stdout_lines | length }} item(s) relie(s) hors de"
+          - "{{ h_cs_hub_dir.stdout | trim }} : figes, jamais mis a jour."
+          - "{{ h_cs_orphans.stdout_lines }}"
+      when: h_cs_orphans.stdout_lines | length > 0
+
+    # Le fichier pointe reste en place dans l'ancien hub : on ne coupe que le
+    # lien, l'installation qui suit en recree un vers le hub courant.
+    - name: Couper les liens orphelins
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ h_cs_orphans.stdout_lines }}"
+      register: h_cs_unlinked
+
+    # ------------------------------------------------------- 2) collections
+    # Reinstaller la collection recree les liens coupes juste au-dessus, avec
+    # la version courante du hub -- c'est ce qui repare sshd-logs.
+    - name: Installer les collections attendues
+      ansible.builtin.command:
+        argv:
+          - cscli
+          - collections
+          - install
+          - "{{ item }}"
+      loop: "{{ pve_hardening_crowdsec_collections }}"
+      register: h_cs_collections
+      changed_when: "'enabling' in h_cs_collections.stdout or 'downloading' in h_cs_collections.stdout"
+
+    - name: Mettre le hub a jour
+      ansible.builtin.command: cscli hub update
+      register: h_cs_hub_update
+      changed_when: "'Nothing to do' not in h_cs_hub_update.stdout"
+
+    # `cscli hub upgrade` annonce toujours « check & update data files » (les
+    # bases GeoIP), meme quand aucun item ne bouge. S'y fier ferait redemarrer
+    # CrowdSec a chaque execution -- et un redemarrage remet les compteurs de
+    # `cscli metrics` a zero, ce qui masque exactement le symptome qu'on
+    # cherche a suivre. On ne retient donc que les lignes d'action reelles.
+    - name: Mettre les items a jour
+      ansible.builtin.command: cscli hub upgrade
+      register: h_cs_hub_upgrade
+      changed_when: >-
+        h_cs_hub_upgrade.stdout_lines
+        | reject('search', 'Action plan')
+        | reject('search', 'check & update data files')
+        | select('match', '\S')
+        | list | length > 0
+
+    # ------------------------------------------------------ 3) acquisitions
+    # Ce fichier etait ecrit a la main. On le reprend en gestion parce que
+    # c'est lui qui decide ce que CrowdSec voit, et qu'il portait trois sources
+    # mortes (pveproxy illisible, kern.log en double, daemon.log inexistant sur
+    # Debian 13). `backup: true` laisse une copie horodatee a cote.
+    - name: Declarer les acquisitions
+      ansible.builtin.template:
+        src: acquis.yaml.j2
+        dest: /etc/crowdsec/acquis.yaml
         owner: root
         group: root
         mode: "0644"
-        content: |
-          # Gere par Ansible (role pve_hardening) -- constat 5 bis de l'audit.
-          filenames:
-            - /var/log/auth.log
-          labels:
-            type: syslog
-      register: h_cs_ssh_acquis
+        backup: true
+      register: h_cs_acquis
 
-    # Proxmox ecrit ses acces web dans un format proche du CLF de nginx : la
-    # collection nginx (deja presente) sait le parser.
-    - name: Declarer l'acquisition de l'interface Proxmox
-      ansible.builtin.copy:
-        dest: /etc/crowdsec/acquis.d/pveproxy.yaml
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          # Gere par Ansible (role pve_hardening).
-          # Sans ceci, un bruteforce de l'interface d'administration Proxmox
-          # n'est jamais detecte.
-          filenames:
-            - /var/log/pveproxy/access.log
-          labels:
-            type: nginx
-      register: h_cs_pve_acquis
+    # Purge des fichiers ecrits par la version precedente de ce role : ils
+    # dupliquaient auth.log et pveproxy avec les memes chemins que acquis.yaml.
+    - name: Retirer les acquisitions dupliquees de acquis.d
+      ansible.builtin.file:
+        path: "/etc/crowdsec/acquis.d/{{ item }}"
+        state: absent
+      loop: [sshd.yaml, pveproxy.yaml]
+      register: h_cs_acquis_d
 
     - name: Redemarrer CrowdSec
       ansible.builtin.systemd_service:
         name: crowdsec
         state: restarted
-      when: h_cs_ssh_acquis.changed or h_cs_pve_acquis.changed or h_cs_sshd.changed
+      when: h_cs_unlinked.changed or h_cs_collections.changed
+            or h_cs_hub_upgrade.changed or h_cs_acquis.changed
+            or h_cs_acquis_d.changed
 
-    - name: Laisser CrowdSec relire les journaux
-      ansible.builtin.wait_for:
-        timeout: 30
-
-    - name: Relever les metriques d'acquisition
-      ansible.builtin.shell:
-        cmd: "cscli metrics 2>/dev/null | grep -E 'auth.log|pveproxy' || echo 'pas encore de metrique'"
-        executable: /bin/bash
-      register: h_cs_metrics
+    # ------------------------------------------------------- 4) verification
+    # `cscli explain` fait tourner la chaine de parsing complete sur une ligne
+    # fournie. C'est la seule facon d'affirmer que la detection marche sans
+    # attendre un vrai attaquant -- et c'est ce qui manquait a la version
+    # precedente de ce role, qui se contentait d'afficher des metriques.
+    - name: Verifier le parsing des sources critiques
+      ansible.builtin.command:
+        argv:
+          - cscli
+          - explain
+          - --type
+          - syslog
+          - --log
+          - "{{ item.log }}"
+      loop: "{{ pve_hardening_crowdsec_probes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: h_cs_probe
       changed_when: false
+      failed_when: "'parser success' not in h_cs_probe.stdout"
 
     - name: Etat de CrowdSec
       ansible.builtin.debug:
         msg:
-          - "{{ h_cs_metrics.stdout_lines }}"
-          - ""
-          - "La colonne 'Lines parsed' doit devenir non nulle a mesure que de"
-          - "nouvelles lignes arrivent. Verifier plus tard avec :"
-          - "  cscli metrics ; cscli decisions list"
+          - "Parsing verifie : {{ pve_hardening_crowdsec_probes | map(attribute='name') | join(', ') }}."
+          - "Les compteurs de `cscli metrics` repartent de zero au redemarrage :"
+          - "la colonne « Lines parsed » de auth.log et syslog doit monter des"
+          - "les premieres lignes. Sinon, relire les trois causes en tete de"
+          - "ce fichier."

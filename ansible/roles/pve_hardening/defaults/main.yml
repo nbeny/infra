@@ -42,7 +42,40 @@ pve_hardening_firewall_mgmt_cidr: "192.168.100.0/24"
 pve_hardening_ssh: false
 
 # --- Constat 5 bis : CrowdSec ne parse ni auth.log ni pveproxy -------------
+# La bascule fait trois choses : rebrancher les items du hub restes lies a
+# l'ancien /var/lib/crowdsec/hub (c'est la cause de la panne SSH), installer
+# les collections ci-dessous, et reprendre /etc/crowdsec/acquis.yaml en
+# gestion. Ce dernier point ECRASE un fichier ecrit a la main -- une copie
+# horodatee est laissee a cote.
 pve_hardening_crowdsec_acquis: false
+
+# fulljackz/proxmox est la piece qui manquait : c'est elle qui lit les echecs
+# d'authentification de pvedaemon dans syslog. Sans elle, un bruteforce de
+# l'interface 8006 ne declenche rien.
+pve_hardening_crowdsec_collections:
+  - crowdsecurity/linux
+  - crowdsecurity/sshd
+  - crowdsecurity/nginx
+  - crowdsecurity/apache2
+  - crowdsecurity/base-http-scenarios
+  - crowdsecurity/http-cve
+  - crowdsecurity/iptables
+  - fulljackz/proxmox
+
+# openresty sert, mais il inclut les vhosts de /etc/nginx : les deux
+# arborescences de logs sont vivantes, il faut les deux.
+pve_hardening_crowdsec_nginx_files:
+  - /usr/local/openresty/nginx/logs/*.log
+  - /var/log/nginx/*.log
+
+# Lignes de reference passees a `cscli explain` en fin de role. Une chaine de
+# parsing qui echoue sur l'une d'elles fait echouer le play : c'est le seul
+# moyen de constater que la detection marche sans attendre un vrai attaquant.
+pve_hardening_crowdsec_probes:
+  - name: "SSH (OpenSSH >= 9.8, programme sshd-session)"
+    log: "2026-01-01T00:00:00.000000+01:00 pve sshd-session[1]: Invalid user admin from 203.0.113.1 port 4242"
+  - name: "Authentification Proxmox (pvedaemon)"
+    log: "2026-01-01T00:00:00.000000+01:00 pve pvedaemon[1]: authentication failure; rhost=203.0.113.1 user=root@pam msg=Authentication failure"
 
 # --- Constats 7 et 9 : services exposes inutilises -------------------------
 pve_hardening_disable_unused: false

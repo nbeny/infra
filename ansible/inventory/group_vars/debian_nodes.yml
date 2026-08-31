@@ -40,9 +40,15 @@ k8s_extra_tools:
 k8s_storage_provisioner: local-path      # local-path | none
 
 # --- Edge : ingress et securite -------------------------------------------
-# Traefik apporte les CRD IngressRoute / Middleware / TLSOption exigees par les
-# manifests de kube/urbanlink. CrowdSec fournit le bouncer et le WAF AppSec
-# references par leurs Middleware.
+# Defaut du GROUPE, plus celui d'urbanlink : depuis la bascule sur Istio
+# ambient, host_vars/urbanlink.yml force `k8s_ingress_controller: none` et
+# istio.yml desinstalle CrowdSec du cluster -- son agent n'avait qu'une source
+# de logs, les pods Traefik. Sur ce noeud, CrowdSec vit sur l'openresty du PVE
+# (role pve_hardening), pas dans le cluster.
+#
+# Ce couple Traefik + CrowdSec reste donc le defaut pour un noeud Debian qui
+# n'a PAS opte pour Istio : Traefik apporte les CRD IngressRoute / Middleware /
+# TLSOption, CrowdSec le bouncer et le WAF AppSec qu'elles referencent.
 k8s_ingress_controller: traefik          # traefik | none
 k8s_crowdsec_enabled: true
 k8s_crowdsec_appsec: true

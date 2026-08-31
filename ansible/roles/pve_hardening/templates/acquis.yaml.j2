@@ -1,0 +1,48 @@
+# {{ ansible_managed }}
+# Sources de logs de CrowdSec sur le noeud Proxmox -- role pve_hardening.
+#
+# Trois sources seulement, et chacune se justifie par ce qu'elle apporte SEULE.
+# La version manuscrite de ce fichier en declarait six ; trois ne servaient a
+# rien et l'une d'elles faussait les seuils. Le detail est en tete de
+# tasks/crowdsec.yml.
+#
+# Ce qui a ete retire, et pourquoi :
+#
+#   /var/log/pveproxy/access.log  Format Proxmox, mois en chiffres et sans
+#                                 referer/user-agent : aucun parseur du hub ne
+#                                 le lit. 24k lignes lues, 0 parsee. Les echecs
+#                                 d'authentification qu'on voulait y voir sont
+#                                 dans syslog, ecrits par pvedaemon.
+#   /var/log/kern.log             Sous-ensemble strict de syslog (regle rsyslog
+#                                 `*.*;auth,authpriv.none`). Le lire en plus,
+#                                 c'est compter chaque paquet iptables deux
+#                                 fois et declencher a la moitie du seuil.
+#   /var/log/daemon.log           N'existe plus sur Debian 13.
+
+# --- Reverse proxy : openresty + les vhosts /etc/nginx ----------------------
+# C'est la vraie porte d'entree Internet du lab, et la source qui alimente
+# aujourd'hui la quasi-totalite des bannissements.
+filenames:
+{% for path in pve_hardening_crowdsec_nginx_files %}
+  - {{ path }}
+{% endfor %}
+labels:
+  type: nginx
+---
+# --- SSH de l'hote ----------------------------------------------------------
+# Lu par crowdsecurity/sshd-logs. Sur OpenSSH >= 9.8 le programme s'appelle
+# `sshd-session` : un parseur fige sur `== 'sshd'` rend cette source muette
+# sans rien signaler.
+filenames:
+  - /var/log/auth.log
+labels:
+  type: syslog
+---
+# --- syslog : pvedaemon (auth Proxmox) + iptables ---------------------------
+# Deux detections pour une seule source :
+#   fulljackz/proxmox-logs      <- `pvedaemon[...]: authentication failure;`
+#   crowdsecurity/iptables-logs <- les paquets journalises par le pare-feu
+filenames:
+  - /var/log/syslog
+labels:
+  type: syslog
