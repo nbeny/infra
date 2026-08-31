@@ -28,6 +28,34 @@
       > '{{ pve_macos_work_dir }}/OpenCore.iso'
     creates: "{{ pve_macos_work_dir }}/OpenCore.iso"
 
+# L'image amont sort avec Misc.Boot.Timeout = 0, ce qui veut dire « attendre
+# indefiniment » dans le selecteur OpenCore. Acceptable pour une machine de
+# bureau, inutilisable pour un runner : apres le moindre redemarrage la VM
+# reste bloquee sur le selecteur et ne revient jamais toute seule.
+#
+# Corrige ici, sur le fichier, AVANT l'import dans Proxmox -- une fois importe
+# c'est un zvol attache a une VM, bien plus penible a modifier.
+- name: "Regler le delai d'auto-demarrage d'OpenCore a {{ pve_macos_opencore_timeout }} s"
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      LOOP=$(losetup --show -fP '{{ pve_macos_work_dir }}/OpenCore.iso')
+      trap 'umount "$MNT" 2>/dev/null || true; losetup -d "$LOOP" 2>/dev/null || true' EXIT
+      MNT=$(mktemp -d)
+      mount "${LOOP}p1" "$MNT"
+      python3 - "$MNT/EFI/OC/config.plist" <<'PY'
+      import plistlib, sys
+      p = sys.argv[1]
+      d = plistlib.load(open(p, 'rb'))
+      d['Misc']['Boot']['Timeout'] = {{ pve_macos_opencore_timeout }}
+      plistlib.dump(d, open(p, 'wb'))
+      print('Timeout =', plistlib.load(open(p, 'rb'))['Misc']['Boot']['Timeout'])
+      PY
+      sync
+      touch '{{ pve_macos_work_dir }}/.opencore-timeout-set'
+    executable: /bin/bash
+    creates: "{{ pve_macos_work_dir }}/.opencore-timeout-set"
+
 # --- Image de recuperation macOS -------------------------------------------
 
 - name: Deposer le script de recuperation d'Apple
@@ -44,21 +72,48 @@
   until: pve_macos_fetch_dl is succeeded
 
 # Interroge les serveurs de recuperation d'Apple. C'est une image de
-# RECUPERATION (~700 Mio) : elle telechargera le reste du systeme depuis
+# RECUPERATION (~840 Mio) : elle telechargera le reste du systeme depuis
 # Internet pendant l'installation, donc la VM doit avoir un acces reseau
 # sortant fonctionnel avant de lancer l'installeur.
-- name: "Telecharger l'image de recuperation {{ pve_macos_shortname }} (peut etre long)"
+#
+# LE DETOUR PAR `script` N'EST PAS DECORATIF. fetch-macOS-v2.py verifie
+# l'image telechargee chunk par chunk contre le chunklist d'Apple, et sa
+# boucle de verification appelle os.get_terminal_size() pour dimensionner sa
+# barre de progression (ligne 265). Sans terminal -- ce qui est le cas sous
+# Ansible -- cet appel leve "[Errno 25] Inappropriate ioctl for device" et le
+# script sort en erreur APRES avoir telecharge les 840 Mio avec succes.
+#
+# La tentation serait d'ajouter `failed_when: false` : ce serait accepter en
+# silence une image potentiellement tronquee. `script -qec` alloue un
+# pseudo-terminal, la verification SHA s'execute reellement (85 chunks,
+# "Image verification complete!") et un vrai echec reste un vrai echec.
+# La commande passee a `script -qec` DOIT tenir sur une seule ligne. Dans un
+# scalaire YAML plie (`>-`), les lignes plus indentees que la premiere gardent
+# leurs retours a la ligne au lieu d'etre repliees en espaces : `script`
+# n'executerait que "python3 fetch-macOS-v2.py", sans aucun argument, et le
+# script retomberait sur son menu interactif puis mourrait sur EOFError.
+- name: "Telecharger l'image de recuperation {{ pve_macos_version }} (peut etre long)"
   ansible.builtin.command:
     cmd: >-
-      python3 fetch-macOS-v2.py
-        --action download
-        --shortname {{ pve_macos_shortname }}
-        --outdir {{ pve_macos_work_dir }}
-        --basename BaseSystem
+      script -qec "python3 fetch-macOS-v2.py --action download --board-id
+      {{ pve_macos_target.board_id }} --os-type default --outdir
+      {{ pve_macos_work_dir }} --basename BaseSystem" /dev/null
     chdir: "{{ pve_macos_work_dir }}"
     creates: "{{ pve_macos_work_dir }}/BaseSystem.dmg"
   register: pve_macos_fetch
   timeout: 3600
+
+# La verification ci-dessus s'affiche mais ne change pas le code de retour de
+# `script` dans toutes les versions d'util-linux : on relit donc la sortie.
+- name: Confirmer que l'image a bien passe la verification du chunklist
+  ansible.builtin.fail:
+    msg: >-
+      fetch-macOS-v2.py n'a pas confirme la verification de l'image
+      ({{ pve_macos_work_dir }}/BaseSystem.dmg). L'image est probablement
+      tronquee -- la supprimer et rejouer le playbook.
+  when:
+    - pve_macos_fetch is changed
+    - "'Image verification complete' not in (pve_macos_fetch.stdout | default(''))"
 
 # Proxmox ne sait pas attacher un .dmg : il faut une image brute.
 - name: Convertir le DMG en image brute
@@ -68,6 +123,72 @@
               -o '{{ pve_macos_work_dir }}/BaseSystem.img'
     creates: "{{ pve_macos_work_dir }}/BaseSystem.img"
   timeout: 1800
+
+# ---------------------------------------------------------------------------
+#  Verifier ce qu'Apple a REELLEMENT envoye
+#
+#  Sans ce controle, une substitution amont est invisible jusqu'au boot : la
+#  VM affiche la pomme, panique, et revient au selecteur OpenCore sans le
+#  moindre message. C'est exactement ce qui s'est produit le 2026-08-31.
+#
+#  La chaine "Darwin Kernel Version XX.Y" est lisible en clair dans l'image
+#  brute et vaut identification sans ambiguite -- contrairement aux noms
+#  marketing ("macOS Monterey", "macOS Sequoia"...), tous presents a cause des
+#  tables de localisation, donc inutilisables.
+# ---------------------------------------------------------------------------
+
+- name: Lire la version Darwin de l'image telechargee
+  ansible.builtin.shell:
+    cmd: >-
+      grep -a -o -m1 -E 'Darwin Kernel Version [0-9]+\.[0-9]+'
+      '{{ pve_macos_work_dir }}/BaseSystem.img'
+      | grep -o -E '[0-9]+\.[0-9]+'
+    executable: /bin/bash
+  register: pve_macos_darwin
+  changed_when: false
+  failed_when: false
+
+- name: Echouer si la version Darwin est illisible
+  ansible.builtin.fail:
+    msg: >-
+      Impossible de lire la version Darwin dans BaseSystem.img. L'image est
+      probablement tronquee ou le format amont a change. Supprimer
+      {{ pve_macos_work_dir }}/BaseSystem.{dmg,img} et rejouer.
+  when: pve_macos_darwin.stdout | trim | length == 0
+
+- name: Echouer si Apple a envoye une autre version que celle demandee
+  ansible.builtin.fail:
+    msg: >-
+      {{ pve_macos_version }} etait demande (Darwin
+      {{ pve_macos_target.darwin_major }}.x) mais Apple a renvoye Darwin
+      {{ pve_macos_darwin.stdout | trim }}. La carte
+      {{ pve_macos_target.board_id }} ne sert plus cette version. Supprimer
+      {{ pve_macos_work_dir }}/BaseSystem.{dmg,img} et corriger le board-id
+      dans pve_macos_versions.
+  when: >-
+    (pve_macos_darwin.stdout | trim | split('.') | first | int)
+    != (pve_macos_target.darwin_major | int)
+
+- name: Echouer si l'image exige AVX2, absent de ce CPU
+  ansible.builtin.fail:
+    msg: >-
+      L'image telechargee est Darwin {{ pve_macos_darwin.stdout | trim }}, qui
+      exige AVX2 -- absent de ce CPU. La VM afficherait la pomme puis
+      paniquerait sans message. Supprimer
+      {{ pve_macos_work_dir }}/BaseSystem.{dmg,img} et choisir big-sur ou
+      monterey.
+  when:
+    - (pve_macos_avx2.stdout | int) == 0
+    - >-
+      (pve_macos_darwin.stdout | trim | split('.') | first | int)
+      >= (pve_macos_avx2_required_from_darwin | int)
+
+- name: "Image confirmee : {{ pve_macos_version }}"
+  ansible.builtin.debug:
+    msg: >-
+      Darwin {{ pve_macos_darwin.stdout | trim }} -- conforme a
+      {{ pve_macos_version }}. Xcode ira au maximum jusqu'a
+      {{ pve_macos_target.xcode_max }}.
 
 - name: Verifier que les deux images sont presentes
   ansible.builtin.stat:

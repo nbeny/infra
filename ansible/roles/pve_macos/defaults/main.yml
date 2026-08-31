@@ -7,7 +7,7 @@
 #  pour AVX2 et QEMU ne sait pas emuler cette seule instruction en gardant le
 #  reste en materiel. Ventura et tout ce qui suit sont donc IMPOSSIBLES ici.
 #  Monterey (12) est le plafond, et il plafonne lui-meme a Xcode 14.2.
-#  Verifier avant de changer `pve_macos_shortname` :
+#  Verifier avant de changer `pve_macos_version` :
 #      grep -o avx2 /proc/cpuinfo   (aucune sortie = pas d'AVX2)
 # ============================================================================
 
@@ -22,9 +22,44 @@ pve_macos_name: tpl-macos-monterey
 pve_macos_storage: pool1
 
 # --- Version de macOS -------------------------------------------------------
-# Valeurs acceptees par fetch-macOS-v2.py : big-sur, monterey, ventura, sonoma.
-# Les deux dernieres ne demarreront pas sur ce noeud (AVX2).
-pve_macos_shortname: monterey
+#
+# NE PAS UTILISER --shortname DE fetch-macOS-v2.py. Sa table interne code en
+# dur `os_type: latest` pour l'entree "monterey" : elle demande a Apple LE PLUS
+# RECENT systeme que supporte cette carte, pas Monterey. Ecrite a l'epoque ou
+# Monterey etait le plus recent, elle a pourri en silence.
+#
+# Mesure ici le 2026-08-31 : `--shortname monterey` a rendu Sequoia (produit
+# 696-28424, Darwin 24.4), qui exige AVX2 -- donc une VM qui affiche la pomme
+# puis panique, sans que rien n'annonce la substitution. `--os-type default`
+# sur la meme carte rend un autre produit (694-54378).
+#
+# D'ou : board-id explicite, --os-type default, et verification de la version
+# Darwin REELLEMENT telechargee avant de construire quoi que ce soit.
+pve_macos_version: monterey
+
+pve_macos_versions:
+  big-sur:
+    board_id: Mac-2BD1B31983FE1663
+    darwin_major: 20
+    xcode_max: "13.2.1"
+  monterey:
+    board_id: Mac-B809C3757DA9BB8D
+    darwin_major: 21
+    xcode_max: "14.2"
+  # Presentes pour que le message d'erreur soit parlant si quelqu'un les
+  # demande. Elles exigent AVX2 et le role les refuse sur ce noeud.
+  ventura:
+    board_id: Mac-4B682C642B45593E
+    darwin_major: 22
+    xcode_max: "15.2"
+  sonoma:
+    board_id: Mac-827FAC58A8FDFA22
+    darwin_major: 23
+    xcode_max: "16.2"
+
+# Darwin 22 (Ventura) est la premiere version dont le cache dyld n'est compile
+# que pour AVX2.
+pve_macos_avx2_required_from_darwin: 22
 
 # --- OSK --------------------------------------------------------------------
 # macOS refuse de demarrer sans le SMC d'Apple, qui repond une cle de 64
@@ -42,6 +77,11 @@ pve_macos_opencore_release: v21
 pve_macos_opencore_url: >-
   https://github.com/thenickdude/KVM-Opencore/releases/download/{{ pve_macos_opencore_release }}/OpenCore-{{ pve_macos_opencore_release }}.iso.gz
 pve_macos_fetch_script_url: https://raw.githubusercontent.com/kholia/OSX-KVM/master/fetch-macOS-v2.py
+
+# Delai avant que le selecteur OpenCore demarre l'entree par defaut. L'image
+# amont sort a 0, qui signifie « attendre indefiniment » : un runner bloque au
+# selecteur apres chaque redemarrage.
+pve_macos_opencore_timeout: 5
 
 pve_macos_work_dir: /var/lib/vz/template/macos
 

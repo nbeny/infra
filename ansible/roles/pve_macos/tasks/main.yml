@@ -22,16 +22,28 @@
   changed_when: false
   failed_when: false
 
+- name: Verifier que la version demandee est connue
+  ansible.builtin.fail:
+    msg: >-
+      pve_macos_version vaut "{{ pve_macos_version }}", inconnu. Valeurs
+      possibles : {{ pve_macos_versions.keys() | list | join(', ') }}.
+  when: pve_macos_version not in pve_macos_versions
+
+- name: Retenir la cible
+  ansible.builtin.set_fact:
+    pve_macos_target: "{{ pve_macos_versions[pve_macos_version] }}"
+
 - name: Refuser une version de macOS qui exige AVX2
   ansible.builtin.fail:
     msg: >-
-      {{ pve_macos_shortname }} exige AVX2, absent de ce CPU
+      {{ pve_macos_version }} est Darwin {{ pve_macos_target.darwin_major }},
+      qui exige AVX2 -- absent de ce CPU
       ({{ ansible_processor[2] | default('inconnu') }}). Seuls big-sur et
       monterey peuvent demarrer ici. Passer outre donnerait une VM qui
-      s'installe puis reste bloquee au demarrage.
+      affiche la pomme puis panique, sans message.
   when:
-    - pve_macos_shortname in ['ventura', 'sonoma']
     - (pve_macos_avx2.stdout | int) == 0
+    - (pve_macos_target.darwin_major | int) >= (pve_macos_avx2_required_from_darwin | int)
 
 - name: Preparer le noeud (ignore_msrs, outils)
   ansible.builtin.include_tasks: host_prereqs.yml

@@ -103,12 +103,55 @@ Le rôle [`pve_macos`](../ansible/roles/pve_macos/README.md) :
    devant une pomme figée.
 2. **Prépare le nœud** — `ignore_msrs=Y` (immédiat + persistant), `dmg2img`.
    Sans `ignore_msrs`, l'invité panique avant même le logo Apple.
-3. **Récupère les images** — OpenCore v21 et l'image de récupération Apple,
-   convertie en image brute.
-4. **Crée la VM 9200** — q35, OVMF sans clés pré-chargées, `ostype other`,
+3. **Récupère les images** — OpenCore v21 (dont il corrige le `Timeout`, voir
+   plus bas) et l'image de récupération Apple, convertie en image brute.
+4. **Vérifie ce qu'Apple a réellement envoyé** — voir ci-dessous, ce n'est pas
+   du zèle.
+5. **Crée la VM 9200** — q35, OVMF sans clés pré-chargées, `ostype other`,
    VirtIO, ballooning désactivé, et la ligne `args:` portant le SMC émulé.
 
 Idempotent : rejouer ne retélécharge rien et ne touche pas une VM existante.
+
+### Pourquoi le rôle n'utilise pas `--shortname`
+
+`fetch-macOS-v2.py` propose un raccourci `--shortname monterey`. **Il ne faut
+pas s'en servir.** Sa table interne code en dur `os_type: latest` pour cette
+entrée : elle demande à Apple *le plus récent système que supporte cette
+carte*, pas Monterey. Écrite quand Monterey était le plus récent, elle a pourri
+en silence.
+
+Mesuré ici le 2026-08-31 : `--shortname monterey` a renvoyé **Sequoia**
+(Darwin 24.4), qui exige AVX2. Résultat : la VM affichait le logo Apple,
+paniquait, et revenait au sélecteur OpenCore — sans qu'aucun message n'annonce
+la substitution.
+
+Le rôle passe donc un `--board-id` explicite avec `--os-type default`, puis
+**lit la version Darwin dans l'image téléchargée** et refuse de continuer si
+elle ne correspond pas :
+
+```
+Darwin 21.6 -- conforme a monterey. Xcode ira au maximum jusqu'a 14.2.
+```
+
+La chaîne `Darwin Kernel Version XX.Y` est lisible en clair dans l'image brute.
+Les noms marketing (« macOS Monterey », « macOS Sequoia »…) y sont *tous*
+présents à cause des tables de localisation : ils ne servent à rien.
+
+| Darwin | macOS | Démarre ici |
+|---|---|---|
+| 20.x | Big Sur | ✅ |
+| 21.x | Monterey | ✅ |
+| 22.x | Ventura | ❌ AVX2 |
+| 23.x | Sonoma | ❌ AVX2 |
+| 24.x | Sequoia | ❌ AVX2 |
+
+### Le `Timeout` d'OpenCore
+
+L'image OpenCore amont sort avec `Misc.Boot.Timeout = 0`, ce qui signifie
+« attendre indéfiniment » dans le sélecteur. Acceptable pour une machine de
+bureau, inutilisable pour un runner : après le moindre redémarrage la VM reste
+bloquée et ne revient jamais seule. Le rôle le passe à 5 secondes, sur le
+fichier, avant l'import dans Proxmox.
 
 ---
 
@@ -285,7 +328,10 @@ non-attendue.
 |---|---|
 | Kernel panic immédiat, avant le logo Apple | `ignore_msrs` non actif — `cat /sys/module/kvm/parameters/ignore_msrs` doit valoir `Y` |
 | Panic au démarrage après un redimensionnement | Nombre de cœurs qui n'est pas une puissance de 2 |
+| **Logo Apple puis retour au sélecteur OpenCore** | **L'image téléchargée n'est pas celle demandée (piège `--shortname`). Vérifier : `grep -a -o -m1 -E 'Darwin Kernel Version [0-9]+\.[0-9]+' BaseSystem.img`** |
 | Pomme figée avec une barre qui n'avance plus | Version de macOS ≥ Ventura : AVX2 manquant, aucun contournement |
+| La VM reste sur le sélecteur OpenCore indéfiniment | `Misc.Boot.Timeout = 0` dans `config.plist` |
+| Diagnostiquer une panique | Ajouter `-v` à `NVRAM > Add > 7C43…9F82 > boot-args` dans `config.plist` : le texte de la panique s'affiche à l'écran |
 | OpenCore ne démarre pas, OVMF refuse | Clés Secure Boot pré-chargées — `pre-enrolled-keys=0` |
 | L'installeur ne voit aucun disque | Images attachées en `media=cdrom` au lieu de disques |
 | Pas d'interface réseau dans Préférences Système | Basculer `net_model` sur `vmxnet3` |

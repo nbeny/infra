@@ -43,7 +43,7 @@
       ansible.builtin.command: >-
         qm create {{ pve_macos_vmid }}
           --name {{ pve_macos_name }}
-          --description "macOS {{ pve_macos_shortname }}. Installation graphique -- voir docs/macos-ci.md."
+          --description "macOS {{ pve_macos_version }}. Installation graphique -- voir docs/macos-ci.md."
           --ostype other
           --machine q35
           --bios ovmf

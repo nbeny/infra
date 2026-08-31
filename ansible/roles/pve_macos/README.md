@@ -59,7 +59,7 @@ est en `no_log` pour qu'elle ne finisse pas dans les journaux Ansible.
 |---|---|---|
 | `pve_macos_vmid` | `9200` | Hors des plages 9000-9101 déjà prises |
 | `pve_macos_storage` | `pool1` | pool1 est vide et a 3,5 To ; pool2 est à 47 % |
-| `pve_macos_shortname` | `monterey` | `big-sur` possible ; `ventura`/`sonoma` refusés |
+| `pve_macos_version` | `monterey` | `big-sur` possible ; `ventura`/`sonoma` refusés (AVX2) |
 | `pve_macos_osk` | *(vide)* | **Obligatoire**, 64 caractères |
 | `pve_macos_cores` | `4` | Doit être une puissance de 2, sinon kernel panic |
 | `pve_macos_memory` | `8192` | Le nœud est déjà surengagé, voir le README racine |
@@ -67,6 +67,26 @@ est en `no_log` pour qu'elle ne finisse pas dans les journaux Ansible.
 | `pve_macos_net_model` | `virtio` | Replier sur `vmxnet3` si l'interface n'apparaît pas |
 
 ## Pièges rencontrés
+
+- **`--shortname` de `fetch-macOS-v2.py` ment.** Sa table code en dur
+  `os_type: latest` pour `monterey` : elle demande le plus récent système que
+  supporte la carte. Mesuré le 2026-08-31, `--shortname monterey` a renvoyé
+  **Sequoia** (Darwin 24.4), qui exige AVX2 — logo Apple, panique, retour au
+  sélecteur, sans un mot d'explication. Le rôle passe un `--board-id` explicite
+  avec `--os-type default`, puis **relit la version Darwin dans l'image** et
+  refuse de continuer si elle ne correspond pas.
+- **`Misc.Boot.Timeout = 0`** dans l'OpenCore amont signifie « attendre
+  indéfiniment ». Un runner resterait bloqué au sélecteur après chaque
+  redémarrage. Corrigé sur le fichier avant l'import.
+- **La commande passée à `script -qec` doit tenir sur une seule ligne.** Dans
+  un scalaire YAML plié (`>-`), les lignes plus indentées que la première
+  gardent leurs retours à la ligne : `script` n'exécutait que `python3
+  fetch-macOS-v2.py`, sans arguments, et le script retombait sur son menu
+  interactif avant de mourir sur `EOFError`.
+- **`script -qec` n'est pas décoratif non plus.** La vérification du chunklist
+  appelle `os.get_terminal_size()` : sans terminal elle lève
+  `[Errno 25] Inappropriate ioctl for device` *après* avoir téléchargé 840 Mio.
+  Un `failed_when: false` accepterait en silence une image tronquée.
 
 - **`media=cdrom`** — les deux images sont attachées comme *disques*, pas comme
   lecteurs CD. macOS refuse de s'installer depuis un CD-ROM émulé.
