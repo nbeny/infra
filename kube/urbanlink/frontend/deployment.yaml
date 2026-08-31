@@ -61,6 +61,53 @@ spec:
               value: http://backend:4000
             - name: MINIO_PROXY_URL
               value: http://minio:9000
+            # ----------------------------------------------------------------
+            #  Celles-ci, EN REVANCHE, sont vivantes a l'execution
+            # ----------------------------------------------------------------
+            # Le jour annonce par le commentaire ci-dessus est arrive : une
+            # partie des `rewrites` a ete remplacee par des route handlers
+            # (`app/api/<x>/[...path]/route.ts`), qui relisent `process.env` a
+            # chaque requete. Les quatre variables ci-dessus ne les concernent
+            # pas -- elles portent les noms de l'epoque des rewrites, et AUCUN
+            # de ces handlers ne les lit.
+            #
+            # Chaque handler a un repli code en dur, et c'est ce qui rend la
+            # panne silencieuse : rien ne signale une variable absente, le
+            # serveur appelle simplement une adresse de developpement.
+            # Releve dans le bundle du pod (`.next/server`), toutes ces
+            # variables valant `undefined` :
+            #
+            #   GRAPHQL_ENDPOINT        -> http://127.0.0.1:10012/graphql  (x5)
+            #                              http://localhost:4000/graphql   (x1)
+            #   NEXT_PUBLIC_GRAPHQL_URI -> http://localhost:4000           (x3)
+            #   KRATOS_PUBLIC_URL       -> http://localhost:4433           (x1)
+            #
+            # `localhost`, dans un pod, c'est le pod lui-meme : rien n'y ecoute
+            # sur ces ports. D'ou le `ECONNREFUSED` sur DEUX adresses (::1 puis
+            # 127.0.0.1) visible dans les journaux du frontend, et le
+            # « Response not successful: Received status code 500 » cote
+            # navigateur. Mesure du 31/08/2026 : /api/graphql avait servi 226
+            # reponses 500 et pas une seule 200 dans la journee.
+            - name: GRAPHQL_ENDPOINT
+              value: http://backend:4000/graphql
+            # Le handler en fait `?.replace("/graphql", "")` pour construire
+            # `<base>/upload/avatar`, `<base>/upload/cover-photo` et
+            # `<base>/stripe-connect/upload-document`. La valeur doit donc etre
+            # l'URI GraphQL COMPLETE, pas la base -- sans le suffixe, le
+            # `replace` ne retire rien et les trois envois de fichier tapent sur
+            # `http://backend:4000/graphql/upload/...`.
+            #
+            # Le prefixe NEXT_PUBLIC_ ne l'expose pas au navigateur ici : ces
+            # trois lectures sont faites par le SERVEUR. Le bundle client, lui,
+            # a fige sa propre valeur au build et ignore celle-ci.
+            - name: NEXT_PUBLIC_GRAPHQL_URI
+              value: http://backend:4000/graphql
+            # Meme cible que KRATOS_PROXY_URL ci-dessus, sous le nom que lit
+            # reellement le handler `/api/kratos/[...path]`. Le mot PUBLIC du
+            # nom est trompeur : c'est le serveur qui appelle, pas le
+            # navigateur. Le navigateur, lui, passe par auth.urbanlink.fr.
+            - name: KRATOS_PUBLIC_URL
+              value: http://kratos:4433
             # MaxMind GeoIP
             - name: GEOIP_DB_PATH
               value: /usr/share/GeoIP/GeoLite2-Country.mmdb
