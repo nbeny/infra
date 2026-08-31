@@ -1,6 +1,19 @@
 ---
 # ============================================================================
-#  Exposition des outils du lab sous *.urbanlink.fr -- LAN uniquement
+#  Exposition des outils du lab sous *.urbanlink.fr
+# ----------------------------------------------------------------------------
+#  Deux paliers, decides par le drapeau `public` de chaque service :
+#
+#    public: true   -> joignable depuis Internet, via Cloudflare uniquement.
+#                      Enregistrement DNS explicite vers l'IP publique, en
+#                      proxy (nuage orange).
+#    (par defaut)   -> LAN uniquement. Couvert par le wildcard
+#                      *.urbanlink.fr -> 192.168.100.50 (DNS-only), plus le
+#                      bloc allow/deny du vhost.
+#
+#  Le palier `internal` n'est PAS qu'une etiquette : il est porte par deux
+#  mecanismes independants, le DNS et nginx. Ouvrir un outil interne par
+#  erreur demanderait de se tromper deux fois.
 # ============================================================================
 edge_urbanlink_domain: urbanlink.fr
 
@@ -17,28 +30,83 @@ edge_urbanlink_binary: /usr/local/openresty/nginx/sbin/nginx
 # c'est l'en-tete Host qui les distingue cote Istio.
 edge_urbanlink_gateway: "http://10.0.0.111:30080"
 
-# Les seules sources autorisees. Les enregistrements A publics pointant deja
-# sur une IP privee, ce filtre est la seconde barriere -- pas la premiere.
+# Les sources autorisees pour les services INTERNES. Leur nom resolvant deja
+# en IP privee, ce filtre est la seconde barriere -- pas la premiere.
 edge_urbanlink_allow:
   - 192.168.1.0/24
   - 192.168.100.0/24
 
+# --- Publication Internet ---------------------------------------------------
+# L'IP publique de la ligne. Le chemin entrant existe deja et sert nbeny.fr :
+#   Internet -> Freebox:443 -> MikroTik dstnat (dst-address=192.168.1.50)
+#            -> 192.168.100.50:443 openresty
+# Ni la box ni le routeur n'ont a changer pour cette publication.
+#
+# ATTENTION -- cette adresse n'est pas garantie fixe chez Free. Si elle change,
+# les six enregistrements publics pointent dans le vide jusqu'a un rejeu de
+# `33-urbanlink-edge.yml -t dns`. Voir la note en fin de README du role.
+edge_urbanlink_public_ip: "82.65.87.60"
+
+# N'accepter le trafic des noms publics QUE s'il a transite par Cloudflare.
+#
+# Sans cela, « public » voudrait dire « ouvert a Internet entier sur l'IP de la
+# maison » : l'origine reste joignable en direct et le WAF, le cache et la
+# protection DDoS de Cloudflare seraient contournables par quiconque devine
+# 82.65.87.60. Avec, un enregistrement repasse par erreur en nuage gris cesse
+# de fonctionner BRUYAMMENT au lieu d'exposer l'origine en silence.
+#
+# Passer a `false` retire le filtre et rend les vhosts publics ouverts a tous.
+edge_urbanlink_cloudflare_only: true
+
+# Les plages Cloudflare evoluent. Elles sont relevees a chaque execution du
+# role, pas figees ici ; cette valeur n'est qu'un repli inutilise en pratique.
+edge_urbanlink_cloudflare_ranges: []
+
+# Depose par le role tls_certificates. Le token y est limite a Zone:DNS:Edit,
+# ce qui suffit exactement a publier les enregistrements ci-dessous.
+edge_urbanlink_cloudflare_credentials: /root/.secrets/cloudflare.ini
+
 # `upstream` absent => la passerelle Istio.
+# `public: true`    => joignable depuis Internet (cf. en-tete du fichier).
 edge_urbanlink_services:
-  # --- applicatif ---------------------------------------------------------
+  # --- applicatif : PUBLIC --------------------------------------------------
   - name: app
     hosts: ["urbanlink.fr", "www.urbanlink.fr"]
+    public: true
+  # Le frontend Next relaie deja `/api/*` vers le backend en same-origin
+  # (BACKEND_PROXY_URL). Ce nom-ci ne sert donc qu'a un appelant EXTERNE au
+  # navigateur -- application mobile, integration tierce. Il est protege par
+  # l'AuthorizationPolicy `uc-edge-auth` (ext_authz Oathkeeper) cote Istio.
   - name: api
     hosts: ["api.urbanlink.fr"]
+    public: true
+  # Indispensable : Kratos a SERVE_PUBLIC_BASE_URL=https://auth.urbanlink.fr,
+  # donc le navigateur y est REDIRIGE pour chaque flux de connexion, et le
+  # callback OIDC Google y revient. Ce nom prive = pas d'authentification.
   - name: auth
     hosts: ["auth.urbanlink.fr"]
+    public: true
   - name: nominatim
     hosts: ["nominatim.urbanlink.fr"]
+    public: true
     read_timeout: 300s          # un geocodage complet peut etre long
+  # L'API S3 de MinIO (:9000), a ne pas confondre avec sa console (:9001),
+  # qui reste interne. Les requetes non signees recoivent AccessDenied : ce
+  # nom ne devient exploitable que si une policy de bucket publique et du CORS
+  # sont poses -- ce que le produit a choisi de NE PAS faire, il passe par le
+  # relais same-origin https://urbanlink.fr/api/minio (MINIO_PUBLIC_URL).
+  #
+  # RAPPEL : le plan Cloudflare gratuit plafonne le corps d'une requete a
+  # 100 Mo. `max_body: 0` cote nginx ne leve pas ce plafond-la.
   - name: s3
     hosts: ["s3.urbanlink.fr"]
+    public: true
     max_body: 0                 # 0 = illimite, pour les envois objet
-  # --- consoles d'administration ------------------------------------------
+  # --- consoles d'administration : LAN UNIQUEMENT ---------------------------
+  # Aucune n'a `public: true`, et c'est deliberé : une console d'administration
+  # exposee sur Internet, meme derriere un mot de passe, est la surface
+  # d'attaque garantie d'un lab. Elles restent couvertes par le wildcard
+  # *.urbanlink.fr -> 192.168.100.50 et par le bloc allow/deny du vhost.
   - name: directus
     hosts: ["directus.urbanlink.fr"]
   - name: minio

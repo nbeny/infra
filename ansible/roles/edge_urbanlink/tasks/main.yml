@@ -22,6 +22,70 @@
     mode: "0644"
   notify: reload openresty
 
+# ---------------------------------------------------------------------------
+#  Controle d'origine des noms publics
+# ---------------------------------------------------------------------------
+# Les plages sont relevees a chaque passage plutot que figees : Cloudflare en
+# ajoute regulierement, et une plage manquante se traduirait par un 403 pour
+# une part des visiteurs -- une panne partielle, donc difficile a voir.
+- name: Relever les plages Cloudflare
+  ansible.builtin.uri:
+    url: "https://www.cloudflare.com/ips-{{ item }}"
+    return_content: true
+  register: edge_cf_ips
+  loop: [v4, v6]
+  when: edge_urbanlink_cloudflare_only | bool
+  changed_when: false
+  # Une lecture seule, sans effet de bord : la laisser s'executer en mode
+  # simulation est ce qui rend `--check` capable de montrer le vrai diff.
+  check_mode: false
+
+- name: Constituer la liste des plages
+  ansible.builtin.set_fact:
+    # `splitlines()` et NON `split('\n')` : dans un scalaire YAML replie, la
+    # sequence \n arrive a Jinja en deux caracteres litteraux sous
+    # ansible-core 2.19. Le decoupage ne se faisait pas et la liste tombait a
+    # deux elements -- soit, apres le garde-fou ci-dessous, un echec net.
+    # (Meme piege dans roles/pve_hardening/tasks/cloudflare.yml.)
+    edge_urbanlink_cloudflare_ranges: >-
+      {{ (edge_cf_ips.results[0].content.splitlines()
+          + edge_cf_ips.results[1].content.splitlines())
+         | map('trim') | select('search', '/') | list }}
+  when: edge_urbanlink_cloudflare_only | bool
+
+# Une liste vide produirait un `geo` ne contenant que le LAN : tous les noms
+# publics repondraient 403 a Internet entier. Mieux vaut echouer ici, en
+# laissant la configuration precedente en place, que publier cette panne.
+- name: Refuser une liste de plages vide ou tronquee
+  ansible.builtin.assert:
+    that: edge_urbanlink_cloudflare_ranges | length >= 10
+    fail_msg: >-
+      Seulement {{ edge_urbanlink_cloudflare_ranges | length }} plages
+      Cloudflare relevees. Appliquer ce chiffre repondrait 403 a la quasi
+      totalite des visiteurs. Verifier l'acces a cloudflare.com et relancer.
+  when: edge_urbanlink_cloudflare_only | bool
+
+- name: Deposer le controle d'origine Cloudflare
+  ansible.builtin.template:
+    src: cloudflare-origin.conf.j2
+    dest: /etc/nginx/conf.d/45-cloudflare-origin.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: edge_urbanlink_cloudflare_only | bool
+  notify: reload openresty
+
+# Le port 80 avait deja son hote par defaut (20-default-deny.conf, hors de ce
+# role) ; le 443 n'en avait aucun. Voir l'en-tete du template.
+- name: Deposer l'hote par defaut en TLS
+  ansible.builtin.template:
+    src: default-deny-tls.conf.j2
+    dest: /etc/nginx/conf.d/50-default-deny-tls.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload openresty
+
 # `validate` du module template ne convient pas ici : il testerait le fichier
 # hors de son contexte, sans la carte connection_upgrade ni les certificats.
 # On ecrit, on teste la configuration COMPLETE, et on retire tout si le test
@@ -52,15 +116,47 @@
 
   rescue:
 
-    - name: Desactiver les vhosts invalides
+    # Retirer le seul lien des vhosts ne suffit plus : 45 et 50 vivent dans
+    # conf.d/ et cassent openresty par eux-memes. `50` en particulier declare
+    # un `default_server` -- si un autre venait a exister, `nginx -t` echoue et
+    # le laisser en place tuerait le prochain rechargement, meme manuel.
+    - name: Retirer toute la configuration posee par ce role
       ansible.builtin.file:
-        path: /etc/nginx/sites-enabled/{{ edge_urbanlink_domain }}
+        path: "{{ item }}"
         state: absent
+      loop:
+        - /etc/nginx/sites-enabled/{{ edge_urbanlink_domain }}
+        - /etc/nginx/conf.d/45-cloudflare-origin.conf
+        - /etc/nginx/conf.d/50-default-deny-tls.conf
+
+    - name: Verifier qu'on a bien rendu la main
+      ansible.builtin.command: "{{ edge_urbanlink_binary }} -t"
+      changed_when: false
 
     - name: Signaler l'echec sans laisser de configuration cassee
       ansible.builtin.fail:
         msg: >-
-          La configuration nginx produite est invalide ; le lien a ete retire
-          et openresty n'a pas ete recharge. Le fichier fautif reste lisible
-          dans /etc/nginx/sites-available/{{ edge_urbanlink_domain }}.
+          La configuration nginx produite est invalide ; tout ce que ce role
+          avait pose a ete retire et openresty n'a pas ete recharge. Le fichier
+          de vhosts fautif reste lisible dans
+          /etc/nginx/sites-available/{{ edge_urbanlink_domain }}.
           Tester a la main : {{ edge_urbanlink_binary }} -t
+
+# ---------------------------------------------------------------------------
+#  Publication DNS -- EN DERNIER, et ce n'est pas un detail
+# ---------------------------------------------------------------------------
+# Tant que le DNS n'a pas bascule, un nom public reste invisible d'Internet.
+# Le faire basculer avant que nginx ne soit pose et valide ouvrirait une
+# fenetre ou le nom repond depuis l'exterieur avec l'ancienne configuration.
+#
+#   ansible-playbook playbooks/33-urbanlink-edge.yml -t dns   # DNS seul
+- name: Publier les enregistrements DNS des noms publics
+  ansible.builtin.include_tasks:
+    file: dns.yml
+    # `apply` n'est pas decoratif : un include DYNAMIQUE ne propage pas ses
+    # tags a ce qu'il inclut. Sans lui, `-t dns` executait l'include puis
+    # filtrait chacune des taches de dns.yml, faute de tag -- le playbook
+    # affichait un succes en ne faisant rien du tout.
+    apply:
+      tags: [dns]
+  tags: [dns]

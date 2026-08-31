@@ -5,16 +5,27 @@
 #  Genere depuis edge_urbanlink_services. NE PAS EDITER SUR LE NOEUD : le
 #  playbook ecrase ce fichier a chaque passage.
 #
-#  Deux barrieres, dans cet ordre :
-#    1. les enregistrements A publics pointent sur une IP privee -- depuis
-#       Internet, ces noms ne menent nulle part. Cette barriere ne depend
-#       d'aucune regle et aucune erreur de configuration ne peut l'ouvrir ;
-#    2. le bloc allow/deny ci-dessous, au cas ou la premiere tomberait.
+#  DEUX PALIERS, et ils ne se ressemblent pas :
+#
+#  - services INTERNES (par defaut) : deux barrieres independantes.
+#      1. leur nom est couvert par le wildcard *.{{ edge_urbanlink_domain }}, qui
+#         resout en 192.168.100.50 -- une IP non routable depuis Internet.
+#         Cette barriere ne depend d'aucune regle et aucune erreur de
+#         configuration nginx ne peut l'ouvrir ;
+#      2. le bloc `allow ... deny all` ci-dessous, si la premiere tombait.
+#
+#  - services PUBLICS (`public: true`) : la premiere barriere est levee
+#    volontairement -- leur enregistrement pointe l'IP publique, en proxy
+#    Cloudflare. Reste le controle d'origine, qui exige que la requete ait
+#    reellement transite par Cloudflare (ou vienne du LAN). Voir
+#    45-cloudflare-origin.conf pour la raison pour laquelle il s'ecrit avec
+#    `geo` et non avec `allow`.
 # ============================================================================
 {% for svc in edge_urbanlink_services %}
 {% set upstream = svc.upstream | default(edge_urbanlink_gateway) %}
+{% set is_public = svc.public | default(false) %}
 
-# --- {{ svc.name }} {{ '-' * (66 - svc.name | length) }}
+# --- {{ svc.name }} [{{ 'PUBLIC ' if is_public else 'INTERNE' }}] {{ '-' * (57 - svc.name | length) }}
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
@@ -25,10 +36,24 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
+{% if is_public %}
+{% if edge_urbanlink_cloudflare_only %}
+    # Ouvert a Internet, mais seulement par Cloudflare. `$uc_origin_allowed`
+    # est calcule dans 45-cloudflare-origin.conf a partir de
+    # $realip_remote_addr -- l'adresse du pair TCP, avant reecriture realip.
+    if ($uc_origin_allowed = 0) {
+        return 403;
+    }
+{% else %}
+    # edge_urbanlink_cloudflare_only=false : ce nom repond a Internet entier,
+    # y compris en direct sur l'IP publique, hors WAF Cloudflare.
+{% endif %}
+{% else %}
 {% for cidr in edge_urbanlink_allow %}
     allow {{ cidr }};
 {% endfor %}
     deny all;
+{% endif %}
 
     client_max_body_size {{ svc.max_body | default('64m') }};
 

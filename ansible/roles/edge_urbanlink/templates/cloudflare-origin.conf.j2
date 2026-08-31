@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+# ============================================================================
+#  Qui a le droit d'atteindre l'origine sur les noms PUBLICS
+# ----------------------------------------------------------------------------
+#  PIEGE MAJEUR -- pourquoi `geo $realip_remote_addr` et surtout PAS `allow`.
+#
+#  30-cloudflare-realip.conf (hors de ce role) reecrit $remote_addr a partir de
+#  l'en-tete CF-Connecting-IP. Or les deux modules n'agissent pas dans la meme
+#  phase du traitement :
+#
+#      realip  -> phase POST_READ  (tot)
+#      access  -> phase ACCESS     (plus tard)   <- c'est `allow` / `deny`
+#
+#  Quand `allow` s'execute, $remote_addr NE DESIGNE DEJA PLUS Cloudflare : il
+#  porte l'adresse du visiteur final. Un `allow <plage Cloudflare>; deny all;`
+#  refuserait donc la Terre entiere, Cloudflare compris -- une panne totale,
+#  et qui ressemblerait a un probleme de DNS ou de certificat.
+#
+#  $realip_remote_addr est la variable que le module realip conserve pour
+#  l'adresse du pair TCP reel. C'est la seule qui designe encore Cloudflare a
+#  ce stade, donc la seule sur laquelle ce controle puisse porter.
+#
+#  Les plages sont relevees sur cloudflare.com/ips-v4 et ips-v6 a chaque
+#  execution du role : les figer ici ferait tomber le site le jour ou
+#  Cloudflare en ajoute une.
+# ============================================================================
+geo $realip_remote_addr $uc_origin_allowed {
+    default 0;
+
+    # --- acces de secours depuis les reseaux locaux -------------------------
+    # Sans ceci, une panne de Cloudflare rendrait le site injoignable meme
+    # depuis la maison, et le diagnostic devrait se faire a l'aveugle.
+{% for cidr in edge_urbanlink_allow %}
+    {{ cidr }} 1;
+{% endfor %}
+
+    # --- plages Cloudflare ({{ edge_urbanlink_cloudflare_ranges | length }} relevees) -----------------------------
+{% for cidr in edge_urbanlink_cloudflare_ranges %}
+    {{ cidr }} 1;
+{% endfor %}
+}

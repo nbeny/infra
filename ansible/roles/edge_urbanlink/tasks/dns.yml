@@ -1,0 +1,182 @@
+---
+# ============================================================================
+#  Publication DNS des noms applicatifs -- zone Cloudflare urbanlink.fr
+# ----------------------------------------------------------------------------
+#  CE QUE CE FICHIER NE TOUCHE PAS, ET POURQUOI C'EST L'ESSENTIEL
+#
+#  La zone ne contient PAS un enregistrement par outil : elle contient un
+#  WILDCARD `*.urbanlink.fr -> 192.168.100.50` en DNS-only, qui couvre les dix
+#  consoles internes (pgadmin, kibana, kiali, prometheus, minio, directus,
+#  kafka, temporal) plus proxmox et router.
+#
+#  Publier un nom ne consiste donc pas a modifier le wildcard -- ce qui
+#  ouvrirait TOUT -- mais a poser a cote un enregistrement EXPLICITE. En DNS,
+#  le plus specifique l'emporte : `api.urbanlink.fr` explicite gagne sur
+#  `*.urbanlink.fr`, et les noms sans enregistrement propre continuent de
+#  resoudre en IP privee.
+#
+#  Consequence directe : ce fichier ne fait que des POST et des PATCH sur les
+#  six noms listes dans `edge_urbanlink_services` avec `public: true`. Aucune
+#  suppression, aucune ecriture sur le wildcard. Un outil interne ne peut pas
+#  etre publie par effet de bord.
+#
+#  Le token est celui depose par le role tls_certificates, limite a
+#  Zone:DNS:Edit. Il ne peut donc PAS lire ni changer le mode SSL/TLS de la
+#  zone -- ce reglage se verifie a la main, cf. README du role.
+# ============================================================================
+
+- name: Lire les identifiants Cloudflare du noeud
+  ansible.builtin.slurp:
+    src: "{{ edge_urbanlink_cloudflare_credentials }}"
+  register: edge_cf_ini
+  no_log: true
+
+- name: Extraire le token
+  ansible.builtin.set_fact:
+    edge_cf_token: >-
+      {{ (edge_cf_ini.content | b64decode
+          | regex_search('dns_cloudflare_api_token\s*=\s*(\S+)', '\1'))[0] }}
+  no_log: true
+
+- name: Resoudre l'identifiant de la zone
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones?name={{ edge_urbanlink_domain }}"
+    headers:
+      Authorization: "Bearer {{ edge_cf_token }}"
+  register: edge_cf_zone
+  changed_when: false
+  no_log: true
+
+- name: Exiger une zone unique et active
+  ansible.builtin.assert:
+    that:
+      - edge_cf_zone.json.success
+      - edge_cf_zone.json.result | length == 1
+    fail_msg: >-
+      La zone {{ edge_urbanlink_domain }} n'a pas ete resolue par l'API
+      Cloudflare. Verifier que le token de
+      {{ edge_urbanlink_cloudflare_credentials }} porte bien sur cette zone.
+
+- name: Relever les enregistrements existants
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ edge_cf_zone.json.result[0].id }}/dns_records?per_page=200
+    headers:
+      Authorization: "Bearer {{ edge_cf_token }}"
+  register: edge_cf_records
+  changed_when: false
+  no_log: true
+
+# Un nom peut deja exister sous deux formes : `urbanlink.fr` est un A, tandis
+# que `www.urbanlink.fr` est un CNAME vers l'apex. Les deux doivent basculer en
+# proxy, mais un CNAME ne doit surtout pas voir son type ni sa cible reecrits :
+# on ne touche alors qu'au drapeau `proxied`.
+- name: Apparier chaque nom public a son enregistrement eventuel
+  ansible.builtin.set_fact:
+    edge_cf_plan: >-
+      {{ edge_cf_plan | default([]) + [{
+           'name': item,
+           'existing': (edge_cf_records.json.result
+                        | selectattr('name', 'equalto', item)
+                        | selectattr('type', 'in', ['A', 'CNAME'])
+                        | list | first | default({}))
+         }] }}
+  loop: >-
+    {{ edge_urbanlink_services
+       | selectattr('public', 'defined') | selectattr('public')
+       | map(attribute='hosts') | flatten | list }}
+  loop_control:
+    label: "{{ item }}"
+
+- name: Recapitulatif du plan de publication
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.name }} :
+      {{ 'CREATION A -> ' ~ edge_urbanlink_public_ip
+         if not item.existing
+         else 'MISE A JOUR ' ~ item.existing.type
+              ~ ' (actuel: ' ~ item.existing.content
+              ~ ', proxy: ' ~ item.existing.proxied ~ ')' }}
+  loop: "{{ edge_cf_plan }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Creer les enregistrements publics absents
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ edge_cf_zone.json.result[0].id }}/dns_records
+    method: POST
+    headers:
+      Authorization: "Bearer {{ edge_cf_token }}"
+    body_format: json
+    body:
+      type: A
+      name: "{{ item.name }}"
+      content: "{{ edge_urbanlink_public_ip }}"
+      # `proxied: true` est le nuage orange. C'est lui qui met Cloudflare dans
+      # le chemin, donc qui rend vrai le filtre d'origine de nginx.
+      proxied: true
+      ttl: 1                      # 1 = automatique, impose par le mode proxy
+      comment: "public -- ansible role edge_urbanlink"
+  loop: "{{ edge_cf_plan | rejectattr('existing.id', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+# Idempotence : on ne rappelle l'API que si l'etat vise differe de l'etat lu.
+# Sans ce `when`, chaque rejeu du playbook remonterait `changed`, et le
+# critere d'acceptation « rejouer ne change rien » tomberait.
+- name: Basculer les enregistrements publics existants
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ edge_cf_zone.json.result[0].id
+      }}/dns_records/{{ item.existing.id }}
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ edge_cf_token }}"
+    body_format: json
+    body: >-
+      {{ {'proxied': true}
+         if item.existing.type == 'CNAME'
+         else {'content': edge_urbanlink_public_ip, 'proxied': true} }}
+  loop: "{{ edge_cf_plan | selectattr('existing.id', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: >-
+    not item.existing.proxied
+    or (item.existing.type == 'A'
+        and item.existing.content != edge_urbanlink_public_ip)
+  no_log: true
+
+# Filet : si le wildcard basculait en proxy ou changeait de cible, les dix
+# consoles internes deviendraient joignables depuis Internet. Rien dans ce
+# role ne l'ecrit, mais le verifier coute une requete et ferme la question.
+- name: Relire la zone apres modification
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ edge_cf_zone.json.result[0].id }}/dns_records?per_page=200
+    headers:
+      Authorization: "Bearer {{ edge_cf_token }}"
+  register: edge_cf_after
+  changed_when: false
+  no_log: true
+
+- name: Verifier que le wildcard interne n'a pas bouge
+  ansible.builtin.assert:
+    that:
+      - edge_cf_wildcard | length == 1
+      - edge_cf_wildcard[0].content == '192.168.100.50'
+      - not edge_cf_wildcard[0].proxied
+    fail_msg: >-
+      Le wildcard *.{{ edge_urbanlink_domain }} ne pointe plus sur
+      192.168.100.50 en DNS-only. En l'etat, les consoles internes
+      (pgadmin, kibana, kiali, prometheus...) sont joignables depuis Internet.
+      A corriger IMMEDIATEMENT dans le tableau de bord Cloudflare.
+    success_msg: >-
+      Wildcard *.{{ edge_urbanlink_domain }} intact : 192.168.100.50, DNS-only.
+      Les consoles internes restent hors d'atteinte depuis Internet.
+  vars:
+    edge_cf_wildcard: >-
+      {{ edge_cf_after.json.result
+         | selectattr('name', 'equalto', '*.' ~ edge_urbanlink_domain)
+         | selectattr('type', 'equalto', 'A') | list }}

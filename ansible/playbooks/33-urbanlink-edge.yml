@@ -1,15 +1,26 @@
 ---
 # Publie les outils du lab sous *.urbanlink.fr, depuis le noeud Proxmox.
 #
+# Deux paliers, decides par le drapeau `public` de edge_urbanlink_services :
+#   - six noms APPLICATIFS joignables depuis Internet, via Cloudflare
+#     (urbanlink.fr, www, api, auth, nominatim, s3) ;
+#   - dix CONSOLES d'administration qui restent sur le LAN.
+# Voir roles/edge_urbanlink/README.md.
+#
 # Prerequis :
-#   1. Les enregistrements A urbanlink.fr et *.urbanlink.fr pointent sur
-#      192.168.100.50, en DNS-only (nuage gris).
+#   1. Le wildcard *.urbanlink.fr pointe sur 192.168.100.50 en DNS-only.
+#      Ce playbook pose LUI-MEME les enregistrements explicites des noms
+#      publics, qui l'emportent sur le wildcard.
 #   2. Le certificat wildcard existe
 #      -> ansible-playbook playbooks/32-tls-certificates.yml
 #   3. La passerelle Istio repond sur 10.0.0.111:30080
 #      -> ansible-playbook playbooks/31-urbanlink-deploy.yml
+#   4. /root/.secrets/cloudflare.ini porte un token Zone:DNS:Edit VALIDE.
+#      Un token revoque ne bloque pas que ce playbook : c'est le meme fichier
+#      que certbot utilise pour renouveler le wildcard en DNS-01.
 #
 #   ansible-playbook playbooks/33-urbanlink-edge.yml
+#   ansible-playbook playbooks/33-urbanlink-edge.yml -t dns   # DNS seul
 #
 # Le TLS est termine ici, pas par Istio : le certificat wildcard vit sur le
 # noeud, et c'est aussi le point ou le bouncer CrowdSec s'applique.
