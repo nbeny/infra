@@ -449,6 +449,31 @@
             state: absent
           loop: [/tmp/uc-tls.key, /tmp/uc-tls.crt]
 
+    # ⚠️ **Un Job est IMMUABLE : `apply` echoue des que sa specification bouge.**
+    # Le message ne nomme meme pas le Job — « Error from server: error when
+    # applying patch » — et il fait echouer l'application ENTIERE, donc tout le
+    # reste du stack avec lui. Or leur specification bouge a chaque livraison :
+    # `kustomize edit set image` y reecrit le tag comme partout ailleurs.
+    #
+    # Les quatre sont IDEMPOTENTS et courts, les supprimer avant d'appliquer ne
+    # coute rien : migrations Prisma et Kratos deja jouees ne se rejouent pas,
+    # `mc mb --ignore-existing` non plus, et le mot de passe `kibana_system` se
+    # repose a l'identique. `--ignore-not-found` couvre le premier deploiement.
+    #
+    # ⚠️ Ne pas remplacer par `--force` sur l'apply : ce drapeau supprime et
+    # recree TOUT objet en conflit, y compris des StatefulSets — et donc leurs
+    # PVC selon la politique de retention. Ici on ne vise que les Jobs.
+    - name: Supprimer les Jobs avant application (ils sont immuables)
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
+        delete job {{ item }} --ignore-not-found
+      loop:
+        - backend-migrate
+        - kratos-migrate
+        - minio-init
+        - elasticsearch-setup
+      changed_when: true
+
     - name: Appliquer le kustomize
       ansible.builtin.command: >-
         kubectl --kubeconfig {{ urbanlink_kubeconfig }}

@@ -182,6 +182,33 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: SENDCLOUD_SECRET_KEY
+            # ⚠️ **Sans ce secret, TOUT le backend refuse de demarrer.**
+            # `SendcloudService.onModuleInit` s'arrete net en production :
+            # « SENDCLOUD_WEBHOOK_SECRET is required in production. Refusing to
+            # start. » Il ne manquait pas seulement ici — il n'existait NULLE
+            # PART : ni dans le Deployment, ni dans secrets.env.example, ni dans
+            # le secrets.env du cluster. Le backend etait donc structurellement
+            # incapable de demarrer sur ce manifeste, ce qu'on ne decouvrait
+            # qu'apres avoir leve tous les autres obstacles.
+            #
+            # ⚠️ La severite du garde-fou est VOULUE, pas un exces : sans
+            # signature, n'importe qui peut pousser un faux
+            # `parcel_status_changed` « livre », ce qui bascule la commande en
+            # DELIVERED **et ouvre le droit de retractation de 14 jours** sur un
+            # colis jamais expedie. Un webhook non signe est une porte ouverte
+            # sur l'argent.
+            #
+            # C'est un secret PARTAGE avec Sendcloud : sa valeur n'a pas
+            # d'importance tant que les deux cotes portent la meme. Tant que le
+            # compte Sendcloud n'est pas cable (module en mode simule), une
+            # valeur aleatoire est la bonne reponse — d'ou `[auto]` dans
+            # secrets.env.example. Le jour du cablage, reprendre celle que
+            # Sendcloud affiche.
+            - name: SENDCLOUD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_WEBHOOK_SECRET
             # Google OAuth
             - name: GOOGLE_CLIENT_ID
               valueFrom:

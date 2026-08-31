@@ -174,6 +174,72 @@ spec:
                   key: ELASTICSEARCH_PASSWORD
             - name: SEARCH_ENGINE
               value: elasticsearch
+            # ================================================================
+            #  ⚠️ LE WORKER EST LA MEME APPLICATION QUE LE BACKEND
+            # ----------------------------------------------------------------
+            # Meme image, meme `AppModule`, autre point d'entree. Il instancie
+            # donc les MEMES services, et subit les MEMES gardes de demarrage.
+            # Son environnement comptait 16 variables de moins que celui du
+            # backend, et il mourait sur
+            #   « SENDCLOUD_WEBHOOK_SECRET is required in production.
+            #     Refusing to start. »
+            # -- un garde pose par un module dont le worker n'utilise pourtant
+            # aucune route HTTP, mais qu'il charge quand meme.
+            #
+            # ⚠️ Ce n'est pas qu'une question de demarrage : **tous les
+            # mouvements d'argent pilotes par un balayage tournent ici**
+            # (rapprochement nocturne, execution d'un accord de litige,
+            # versements). Un worker sans identifiants Stripe ou Sendcloud
+            # ecrirait en base des remboursements qui ne partent nulle part,
+            # sans jamais lever d'erreur.
+            #
+            # Regle : toute variable ajoutee au backend et lue par un service
+            # partage doit etre ajoutee ici aussi.
+            # ================================================================
+            - name: SENDCLOUD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_WEBHOOK_SECRET
+            - name: SENDCLOUD_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_PUBLIC_KEY
+            - name: SENDCLOUD_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_SECRET_KEY
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_WEBHOOK_SECRET
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_PUBLISHABLE_KEY
+            - name: SMSAPI_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMSAPI_TOKEN
+            - name: SMSAPI_SENDER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMSAPI_SENDER
+            - name: KLIPY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KLIPY_API_KEY
+            # Le worker compose des URLs de fichiers dans ses notifications ;
+            # sans ceci elles designeraient `localhost:9000`.
+            - name: MINIO_PUBLIC_URL
+              value: https://urbanlink.fr/api/minio
           resources:
             requests:
               cpu: 250m
