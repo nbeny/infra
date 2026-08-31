@@ -197,6 +197,29 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: TURN_SECRET
+            # ⚠️ **Ces deux-la sont indispensables, et pour une raison qui ne
+            # saute pas aux yeux : `db:seed:all` enchaine `search:reindex`, qui
+            # DEMARRE L'APPMODULE ENTIER.** Le Job subit donc les memes gardes
+            # de demarrage que le backend. Mesure le 2026-08-31 : le seed avait
+            # pose ses 54 comptes, 1435 annonces et 310 publications, puis tout
+            # s'est arrete sur
+            #   « STRIPE_CONNECT_WEBHOOK_SECRET is not set »
+            # — un message qui parle de webhooks alors qu'on indexe, et qui
+            # laisse la base pleine et Elasticsearch vide.
+            #
+            # ⚠️ Ces gardes se decouvrent UNE PAR UNE : chacune ne se revele
+            # qu'une fois la precedente levee. Les lister d'un coup :
+            #   grep -rhoE "[A-Z_]+ is (not set|required in production)" backTs/src
+            - name: STRIPE_CONNECT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_CONNECT_WEBHOOK_SECRET
+            - name: SENDCLOUD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_WEBHOOK_SECRET
             # Le seed pose des comptes Stripe Connect de demonstration, mais
             # **il n'appelle jamais Stripe** : `prisma/seeds/stripe-connect.seed.ts`
             # ecrit des identifiants fabriques (`acct_mock_*`, `ba_mock_*`)
