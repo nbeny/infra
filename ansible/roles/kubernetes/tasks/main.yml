@@ -57,13 +57,15 @@
   tags: [k8s-mesh]
 
 # Observabilite applicative : independante du mesh -- le Prometheus du mesh et
-# celui-ci cohabitent. Ne s'aplique qu'apres que le cluster tourne et que le
-# Secret urbanconnect-secrets existe (pose par 31-urbanlink-deploy.yml), d'ou
-# la garde sur la presence de secrets.env (verifiee dans observability.yml).
+# celui-ci cohabitent. Ne s'applique qu'une fois le cluster en service et le
+# secrets.env depose par 31-urbanlink-deploy.yml (garde dans observability.yml).
+#
+# Tag PROPRE, et non `k8s-metrics` : ce dernier porte deja metrics-server, et
+# les confondre obligerait a retraverser l'un pour rejouer l'autre.
 - name: Deployer l'observabilite applicative
   ansible.builtin.import_tasks: observability.yml
   when:
     - not (k8s_install_only | bool)
     - k8s_role == 'control_plane'
     - k8s_observability_enabled | bool
-  tags: [k8s-metrics]
+  tags: [k8s-observability]

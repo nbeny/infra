@@ -1,11 +1,26 @@
 # Service d'alias vers le Prometheus de kube-prometheus-stack.
 #
-# kube-prometheus-stack nomme son Service `prometheus-kube-prometheus-prometheus`
-# dans le namespace urbanconnect. Les datasources provisionnees
-# (grafana-datasources.yaml, source de verite) pointent pourtant sur
+# Le chart nomme son Service `kube-prometheus-stack-prometheus`. Les datasources
+# provisionnees (config/prod/observability/grafana-datasources.yaml, source de
+# verite dans le depot applicatif) pointent pourtant sur
 # `prometheus.urbanconnect.svc.cluster.local:9090` -- la convention historique
-# du Prometheus applicatif standalone. Ce Service d'alias garde ces URLs stables
+# du Prometheus applicatif standalone. Ce Service d'alias garde ces URL stables
 # sans rien changer aux datasources : il selectionne les memes pods.
+#
+# ⚠️ LE SELECTEUR EST LA SEULE CHOSE QUI COMPTE ICI, et il ne se devine pas.
+# Les pods ne sont pas crees par le chart mais par le prometheus-operator, a
+# partir de la ressource `Prometheus` nommee `kube-prometheus-stack-prometheus`
+# (fullname du chart + `-prometheus`). L'operateur les etiquette d'apres le nom
+# de CETTE ressource, pas d'apres le nom de la release :
+#
+#   app.kubernetes.io/name     = prometheus
+#   app.kubernetes.io/instance = kube-prometheus-stack-prometheus
+#   prometheus                 = kube-prometheus-stack-prometheus
+#
+# Selectionner `app.kubernetes.io/instance: kube-prometheus-stack` (le nom de la
+# release) ne matche donc RIEN : le Service existe, il est « Synced » et
+# « Healthy » cote Argo, mais sans aucun endpoint -- et Grafana affiche
+# simplement des graphes vides.
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,12 +28,14 @@ metadata:
   namespace: urbanconnect
   labels:
     app.kubernetes.io/name: prometheus
-    app.kubernetes.io/instance: kube-prometheus-stack
+    app.kubernetes.io/instance: kube-prometheus-stack-prometheus
 spec:
   selector:
     app.kubernetes.io/name: prometheus
-    app.kubernetes.io/instance: kube-prometheus-stack
+    prometheus: kube-prometheus-stack-prometheus
   ports:
     - name: http
       port: 9090
-      targetPort: 9090
+      # Port nomme cote pod : `http-web` chez l'operateur. Viser le nom plutot
+      # que le numero survit a un changement de port du conteneur.
+      targetPort: http-web

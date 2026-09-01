@@ -94,6 +94,15 @@ k8s_observability_enabled: true
 k8s_observability_namespace: urbanconnect
 k8s_kube_prometheus_stack_chart_version: "88.3.0"
 
+# Le compte admin de Grafana et le SMTP d'Alertmanager sont lus ICI, sur le
+# noeud -- c'est le fichier que 31-urbanlink-deploy.yml y depose par rsync.
+k8s_observability_secrets_env: /opt/urbanlink-kube/secrets.env
+
+# Sert a `root_url` de Grafana : sans lui, Grafana batit ses URL absolues sur
+# localhost:3000. Le nom complet est `grafana.<ce domaine>`, servi par le vhost
+# nginx du noeud Proxmox (role edge_urbanlink).
+k8s_observability_domain: urbanlink.fr
+
 # Passerelle d'entree Istio. Quand elle est active, elle REMPLACE Traefik et
 # reprend ses NodePort : les deux ne peuvent pas ecouter sur les memes ports.
 k8s_istio_gateway: false

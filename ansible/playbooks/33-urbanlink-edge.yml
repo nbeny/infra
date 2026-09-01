@@ -4,7 +4,9 @@
 # Deux paliers, decides par le drapeau `public` de edge_urbanlink_services :
 #   - six noms APPLICATIFS joignables depuis Internet, via Cloudflare
 #     (urbanlink.fr, www, api, auth, nominatim, s3) ;
-#   - dix CONSOLES d'administration qui restent sur le LAN.
+#   - douze noms INTERNES qui restent sur le LAN : dix consoles du cluster
+#     (directus, minio, pgadmin, kafka, temporal, kibana, kiali, prometheus,
+#     grafana, argo) plus proxmox et router, servis hors cluster.
 # Voir roles/edge_urbanlink/README.md.
 #
 # Prerequis :

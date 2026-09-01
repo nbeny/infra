@@ -56,7 +56,7 @@
 #   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
 #   9. frontend (après backend)
 #  10. coturn (DaemonSet hostNetwork sur nœuds publics), geoipupdate, pgadmin
-#  11. ingress Istio — Gateway (les 15 hosts) puis VirtualServices, et
+#  11. ingress Istio — Gateway (les 16 hosts) puis VirtualServices, et
 #      l'AuthorizationPolicy appliquée à part dans istio-ingress
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -270,13 +270,23 @@ configMapGenerator:
   - config/prod/observability/grafana-dashboards/07-k8s-pods.json
   - config/prod/observability/grafana-dashboards/08-overview.json
   name: grafana-dashboards
-  labels:
-    grafana_dashboard: "1"
+  # ⚠️ `options.labels` et NON `labels` a la racine du generateur. Le champ
+  # court n'existe que depuis kustomize v5.5 ; le repo-server d'Argo CD
+  # embarque la v5.4.3 (mesure le 2026-09-01) et refuse TOUT le build :
+  #   « invalid Kustomization: json: unknown field "labels" ».
+  # Ce n'est pas une erreur partielle -- l'Application entiere passe en
+  # ComparisonError et plus RIEN ne se deploie. `options.labels` est accepte
+  # par les deux versions, il n'y a donc aucune raison de prendre le risque.
+  options:
+    labels:
+      grafana_dashboard: "1"
 - files:
   - config/prod/observability/grafana-datasources.yaml
   name: grafana-datasources
-  labels:
-    grafana_datasource: "1"
+  # Meme raison que ci-dessus : `options.labels`, pas `labels`.
+  options:
+    labels:
+      grafana_datasource: "1"
 images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend

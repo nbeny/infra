@@ -9,48 +9,75 @@
 # bord Istio. Les deux cohabitent -- cf.
 # config/prod/observability/grafana-datasources.yaml.
 #
-# Secrets : aucun n'est ecrit ici. Le mot de passe admin de Grafana arrive par
-# {{ grafana_admin_password }} (issu de secrets.env, injecte par
-# observability.yml). Le jeton de scrape du backend vit dans le Secret
-# `urbanconnect-secrets` (cle METRICS_TOKEN), monte dans le pod Prometheus par
-# `prometheusSpec.secretMounts` -- see additionalScrapeConfigs ci-dessous.
+# Secrets : aucune valeur en clair n'est ecrite dans ce depot. Le compte admin
+# de Grafana et les identifiants SMTP d'Alertmanager viennent de secrets.env,
+# lus par observability.yml. Le jeton de scrape du backend n'est meme pas lu :
+# le Secret `urbanconnect-secrets` est monte tel quel dans le pod Prometheus.
 
 # --- Grafana ----------------------------------------------------------------
 grafana:
-  adminUser: alesio
-  adminPassword: "{{ grafana_admin_password }}"
+  # LE MEME compte humain que les autres consoles internes (CONSOLE_ADMIN_USER
+  # / CONSOLE_ADMIN_PASSWORD, cf. playbooks/34-console-accounts.yml). Grafana
+  # n'a pas de compte de service a preserver a cote : sa configuration est
+  # provisionnee par fichiers (les deux sidecars ci-dessous), jamais par son
+  # API. Lui donner un mot de passe a lui seul aurait casse la promesse « un
+  # seul couple pour toutes les consoles » sans rien proteger de plus.
+  #
+  # Grafana relit ces deux valeurs A CHAQUE DEMARRAGE : changer le mot de passe
+  # dans secrets.env et rejouer ce role suffit a le faire suivre.
+  adminUser: {{ console_admin_user }}
+  adminPassword: "{{ console_admin_password }}"
+
+  # Grafana construit des URL absolues (liens de partage, redirection apres
+  # connexion, rendu d'images). Sans `root_url` il les batit sur
+  # `localhost:3000` -- exactement le defaut corrige pour Kibana en aout. Le
+  # TLS est termine par l'openresty du noeud, d'ou le `https` ici alors que le
+  # pod, lui, ne parle qu'en clair.
+  grafana.ini:
+    server:
+      domain: grafana.{{ k8s_observability_domain }}
+      root_url: "https://grafana.{{ k8s_observability_domain }}"
+    analytics:
+      check_for_updates: false
+      reporting_enabled: false
+
   sidecar:
     datasources:
       enabled: true
-      # Decouverte des ConfigMaps generee par kustomize : `grafana-datasources`
-      # est etiquete `grafana_datasource: "1"` (voir kustomization.yaml).
+      # Decouverte de la ConfigMap generee par kustomize : `grafana-datasources`
+      # est etiquetee `grafana_datasource: "1"` (voir kustomization.yaml).
       label: grafana_datasource
       labelValue: "1"
-      searchNamespace: urbanconnect
+      searchNamespace: {{ k8s_observability_namespace }}
     dashboards:
       enabled: true
-      # Tableaux de bord UrbanLink, etiquete `grafana_dashboard: "1"`.
+      # Tableaux de bord UrbanLink, etiquetes `grafana_dashboard: "1"`.
       label: grafana_dashboard
       labelValue: "1"
-      searchNamespace: urbanconnect
+      searchNamespace: {{ k8s_observability_namespace }}
 
 # --- Prometheus -------------------------------------------------------------
 prometheus:
   prometheusSpec:
-    # Le backend protege /metrics par Bearer. Le jeton est monte depuis le
-    # Secret `urbanconnect-secrets` (cle METRICS_TOKEN), jamais duplique.
-    secretMounts:
-      - name: app-metrics-auth
-        secretName: urbanconnect-secrets
-        mountPath: /etc/prometheus/secrets
-        readOnly: true
+    # ⚠️ `secrets:` et NON `secretMounts:`. Ce dernier n'existe dans aucune
+    # version du chart ni dans la CRD Prometheus : l'API le supprime
+    # silencieusement au moment de l'admission (pruning), le volume n'est
+    # jamais monte, et le scrape du backend echoue en 401 sans que rien
+    # n'indique pourquoi.
+    #
+    # Le chemin de montage est impose par l'operateur :
+    #   /etc/prometheus/secrets/<nom du Secret>/<cle>
+    # d'ou le credentials_file ci-dessous. Le Secret entier est monte, mais
+    # seul METRICS_TOKEN est lu.
+    secrets:
+      - urbanconnect-secrets
     additionalScrapeConfigs:
       # Backend NestJS : metriques metier (urbanconnect_*).
       - job_name: urbanconnect-backend
         metrics_path: /metrics
         authorization:
-          credentials_file: /etc/prometheus/secrets/METRICS_TOKEN
           type: Bearer
+          credentials_file: /etc/prometheus/secrets/urbanconnect-secrets/METRICS_TOKEN
         static_configs:
           - targets:
               - backend.urbanconnect.svc.cluster.local:4000
@@ -81,38 +108,105 @@ prometheus:
             labels:
               job: loki
     # Regles dans kube/urbanlink/observability/prometheus-alerts.yaml, etiquete
-    # `release: kube-prometheus-stack` pour etre selectionne ici.
+    # `release: kube-prometheus-stack` pour etre selectionne ici -- comme les
+    # regles par defaut du chart, qui portent le meme label.
     ruleSelector:
       matchLabels:
         release: kube-prometheus-stack
-    # Cluster mono-noeud : un replica. Les PDB par defaut du chart
-    # laisseraient des pods non planifiables (meme constat que pour istiod).
+    # Cluster mono-noeud.
     replicas: 1
-    podDisruptionBudget:
-      enabled: false
+    retention: 15d
+    # Sans `storageSpec`, l'operateur donne a Prometheus un emptyDir : les
+    # quinze jours de retention annonces ci-dessus disparaitraient au premier
+    # redemarrage du pod. `local-path` est la seule StorageClass du cluster et
+    # elle est par defaut, il n'y a donc rien a nommer ici.
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+# ---------------------------------------------------------------------------
+#  Plan de controle : ce qui n'est PAS scrapable sur ce noeud
+# ---------------------------------------------------------------------------
+# Releve sur urbanlink le 2026-09-01, dans /etc/kubernetes/manifests :
+#
+#   etcd                    --listen-metrics-urls=http://127.0.0.1:2381
+#   kube-controller-manager --bind-address=127.0.0.1
+#   kube-scheduler          --bind-address=127.0.0.1
+#   kube-proxy              metricsBindAddress: ""  -> 127.0.0.1:10249
+#
+# Les quatre n'ecoutent que sur la boucle locale ; Prometheus les joindrait par
+# l'IP du noeud et recevrait un refus de connexion. Laisser leurs
+# ServiceMonitors actifs donnerait quatre cibles DOWN en permanence, donc
+# `TargetDown` et `KubeControllerManagerDown` en continu -- un bruit de fond
+# qui rend le reste des alertes illisible.
+#
+# Les desactiver ne perd aucune mesure qui existe aujourd'hui. Les recuperer
+# demanderait de rebinder le plan de controle sur 0.0.0.0, ce qui est un
+# chantier distinct et pas sans consequence sur l'exposition du noeud.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
 
 # --- Alertmanager -----------------------------------------------------------
 alertmanager:
   config:
     route:
-      receiver: ops
+      receiver: {{ 'ops' if grafana_smtp_smarthost | length > 0 else '"null"' }}
       group_by: ["alertname"]
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 4h
+      routes:
+        # `Watchdog` est une alerte du chart qui tire EN PERMANENCE, par
+        # conception : elle prouve que la chaine d'alerte fonctionne. La
+        # laisser suivre la route par defaut enverrait un courriel toutes les
+        # quatre heures, indefiniment.
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+        - receiver: "null"
+          matchers:
+            - alertname = "InfoInhibitor"
     receivers:
+      - name: "null"
+{% if grafana_smtp_smarthost | length > 0 %}
       - name: ops
         email_configs:
-          - to: ops@urbanlink.fr
-            from: alertmanager@urbanlink.fr
+          - to: ops@{{ k8s_observability_domain }}
+            from: alertmanager@{{ k8s_observability_domain }}
             smarthost: {{ grafana_smtp_smarthost }}
             auth_username: {{ grafana_smtp_username }}
             auth_password: "{{ grafana_smtp_password }}"
             send_resolved: true
-  # Cluster mono-noeud.
-  replicas: 1
+{% else %}
+      # GRAFANA_SMTP_* sont vides dans secrets.env : aucun recepteur email
+      # n'est declare et tout est route vers `null`.
+      #
+      # Ce n'est pas de la prudence, c'est une obligation. Alertmanager REFUSE
+      # une configuration dont un `email_configs` n'a pas de smarthost
+      # (« no global SMTP smarthost set ») : ecrire un recepteur `ops` avec un
+      # champ vide ne mettrait pas les courriels de cote, cela empecherait
+      # Alertmanager de demarrer.
+      #
+      # Les alertes restent visibles dans Grafana et dans l'UI d'Alertmanager.
+      # Pour les recevoir par courriel : renseigner GRAFANA_SMTP_SMARTHOST,
+      # _USERNAME et _PASSWORD dans secrets.env, puis rejouer ce role.
+{% endif %}
+  alertmanagerSpec:
+    # ⚠️ `alertmanagerSpec.replicas` et non `alertmanager.replicas` : ce dernier
+    # n'existe pas dans le chart, Helm l'aurait ignore en silence.
+    replicas: 1
 
-# --- Cluster mono-noeud -----------------------------------------------------
-global:
-  defaultPodDisruptionBudget:
-    enabled: false
+# Les PodDisruptionBudget de Prometheus, d'Alertmanager et de l'operateur sont
+# deja a `enabled: false` dans les valeurs par defaut du chart 88.x -- rien a
+# desactiver ici. (Il n'existe pas non plus de `global.defaultPodDisruptionBudget`
+# dans ce chart : l'y ecrire n'aurait eu aucun effet.)

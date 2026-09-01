@@ -29,6 +29,30 @@ if [ ! -f "$ENV_FILE" ]; then
     chmod 600 "$ENV_FILE"
 fi
 
+# ---------------------------------------------------------------------------
+#  Les cles AJOUTEES au modele apres coup
+# ---------------------------------------------------------------------------
+# Le bloc ci-dessus ne s'execute qu'a la toute premiere creation. Sans ce qui
+# suit, une cle ajoutee ensuite a secrets.env.example n'atteignait JAMAIS un
+# fichier deja existant : elle restait absente, et le playbook qui la lit
+# echouait -- ou pire, lisait une chaine vide.
+#
+# Constate le 2026-09-01 : CONSOLE_ADMIN_USER / _EMAIL / _PASSWORD, ajoutees
+# au modele avec le compte console commun, manquaient dans le secrets.env du
+# noeud. Le role edge_urbanlink refusait donc de poser les vhosts, et
+# 34-console-accounts.yml de creer les comptes.
+#
+# On n'ajoute QUE ce qui manque, avec la valeur du modele (souvent vide) : une
+# cle deja presente n'est jamais reecrite.
+while IFS= read -r line; do
+    key="${line%%=*}"
+    if ! grep -qE "^${key}=" "$ENV_FILE"; then
+        printf '%s\n' "$line" >> "$ENV_FILE"
+        echo "  + $key (nouvelle cle du modele)"
+    fi
+done < <(sed -E 's/[[:space:]]+#[[:space:]]*\[(auto|identite|externe)\].*$//' "$EXAMPLE" \
+         | grep -E '^[A-Z0-9_]+=')
+
 # Un secret sans caractere special : ces valeurs finissent dans des URLs de
 # connexion (DATABASE_URL, REDIS_URL) ou un `@` ou un `/` casserait l'analyse.
 rand() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "${1:-40}"; }
@@ -72,6 +96,12 @@ fill DIRECTUS_SECRET        "$(rand 40)"
 fill NOMINATIM_DB_PASSWORD  "$(rand 32)"
 fill TEMPORAL_DB_PASSWORD   "$(rand 32)"
 fill PGADMIN_PASSWORD       "$(rand 24)"
+# Compte HUMAIN commun aux consoles internes : pgAdmin, Directus, MinIO,
+# Kibana, Argo CD (34-console-accounts.yml), l'invite nginx de Kiali /
+# Temporal / Prometheus (role edge_urbanlink) et l'admin de Grafana
+# (roles/kubernetes/tasks/observability.yml). Un seul mot de passe, sinon
+# « commun » ne veut plus rien dire.
+fill CONSOLE_ADMIN_PASSWORD "$(rand 24)"
 fill REDIS_PASSWORD         "$(rand 32)"
 fill ELASTICSEARCH_PASSWORD "$(rand 32)"
 fill KIBANA_SYSTEM_PASSWORD "$(rand 32)"

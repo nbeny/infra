@@ -32,6 +32,12 @@
 #                 reglage de deploiement (AUTH_TYPE=LOGIN_FORM), pas un compte
 #                 stocke. Voir kube/urbanlink/kafka-ui/deployment.yaml.
 #
+#   grafana    -- couvert, mais par le chart Helm : son compte admin EST le
+#                 compte commun (adminUser/adminPassword des valeurs, cf.
+#                 roles/kubernetes/tasks/observability.yml). Grafana relit ces
+#                 deux valeurs a chaque demarrage, donc une rotation du mot de
+#                 passe se propage en rejouant ce role -- pas ce playbook.
+#
 #   kiali        -- pas de compte local possible : ses seules strategies sont
 #   temporal-ui     `anonymous`, `token` et `openid`. Temporal UI 2.31.2 est
 #   prometheus      OIDC uniquement. Prometheus sait faire du basic_auth, mais

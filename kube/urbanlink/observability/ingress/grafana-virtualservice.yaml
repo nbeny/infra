@@ -8,6 +8,16 @@
 #
 #  Les metriques du Mesh restent sur prometheus.urbanlink.fr (istio-system),
 #  expose par ingress/virtualservices.yaml.
+#
+#  ⚠️ Un VirtualService NE SUFFIT PAS a exposer un nom. Il faut aussi :
+#    1. `grafana.urbanlink.fr` dans les hosts du Gateway `uc-gateway`
+#       (ingress/gateway.yaml, LES DEUX servers) -- sinon la passerelle ne
+#       reconnait pas le SNI/Host et repond 404 sans jamais consulter ce
+#       routage ;
+#    2. un vhost nginx sur le noeud Proxmox (edge_urbanlink_services), le TLS
+#       etant termine la-bas et non ici.
+#  Le DNS, lui, ne demande rien : le wildcard *.urbanlink.fr -> 192.168.100.50
+#  couvre deja tous les noms internes.
 # ============================================================================
 apiVersion: networking.istio.io/v1
 kind: VirtualService

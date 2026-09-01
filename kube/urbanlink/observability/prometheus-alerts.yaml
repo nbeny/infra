@@ -11,7 +11,19 @@
 #    - otelcol_*               : collecteur OTel
 #
 #  L'alerte ne vaut que si la metrique existe. Les metriques redis_*/pg_* ne
-#  sont PAS scrapees (aucun exporter) -- pas de regle les concernant.
+#  sont PAS scrapees (aucun exporter) -- pas de regle les concernant. Pour la
+#  meme raison, il n'y a aucune regle sur les certificats : ils sont renouveles
+#  par certbot sur le noeud Proxmox, pas par cert-manager, et
+#  `certmanager_certificate_expiration_timestamp_seconds` n'existe nulle part
+#  dans ce cluster.
+#
+#  ⚠️ Une regle FAUSSE ne se voit pas. Deux pieges rencontres ici :
+#    - un nom de metrique inexistant ne leve aucune erreur : l'expression rend
+#      un vecteur vide, et l'alerte ne part simplement jamais ;
+#    - un `on(pod)` entre deux series qui ont plusieurs conteneurs par pod
+#      echoue a CHAQUE evaluation (« multiple matches for labels »), et
+#      l'erreur ne se lit que dans l'onglet Rules de Prometheus.
+#  D'ou l'appariement complet `on(namespace, pod, container)` plus bas.
 # ============================================================================
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -27,8 +39,10 @@ spec:
     - name: urbanlink.availability
       rules:
         - alert: PodCrashLooping
+          # kube-state-metrics expose `_restarts_total`, pas `_restarting_total` :
+          # ce dernier n'existe pas et l'alerte n'aurait jamais tire.
           expr: >-
-            increase(kube_pod_container_status_restarting_total{
+            increase(kube_pod_container_status_restarts_total{
               namespace="urbanconnect"
             }[10m]) > 3
           for: 5m
@@ -57,19 +71,28 @@ spec:
           labels:
             severity: warning
           annotations:
+            # Pas de `query` imbriquant `{{ $labels.deployment }}` dans sa
+            # chaine : le template Go ne re-evalue pas l'interieur d'un
+            # litteral, la requete partait avec « {{ $labels.deployment }} »
+            # ecrit tel quel et l'annotation echouait a l'expansion.
             summary: >-
-              Deployment {{ $labels.deployment }} :
-              {{ $value }} replicas prets sur {{ with query
-              "kube_deployment_spec_replicas{namespace='urbanconnect',deployment='{{ $labels.deployment }}'}"
-              }}{{ . | first | value }}{{ end }} desirees
+              Deployment {{ $labels.deployment }} : le nombre de replicas prets
+              ne correspond pas au nombre desire depuis 10 minutes
 
     # --- Ressources -----------------------------------------------------------
     - name: urbanlink.resources
       rules:
         - alert: HighCPUUsage
+          # `on(namespace, pod, container)` : avec `on(pod)` seul, un pod a
+          # plusieurs conteneurs (backend + sidecar) donne plusieurs series a
+          # droite pour la meme cle, et Prometheus refuse l'appariement a chaque
+          # evaluation. `container!=""` ecarte en plus la serie agregee du
+          # sandbox, qui n'a pas de limite en face.
           expr: >-
-            (rate(container_cpu_usage_seconds_total{namespace="urbanconnect"}[5m])
-            / on(pod) group_left()
+            (rate(container_cpu_usage_seconds_total{
+              namespace="urbanconnect", container!=""
+            }[5m])
+            / on(namespace, pod, container) group_left()
             kube_pod_container_resource_limits{
               resource="cpu", namespace="urbanconnect"
             }) > 0.8
@@ -80,9 +103,12 @@ spec:
             summary: "Pod {{ $labels.pod }} CPU > 80% ({{ $value | humanizePercentage }})"
 
         - alert: HighMemoryUsage
+          # Meme appariement complet que HighCPUUsage, pour la meme raison.
           expr: >-
-            (container_memory_working_set_bytes{namespace="urbanconnect"}
-            / on(pod) group_left()
+            (container_memory_working_set_bytes{
+              namespace="urbanconnect", container!=""
+            }
+            / on(namespace, pod, container) group_left()
             kube_pod_container_resource_limits{
               resource="memory", namespace="urbanconnect"
             }) > 0.85
@@ -104,10 +130,15 @@ spec:
               {{ $value | humanizePercentage }}
 
         - alert: OOMKillDetected
+          # `OOMKilled` est une VALEUR DE LABEL, pas la valeur de la serie
+          # (qui vaut 1). PromQL n'autorise pas la comparaison a une chaine :
+          # `== "OOMKilled"` est une erreur de syntaxe, et le webhook
+          # d'admission du prometheus-operator refuse alors TOUT le
+          # PrometheusRule -- donc les vingt autres alertes avec.
           expr: >-
             kube_pod_container_status_last_terminated_reason{
-              namespace="urbanconnect"
-            } == "OOMKilled"
+              namespace="urbanconnect", reason="OOMKilled"
+            } == 1
           labels:
             severity: critical
           annotations:
@@ -187,13 +218,15 @@ spec:
             summary: "OTel Collector memoire > 400MB"
 
     # --- TLS / Certificats ----------------------------------------------------
-    - name: urbanlink.tls
-      rules:
-        - alert: CertExpiringSoon
-          expr: >-
-            certmanager_certificate_expiration_timestamp_seconds
-            - time() < 86400 * 30
-          labels:
-            severity: warning
-          annotations:
-            summary: "Certificat {{ $labels.name }} expire dans < 30 jours"
+    #
+    # AUCUNE regle ici, et c'est deliberé. Le groupe portait une alerte sur
+    # `certmanager_certificate_expiration_timestamp_seconds` : cert-manager
+    # n'est pas installe sur ce cluster -- le wildcard *.urbanlink.fr est
+    # obtenu et renouvele par CERTBOT sur le noeud Proxmox (role
+    # tls_certificates), hors de portee de ce Prometheus. La metrique n'existe
+    # donc nulle part, et l'alerte donnait l'illusion d'une surveillance qui
+    # n'aurait jamais tire, meme un certificat expire.
+    #
+    # Surveiller reellement cette expiration demande une sonde depuis le noeud
+    # (blackbox exporter sur le vhost, ou un check du systemd timer certbot) :
+    # un chantier distinct, pas une ligne a rajouter ici.

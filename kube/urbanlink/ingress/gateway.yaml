@@ -62,6 +62,7 @@ spec:
         - "kibana.urbanlink.fr"
         - "kiali.urbanlink.fr"
         - "prometheus.urbanlink.fr"
+        - "grafana.urbanlink.fr"
         - "argo.urbanlink.fr"
       # Reste a `false` : la redirection vers HTTPS est faite par nginx, en
       # amont. L'activer ici renverrait les requetes deja dechiffrees vers un
@@ -90,6 +91,7 @@ spec:
         - "kibana.urbanlink.fr"
         - "kiali.urbanlink.fr"
         - "prometheus.urbanlink.fr"
+        - "grafana.urbanlink.fr"
         - "argo.urbanlink.fr"
       tls:
         mode: SIMPLE

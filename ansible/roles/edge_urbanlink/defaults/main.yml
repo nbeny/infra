@@ -152,6 +152,14 @@ edge_urbanlink_services:
   - name: prometheus
     hosts: ["prometheus.urbanlink.fr"]
     basic_auth: true            # son basic_auth natif casserait sondes + Kiali
+  # Grafana du kube-prometheus-stack (namespace urbanconnect, Service
+  # kube-prometheus-stack-grafana:80). PAS de `basic_auth` : contrairement a
+  # Kiali, Temporal et Prometheus, il a un VRAI compte -- `alesio`, avec le
+  # meme mot de passe que les autres consoles (CONSOLE_ADMIN_PASSWORD, pose
+  # par le chart via roles/kubernetes/tasks/observability.yml). Lui ajouter
+  # l'invite du bord ferait s'identifier deux fois pour rien.
+  - name: grafana
+    hosts: ["grafana.urbanlink.fr"]
   # Argo CD -- meme palier que Kiali et Prometheus, et pour la meme raison :
   # une console qui a les pleins pouvoirs sur le cluster n'a rien a faire sur
   # Internet. Elle etait jusqu'ici accessible par `kubectl port-forward`.

@@ -66,15 +66,29 @@ Compose actif (`docker-compose.yml`) vers Kubernetes, avec durcissement edge
 Le pattern master/children de Traefik a disparu avec lui. Istio sépare
 nativement ce que l'`IngressRoute` mêlait :
 
-- `ingress/gateway.yaml` — les 14 hosts servis, et le TLS de la passerelle.
+- `ingress/gateway.yaml` — les 16 hosts servis, et le TLS de la passerelle.
 - `ingress/virtualservices.yaml` — un VirtualService par host, routage seul.
+  Grafana fait exception : son VirtualService vit avec le reste de
+  l'observabilité, dans `observability/ingress/`.
 - `ingress/authorization.yaml` — la politique, séparée du routage. Elle vit
   dans le namespace `istio-ingress`, auprès des pods de la passerelle : c'est
   le seul endroit où l'ext_authz L7 s'applique en mode ambient, `ztunnel` ne
   faisant que du L4. Elle est donc appliquée **hors kustomize**, par le
   playbook.
 
-Ajouter un outil = un VirtualService et une ligne dans les `hosts` du Gateway.
+Ajouter un outil demande **trois** écritures, jamais une seule :
+
+1. un VirtualService (avec l'étiquette `uc.ingress/tier`) ;
+2. le host dans les `hosts` du Gateway — **les deux `servers`**, HTTP et HTTPS.
+   L'oublier ne casse pas le déploiement : la passerelle répond simplement 404
+   sans jamais consulter le VirtualService ;
+3. une entrée dans `edge_urbanlink_services`
+   (`ansible/roles/edge_urbanlink/defaults/main.yml`), puis
+   `ansible-playbook playbooks/33-urbanlink-edge.yml` — c'est le nginx du nœud
+   qui termine le TLS, pas la passerelle.
+
+Le DNS, lui, ne demande rien : le wildcard `*.urbanlink.fr → 192.168.100.50`
+en DNS-only couvre déjà tout nom interne, avant même qu'il existe.
 
 L'étiquette `uc.ingress/tier` (`public` / `internal`) est portée par chaque
 VirtualService. Elle n'a aujourd'hui **aucun effet technique** : tout est déjà
@@ -159,11 +173,21 @@ pas un effet de bord (voir l'en-tête de `kustomization.yaml`).
 > `grafana-dashboards/`) et les sources de données (`grafana-datasources.yaml`)
 > sont construits en ConfigMaps et découverts par le sidecar Grafana du
 > kube-prometheus-stack, via les labels `grafana_dashboard: "1"` et
-> `grafana_datasource: "1"`. Le Prometheus/Grafana/Alertmanager eux-mêmes sont
-> déployés par **Helm** (`ansible/roles/kubernetes/tasks/observability.yml`),
-> pas par Argo — les valeurs viennent du template
-> `kube-prometheus-stack-values.yaml.j2`, le mot de passe admin et le SMTP via
-> `secrets.env` (clés `GRAFANA_*`).
+> `grafana_datasource: "1"` — posés par `options.labels` du
+> `configMapGenerator`, **pas** par un `labels:` à la racine du générateur : ce
+> champ court n'existe qu'à partir de kustomize 5.5, et le repo-server d'Argo
+> embarque la 5.4.3, qui refuse le build entier.
+>
+> Le Prometheus/Grafana/Alertmanager eux-mêmes sont déployés par **Helm**
+> (`ansible/roles/kubernetes/tasks/observability.yml`), pas par Argo — les
+> valeurs viennent du template `kube-prometheus-stack-values.yaml.j2`. Le
+> compte admin de Grafana est le compte console commun
+> (`CONSOLE_ADMIN_USER` / `CONSOLE_ADMIN_PASSWORD`) ; le SMTP d'Alertmanager
+> vient de `secrets.env` (clés `GRAFANA_SMTP_*`).
+>
+> ⚠️ **Ordre imposé** : le chart Helm installe la CRD `PrometheusRule`. Il doit
+> donc passer avant qu'Argo ne synchronise `observability/prometheus-alerts.yaml`,
+> sinon la synchronisation échoue sur un `kind` inconnu.
 
 ### 3.4 Secrets
 
@@ -349,7 +373,7 @@ Tests fonctionnels :
   mdp `kibana_system` une fois ES prêt (Kibana refuse le superuser `elastic`).
   Pas d'Ingress pour Kibana → `port-forward` (cf. §4).
 - **Consoles d'administration** (directus, minio, pgadmin, kafka, temporal,
-  kibana, kiali, prometheus) : restreintes au LAN par le bloc `allow`/`deny`
+  kibana, kiali, prometheus, grafana, argo) : restreintes au LAN par le bloc `allow`/`deny`
   des vhosts nginx, et par des enregistrements A publics qui pointent sur une
   IP privée. Deux barrières indépendantes.
 - **JWT à l'edge** (optionnel) : Oathkeeper peut minter un JWT signé (mutator

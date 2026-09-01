@@ -5,9 +5,12 @@
 #  CE QUE CE FICHIER NE TOUCHE PAS, ET POURQUOI C'EST L'ESSENTIEL
 #
 #  La zone ne contient PAS un enregistrement par outil : elle contient un
-#  WILDCARD `*.urbanlink.fr -> 192.168.100.50` en DNS-only, qui couvre les onze
-#  consoles internes (pgadmin, kibana, kiali, prometheus, argo, minio, directus,
-#  kafka, temporal) plus proxmox et router.
+#  WILDCARD `*.urbanlink.fr -> 192.168.100.50` en DNS-only, qui couvre les dix
+#  consoles internes (pgadmin, kibana, kiali, prometheus, grafana, argo, minio,
+#  directus, kafka, temporal) plus proxmox et router.
+#
+#  C'est ce qui fait qu'exposer une console de plus ne demande AUCUNE action
+#  DNS : `grafana.urbanlink.fr` a resolu correctement avant meme d'exister.
 #
 #  Publier un nom ne consiste donc pas a modifier le wildcard -- ce qui
 #  ouvrirait TOUT -- mais a poser a cote un enregistrement EXPLICITE. En DNS,

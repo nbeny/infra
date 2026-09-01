@@ -2,73 +2,82 @@
 # ---------------------------------------------------------------------------
 #  Observabilite applicative -- kube-prometheus-stack
 # ---------------------------------------------------------------------------
-# Met en place, par Helm (comme istiod/traefik/metrics-server), la plateforme
+# Met en place, par Helm (comme istiod/metrics-server), la plateforme
 # d'observabilite : Prometheus (avec son operator), Grafana et Alertmanager.
 # Elle vit dans `urbanconnect`, a cote de l'observabilite posee par Argo
-# (OTel/Tempo/Loki). C'est Argo qui deploie ces trois-là et le PrometheusRule
-# (kube/urbanlink/observability/) ; ici on ne pose QUE le Helm chart -- le
-# reste du travail est scripte sans Helm, par kustomize.
+# (OTel/Tempo/Loki). C'est Argo qui deploie ces trois-la et le PrometheusRule
+# (kube/urbanlink/observability/) ; ici on ne pose QUE le chart Helm -- le
+# reste est du kustomize, sans Helm.
 #
-# Ce PLAYBOOK est volontairement separe d'istio.yml : le Prometheus du MESH
+# Ce fichier est volontairement separe d'istio.yml : le Prometheus du MESH
 # (addon Istio) reste celui de Kiali. Deux Prometheus distincts, un par role.
 #
-# Secrets : lus depuis secrets.env sur le noeud de controle (meme source que
-# 31-urbanlink-deploy.yml et 34-console-accounts.yml), jamais ecrits ici.
+# ORDRE : ce role doit passer AVANT qu'Argo ne synchronise
+# observability/prometheus-alerts.yaml -- c'est le chart qui installe la CRD
+# PrometheusRule. Sans lui, Argo echoue sur un `kind` inconnu.
+#
+# Secrets : lus depuis secrets.env sur le noeud (depose par
+# 31-urbanlink-deploy.yml), jamais ecrits ici.
 
 - name: "[obs] Verifier le fichier de secrets"
   ansible.builtin.stat:
-    path: /opt/urbanlink-kube/secrets.env
+    path: "{{ k8s_observability_secrets_env }}"
   register: obs_secrets
 
 - name: "[obs] Exiger le fichier de secrets"
   ansible.builtin.assert:
     that: obs_secrets.stat.exists
     fail_msg: >
-      /opt/urbanlink-kube/secrets.env est absent. Il est depose par
+      {{ k8s_observability_secrets_env }} est absent. Il est depose par
       playbooks/31-urbanlink-deploy.yml (rsync du depot). Le creer depuis
       kube/urbanlink/secrets.env.example ou lancer scripts/secrets/bootstrap.sh.
 
-# Le mot de passe admin de Grafana est OBLIGATOIRE : Grafana refuse de
-# demarrer sans adminPassword explicite.
-- name: "[obs] Lire GRAFANA_ADMIN_PASSWORD depuis secrets.env"
-  ansible.builtin.shell:
-    cmd: "sed -n 's/^GRAFANA_ADMIN_PASSWORD=//p' /opt/urbanlink-kube/secrets.env | head -1"
-    executable: /bin/bash
-  register: obs_grafana_admin
-  changed_when: false
+# Grafana refuse de demarrer sans compte admin explicite. On reutilise le
+# compte HUMAIN commun aux consoles internes plutot que d'en inventer un
+# nouveau -- meme couple que Kiali, Temporal, pgAdmin, Argo CD. Voir
+# playbooks/34-console-accounts.yml.
+# ⚠️ Lecture par `slurp` + `regex_search`, PAS par une boucle `sed` dont on
+# lirait `stdout_lines` : une cle absente ne produit aucune ligne, et toutes
+# les valeurs suivantes se decalent d'un cran -- le mot de passe SMTP finirait
+# dans le nom d'utilisateur. Ici chaque cle est cherchee par son nom, une
+# absence rend une chaine vide, et rien ne bouge.
+- name: "[obs] Lire le compte console et le SMTP dans secrets.env"
+  ansible.builtin.slurp:
+    src: "{{ k8s_observability_secrets_env }}"
+  register: obs_env_raw
   no_log: true
 
-- name: "[obs] Exiger le mot de passe admin Grafana"
-  ansible.builtin.assert:
-    that: obs_grafana_admin.stdout | trim | length > 0
-    fail_msg: >
-      GRAFANA_ADMIN_PASSWORD est vide dans secrets.env. Il est genere par
-      scripts/secrets/bootstrap.sh -- le relancer ou le renseigner.
-
-- name: "[obs] Lire les parametres SMTP d'Alertmanager depuis secrets.env"
-  ansible.builtin.shell:
-    cmd: |
-      sed -n 's/^GRAFANA_SMTP_SMARTHOST=//p' /opt/urbanlink-kube/secrets.env | head -1
-      sed -n 's/^GRAFANA_SMTP_USERNAME=//p'  /opt/urbanlink-kube/secrets.env | head -1
-      sed -n 's/^GRAFANA_SMTP_PASSWORD=//p'  /opt/urbanlink-kube/secrets.env | head -1
-    executable: /bin/bash
-  register: obs_smtp
-  changed_when: false
-  no_log: true
-
-- name: "[obs] Relever les parametres SMTP"
+- name: "[obs] Nommer les valeurs lues"
   ansible.builtin.set_fact:
-    grafana_admin_password: "{{ obs_grafana_admin.stdout | trim }}"
-    grafana_smtp_smarthost: "{{ obs_smtp.stdout_lines[0] | default('', true) | trim }}"
-    grafana_smtp_username:  "{{ obs_smtp.stdout_lines[1] | default('', true) | trim }}"
-    grafana_smtp_password:  "{{ obs_smtp.stdout_lines[2] | default('', true) | trim }}"
+    console_admin_user: "{{ obs_env | regex_search('^CONSOLE_ADMIN_USER=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
+    console_admin_password: "{{ obs_env | regex_search('^CONSOLE_ADMIN_PASSWORD=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
+    grafana_smtp_smarthost: "{{ obs_env | regex_search('^GRAFANA_SMTP_SMARTHOST=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
+    grafana_smtp_username: "{{ obs_env | regex_search('^GRAFANA_SMTP_USERNAME=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
+    grafana_smtp_password: "{{ obs_env | regex_search('^GRAFANA_SMTP_PASSWORD=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
+  vars:
+    obs_env: "{{ obs_env_raw.content | b64decode }}"
+  no_log: true
 
-# Alertmanager demarre meme sans SMTP : l'email n'est alors pas envoye, mais
-# la pile tourne. On le signale pour que ce soit un choix, pas un oubli.
+- name: "[obs] Exiger un compte admin utilisable pour Grafana"
+  ansible.builtin.assert:
+    that:
+      - console_admin_user | length > 0
+      - console_admin_password | length >= 8
+    fail_msg: >
+      CONSOLE_ADMIN_USER / CONSOLE_ADMIN_PASSWORD sont absents ou trop courts
+      dans {{ k8s_observability_secrets_env }}. Les generer avec
+      scripts/secrets/bootstrap.sh, rejouer
+      playbooks/31-urbanlink-deploy.yml, puis relancer ce role.
+    success_msg: "Grafana : compte admin {{ console_admin_user }}"
+
+# Alertmanager demarre sans SMTP -- le template n'ecrit alors AUCUN recepteur
+# email (un `smarthost` vide l'empecherait de demarrer, cf. le .j2). On le
+# signale pour que ce soit un choix, pas un oubli.
 - name: "[obs] Avertir si le SMTP d'Alertmanager est vide"
   ansible.builtin.debug:
     msg: >-
-      GRAFANA_SMTP_* sont vides : les emails d'alerte ne partiront pas.
+      GRAFANA_SMTP_* sont vides : aucune alerte ne partira par courriel.
+      Les alertes restent visibles dans Grafana et dans Alertmanager.
       Renseigner dans secrets.env (voir kube/urbanlink/secrets.env.example).
   when: grafana_smtp_smarthost | length == 0
 
