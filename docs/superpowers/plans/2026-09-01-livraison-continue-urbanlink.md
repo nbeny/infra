@@ -85,31 +85,43 @@ pas joignables directement depuis le poste Windows : passer par `ssh -J`.
 - Modify: `ansible/inventory/00-static.yml`
 - Create: `ansible/inventory/group_vars/ci_nodes.yml`
 
-- [ ] **Étape 1 : Relever les trois valeurs manquantes sur la machine**
+- [ ] **Étape 1 : Confirmer les valeurs relevées sur la machine**
 
-Aucune n'est déductible du dépôt : cette VM y est totalement absente.
-
-Depuis le nœud PVE, trouver la VM :
-
-```bash
-ssh root@192.168.100.50 'qm list'
-```
-
-Puis, sur la VM (remplacer `<VMID>` par ce que la commande précédente a donné) :
+Relevées le 2026-09-01. ⚠️ `ci-runner` n'a **pas d'agent QEMU** : `qm guest exec`
+répond « QEMU guest agent is not running », et un `ssh` depuis le nœud PVE
+échoue en `publickey` (sa clé RSA n'existe plus). Le seul chemin qui marche est
+le rebond **depuis ce poste** :
 
 ```bash
-ssh root@192.168.100.50 "qm guest exec <VMID> -- /bin/sh -c '
-  hostname -I
-  systemctl list-units \"actions.runner.*\" --no-pager --plain
-  df -h /var/lib
-  id \$(systemctl show -p User --value \$(systemctl list-units \"actions.runner.*\" --no-pager --plain | awk \"NR==2{print \\\$1}\"))
-'"
+ssh -J root@192.168.100.50 debian@10.0.0.130 \
+  'hostname; systemctl list-units "actions.runner.*" --no-pager --plain --no-legend; \
+   df -h /var/lib | tail -1; id; command -v jq docker curl rsync'
 ```
 
-Noter :
-- l'**adresse IP** sur `10.0.0.0/24`,
-- le **nom d'utilisateur** du service runner (le workflow actuel suppose `debian`),
-- l'**espace disponible** sur `/var/lib`.
+Attendu, et déjà constaté :
+
+| Valeur | Relevé |
+|---|---|
+| VM | `ci-runner`, VMID 130, démarrée, 12 Go de RAM |
+| Adresse | `10.0.0.130` (convention du lab : dernier octet = VMID) |
+| Utilisateur du service runner | `debian` (uid 1000) |
+| Groupes | **déjà dans `docker` (gid 989)** |
+| Disque | 79 Go, 58 Go libres |
+| Outils | `jq`, `docker`, `curl`, `rsync` tous présents |
+
+⚠️ **Trois runners sont enregistrés pour `UrbanConnct`** sur cette seule VM
+(`ci-runner-urbanlink`, `-2`, `-3`), plus deux pour d'autres dépôts. La matrice
+du job `images` peut donc bâtir **les trois images en parallèle sur la même
+machine**. Deux conséquences traitées ailleurs dans ce plan : la tâche 9 sort
+le ramasse-miettes de la matrice (il est destructeur s'il tourne pendant un
+push), et 12 Go de RAM pour trois `npm install` simultanés est serré — c'est le
+comportement actuel, on ne le change pas ici, mais c'est le premier suspect si
+un build meurt sans message.
+
+⚠️ **`debian` est déjà dans le groupe `docker`.** La déclaration de `docker_users`
+à l'étape 4 n'est donc pas un correctif mais un garde-fou : elle inscrit dans le
+code un état qui n'existait jusqu'ici que sur la machine, et que rien ne
+rétablirait après une reconstruction.
 
 - [ ] **Étape 2 : Vérifier que l'hôte n'est pas résolu (l'échec attendu)**
 
@@ -139,7 +151,7 @@ Dans `ansible/inventory/00-static.yml`, ajouter après le bloc `kali_nodes` :
     ci_nodes:
       hosts:
         ci-runner:
-          ansible_host: 10.0.0.XXX   # <- valeur relevee a l'etape 1
+          ansible_host: 10.0.0.130   # <- valeur relevee a l'etape 1
 ```
 
 Puis, dans le groupe parapluie `guests`, ajouter `ci_nodes:` à la liste des
@@ -469,10 +481,10 @@ git commit -m "feat(registry): les images construites sur ci-runner etaient invi
 D'abord pousser une image de test depuis `ci-runner` :
 
 ```bash
-ssh -J root@192.168.100.50 <user>@10.0.0.XXX \
+ssh -J root@192.168.100.50 debian@10.0.0.130 \
   'docker pull alpine:3.20 \
-   && docker tag alpine:3.20 10.0.0.XXX:5000/alpine:test \
-   && docker push 10.0.0.XXX:5000/alpine:test'
+   && docker tag alpine:3.20 10.0.0.130:5000/alpine:test \
+   && docker push 10.0.0.130:5000/alpine:test'
 ```
 
 Attendu : le push réussit (Docker traite les adresses IP privées comme des
@@ -482,10 +494,10 @@ Puis, depuis `urbanlink` :
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
-  'sudo crictl pull 10.0.0.XXX:5000/alpine:test'
+  'sudo crictl pull 10.0.0.130:5000/alpine:test'
 ```
 
-Attendu : échec sur `failed to do request: Head "https://10.0.0.XXX:5000/v2/...":
+Attendu : échec sur `failed to do request: Head "https://10.0.0.130:5000/v2/...":
 http: server gave HTTP response to HTTPS client`.
 
 ⚠️ Noter le message : containerd parle **https** à un registre en clair. C'est
@@ -593,7 +605,7 @@ Dans `ansible/inventory/host_vars/urbanlink.yml`, ajouter :
 # n'est pas ici. Si ci-runner est eteinte, un tag NEUF est intirable -- un tag
 # deja present, lui, ne declenche aucun pull (imagePullPolicy IfNotPresent).
 docker_insecure_registries:
-  - "10.0.0.XXX:5000"   # <- ci-runner, valeur relevee a la tache 1
+  - "10.0.0.130:5000"   # <- ci-runner, valeur relevee a la tache 1
 ```
 
 - [ ] **Étape 6 : Appliquer sur `urbanlink`**
@@ -609,7 +621,7 @@ Si le playbook n'a pas de tag `docker`, le jouer en entier — il est idempotent
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
-  'sudo crictl pull 10.0.0.XXX:5000/alpine:test && sudo crictl images | grep alpine'
+  'sudo crictl pull 10.0.0.130:5000/alpine:test && sudo crictl images | grep alpine'
 ```
 
 Attendu : `Image is up to date for ...` puis une ligne listant l'image.
@@ -621,7 +633,7 @@ coup la route réseau, le `hosts.toml`, le `config_path` et le redémarrage.
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
-  'sudo crictl rmi 10.0.0.XXX:5000/alpine:test'
+  'sudo crictl rmi 10.0.0.130:5000/alpine:test'
 ```
 
 - [ ] **Étape 9 : Commit**
@@ -1202,7 +1214,7 @@ Sur GitHub, `Settings → Secrets and variables → Actions → Variables` :
 
 | Nom | Valeur |
 |---|---|
-| `LAB_REGISTRY` | `10.0.0.XXX:5000` (adresse relevée à la tâche 1) |
+| `LAB_REGISTRY` | `10.0.0.130:5000` (adresse relevée à la tâche 1) |
 
 Une **variable** et non un secret : ce n'est pas une donnée sensible, et un
 secret serait masqué dans les journaux, rendant tout diagnostic aveugle.
@@ -1334,13 +1346,18 @@ printf "%b" "$dated" | grep . | sort -r | tail -n "+$((KEEP + 1))" \
       esac
     done
 
-# ⚠️ Supprimer un manifeste ne libere AUCUN octet : les couches restent sur le
-# disque jusqu'a ce que le ramasse-miettes passe. Sans cette etape la purge est
-# purement cosmetique.
-echo "Liberation de l'espace…"
-docker exec "$CONTAINER" \
-  registry garbage-collect --delete-untagged /etc/docker/registry/config.yml
+# ⚠️ **CE SCRIPT NE LANCE PAS LE RAMASSE-MIETTES.** Supprimer un manifeste ne
+# libere aucun octet -- les couches restent jusqu'a ce que `garbage-collect`
+# passe -- mais ce dernier ne peut PAS tourner pendant un push : il supprime les
+# blobs qu'il croit non references, y compris ceux d'un televersement en cours,
+# ce qui corrompt l'image poussee. Or trois runners sont enregistres pour ce
+# depot sur la meme VM, donc les trois images se poussent EN PARALLELE.
+# Le ramasse-miettes vit donc dans un job distinct, apres la matrice.
+echo "Manifestes supprimes. L'espace sera libere par le job registry-gc."
 ```
+
+⚠️ La variable `CONTAINER` n'est plus utilisée par ce script — la retirer de
+l'en-tête pour ne pas laisser croire qu'il parle au conteneur.
 
 Le rendre exécutable :
 
@@ -1349,31 +1366,59 @@ chmod +x C:/Users/nbeny/Documents/GitHub/UrbanConnct/scripts/ci/registry-purge.s
 git update-index --chmod=+x scripts/ci/registry-purge.sh
 ```
 
-- [ ] **Étape 3 : Le brancher dans le job `images`**
+- [ ] **Étape 3 : Le brancher dans un job distinct, après la matrice**
 
-Ajouter en dernière étape du job `images`, après « Pousser dans le registre » :
+⚠️ **Pas une étape du job `images`.** Trois runners sont enregistrés pour ce
+dépôt sur `ci-runner` : les trois entrées de la matrice tournent en parallèle,
+et un `registry garbage-collect` lancé pendant qu'une autre image se pousse
+supprime des blobs en cours de téléversement. Le job ci-dessous ne démarre
+qu'une fois les trois poussées terminées.
+
+Ajouter, entre les jobs `images` et `deploy` :
 
 ```yaml
-      # ⚠️ `if: always()` serait une erreur ici : si le push a echoue, il n'y a
-      # rien de neuf a purger, et lancer un garbage-collect sur un registre
-      # qu'on vient peut-etre de laisser dans un etat partiel n'apporte rien.
-      - name: Purger les vieux tags
+  registry-gc:
+    name: Rétention du registre
+    needs: images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, urbanlink]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sequentiel, et c'est voulu : le ramasse-miettes ne doit croiser aucune
+      # ecriture, pas meme une suppression de manifeste concurrente.
+      - name: Supprimer les tags au-delà des 10 derniers
         run: |
           set -euo pipefail
-          ./scripts/ci/registry-purge.sh \
-            '${{ vars.LAB_REGISTRY }}' '${{ matrix.name }}' 10
+          for img in urbanconnect-backend urbanconnect-frontend urbanconnect-temporal-worker; do
+            ./scripts/ci/registry-purge.sh '${{ vars.LAB_REGISTRY }}' "$img" 10
+          done
+
+      # `--delete-untagged` supprime aussi les manifestes que plus aucun tag ne
+      # designe -- ceux que l'etape precedente vient de detacher.
+      - name: Libérer l'espace
+        run: |
+          set -euo pipefail
+          docker exec lab-registry \
+            registry garbage-collect --delete-untagged /etc/docker/registry/config.yml
+          df -h /var/lib | tail -1
 ```
+
+⚠️ **`deploy` ne doit PAS dépendre de ce job.** `needs: [images]` reste tel
+quel : un échec de rétention ne doit jamais empêcher une livraison par ailleurs
+valide de partir. Le disque a 58 Go libres — un tour de purge manqué n'est pas
+un incident.
 
 - [ ] **Étape 4 : Vérifier que `jq` est présent sur le runner**
 
 ```bash
-ssh -J root@192.168.100.50 <user>@10.0.0.XXX 'command -v jq curl docker'
+ssh -J root@192.168.100.50 debian@10.0.0.130 'command -v jq curl docker'
 ```
 
 Attendu : trois chemins. Si `jq` manque :
 
 ```bash
-ssh -J root@192.168.100.50 <user>@10.0.0.XXX 'sudo apt-get install -y jq'
+ssh -J root@192.168.100.50 debian@10.0.0.130 'sudo apt-get install -y jq'
 ```
 
 - [ ] **Étape 5 : Tester le script à vide**
@@ -1381,8 +1426,8 @@ ssh -J root@192.168.100.50 <user>@10.0.0.XXX 'sudo apt-get install -y jq'
 Sur une image qui n'existe pas, il doit sortir proprement :
 
 ```bash
-ssh -J root@192.168.100.50 <user>@10.0.0.XXX \
-  'cd /tmp && curl -sSf http://10.0.0.XXX:5000/v2/_catalog'
+ssh -J root@192.168.100.50 debian@10.0.0.130 \
+  'cd /tmp && curl -sSf http://10.0.0.130:5000/v2/_catalog'
 ```
 
 Attendu : un JSON listant le catalogue (`{"repositories":[...]}`), même vide.
@@ -1724,10 +1769,10 @@ Puis, dans l'ordre :
 
 | Vérification | Commande | Attendu |
 |---|---|---|
-| Le registre a reçu | `curl http://10.0.0.XXX:5000/v2/urbanconnect-backend/tags/list` | le tag `sha-…` du commit |
+| Le registre a reçu | `curl http://10.0.0.130:5000/v2/urbanconnect-backend/tags/list` | le tag `sha-…` du commit |
 | Le bump est arrivé | `cd infra && git fetch && git log origin/master -1 --oneline` | un commit `deploy: images sha-…` |
 | Argo a réagi | `kubectl -n argocd get application urbanlink -o jsonpath='{.status.sync.status}/{.status.health.status}'` | `Synced/Healthy` |
-| Les pods portent la bonne image | `kubectl -n urbanconnect get deploy backend -o jsonpath='{..image}'` | `10.0.0.XXX:5000/urbanconnect-backend:sha-…` |
+| Les pods portent la bonne image | `kubectl -n urbanconnect get deploy backend -o jsonpath='{..image}'` | `10.0.0.130:5000/urbanconnect-backend:sha-…` |
 | La migration a tourné avant | `kubectl -n urbanconnect get job backend-migrate -o jsonpath='{.status.succeeded}'` | `1` |
 
 - [ ] **Étape 9 : Vérifier qu'une variable se propage**
@@ -1764,7 +1809,7 @@ git revert --no-edit HEAD && git push
 Après quelques livraisons :
 
 ```bash
-curl -s http://10.0.0.XXX:5000/v2/urbanconnect-backend/tags/list | jq '.tags | length'
+curl -s http://10.0.0.130:5000/v2/urbanconnect-backend/tags/list | jq '.tags | length'
 ```
 
 Attendu : au plus `10`.
@@ -1888,9 +1933,16 @@ git commit -m "docs(livraison): aucun README ne disait qui deploie, alors qu'Arg
 | § 7 — ordre de bascule | 11 |
 | § 9 — vérifications | 11, étapes 8 à 10 |
 
-**Trois valeurs à relever à la tâche 1** avant toute autre chose : l'IP de
-`ci-runner`, l'utilisateur de son service runner, son espace disque. Elles
-apparaissent dans le plan sous les formes `10.0.0.XXX` et `<user>` — ce ne sont
-pas des approximations à laisser en place, mais des valeurs que seule la
-machine peut donner. Aucune tâche au-delà de la première ne peut être menée
-sans elles.
+**Les valeurs de `ci-runner` ont été relevées le 2026-09-01** et substituées
+partout dans le plan : IP `10.0.0.130`, utilisateur `debian` (déjà dans le
+groupe `docker`), 58 Go libres sur 79, `jq`/`docker`/`curl`/`rsync` présents.
+
+⚠️ **Un seul chemin d'accès fonctionne** : le rebond depuis le poste Windows,
+`ssh -J root@192.168.100.50 debian@10.0.0.130`. Ni `qm guest exec` (la VM n'a
+pas d'agent QEMU) ni un `ssh` lancé depuis le nœud PVE (sa clé RSA n'existe
+plus) ne joignent cette machine.
+
+⚠️ **Trois runners `UrbanConnct` tournent sur cette même VM.** La matrice du job
+`images` bâtit donc les trois images en parallèle. C'est ce qui impose le job
+`registry-gc` distinct de la tâche 9 : un ramasse-miettes concurrent d'un push
+supprime des blobs en cours de téléversement.
