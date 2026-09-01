@@ -44,6 +44,17 @@ metadata:
   # `PreSync` et non `Sync` : la migration doit s'achever AVANT que les
   # nouveaux pods du backend ne demarrent. Cet ordre n'etait garanti par rien
   # jusqu'ici.
+  #
+  # ⚠️ **Il peut se le permettre parce qu'il ne monte AUCUNE ConfigMap
+  # generee** -- il ne lit que des variables du Secret. Ses deux jumeaux,
+  # `kratos/migrate-job.yaml` et `kibana/setup-job.yaml`, en montent une : la
+  # phase PreSync s'executant avant que la moindre ressource ne soit appliquee,
+  # ils attendraient une ConfigMap hashee que la synchronisation n'a pas encore
+  # le droit de creer. Ils sont donc en `Sync` (detail mesure sur place).
+  #
+  # ⇒ Avant d'ajouter un `volumeMounts` a CE Job, le repasser en `Sync` --
+  #   sinon la synchronisation entiere se bloque, et le message d'erreur ne
+  #   parle que d'un montage.
   annotations:
     argocd.argoproj.io/hook: PreSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
