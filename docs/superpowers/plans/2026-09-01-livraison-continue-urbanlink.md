@@ -877,15 +877,33 @@ nommée `pgbouncer.env`.
 
 - [ ] **Étape 7 : Vérifier que le hash bouge avec le contenu**
 
+⚠️ **La sonde doit être une vraie paire `CLÉ=valeur`, pas un commentaire.**
+Mesure du 2026-09-01 : `echo "# test" >> pgbouncer.env` laisse le hash
+**inchangé**, et on conclurait à tort que le mécanisme est cassé. `envs:`
+applique la sémantique env-file — lignes vides et commentaires sont ignorés à
+la construction des clés — donc la ConfigMap produite est identique au
+caractère près. Ce n'est pas un défaut, c'est le comportement correct.
+
 ```bash
-kustomize build . | grep -o "pgbouncer-config-[a-z0-9]*" | head -1
-echo "# test" >> config/prod/pgbouncer/pgbouncer.env
-kustomize build . | grep -o "pgbouncer-config-[a-z0-9]*" | head -1
-git checkout config/prod/pgbouncer/pgbouncer.env 2>/dev/null || sed -i '$ d' config/prod/pgbouncer/pgbouncer.env
+kubectl kustomize . | grep -o "pgbouncer-config-[a-z0-9]*" | head -1
+printf 'PROBE_VAR=1\n' >> config/prod/pgbouncer/pgbouncer.env
+kubectl kustomize . | grep -o "pgbouncer-config-[a-z0-9]*" | head -1
 ```
 
 Attendu : les deux valeurs diffèrent. C'est la preuve directe que le
 redémarrage automatique fonctionnera.
+
+Puis restaurer, et **le vérifier** — à ce stade le fichier peut ne pas encore
+être suivi par git, auquel cas `git checkout` ne restaure rien :
+
+```bash
+git checkout kube/urbanlink/config/prod/pgbouncer/pgbouncer.env 2>/dev/null \
+  || sed -i '/^PROBE_VAR=1$/d' kube/urbanlink/config/prod/pgbouncer/pgbouncer.env
+diff kube/urbanlink/config/prod/pgbouncer/pgbouncer.env \
+     C:/Users/nbeny/Documents/GitHub/UrbanConnct/config/prod/pgbouncer/pgbouncer.env
+```
+
+Attendu : aucune différence.
 
 - [ ] **Étape 8 : Commit**
 
