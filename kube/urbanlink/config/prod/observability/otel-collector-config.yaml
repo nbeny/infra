@@ -111,6 +111,19 @@ service:
     logs:
       level: warn
     metrics:
+      # ⚠️ `address` DOIT etre vide des lors qu'on declare `readers`.
+      #
+      # Le collecteur 0.108 ne remplace pas l'un par l'autre : il AJOUTE au
+      # `readers` ci-dessous un lecteur construit depuis `address`, dont le
+      # defaut est `:8888`. Deux lecteurs sur le meme port, et le processus
+      # meurt des le demarrage -- en CrashLoop sans fin sous Kubernetes :
+      #
+      #   error  Asynchronous error received, terminating process
+      #   {"error": "listen tcp :8888: bind: address already in use"}
+      #
+      # Mesure le 2026-09-01 sur le cluster urbanlink, et reproduit en pod
+      # isole : la meme configuration avec `address: ""` demarre et tient.
+      address: ""
       readers:
         - pull:
             exporter:
