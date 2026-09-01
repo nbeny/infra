@@ -5,14 +5,38 @@ metadata:
   namespace: urbanconnect
   labels:
     app: kratos-migrate
-  # ⚠️ Hook Argo PreSync. La ConfigMap kratos-config etant desormais generee
-  # avec un suffixe de hash, la reference montee par ce Job change des que la
-  # configuration de Kratos change -- donc sa spec change, donc `apply`
-  # echouerait sur l'immuabilite des champs d'un Job.
+  # Hook Argo. La ConfigMap kratos-config etant generee avec un suffixe de hash,
+  # la reference montee par ce Job change des que la configuration de Kratos
+  # change -- donc sa spec change, donc un `apply` echouerait sur l'immuabilite
+  # des champs d'un Job. `BeforeHookCreation` le supprime puis le recree.
   #
-  # Et la migration doit preceder le demarrage de Kratos.
+  # ⚠️ **`Sync` et NON `PreSync`, et ce n'est pas un detail de phase.** La phase
+  # PreSync s'execute AVANT que la moindre ressource ne soit appliquee -- donc
+  # avant que la ConfigMap hashee n'existe. Ce Job montant precisement cette
+  # ConfigMap, il attendait un objet que la synchronisation n'avait pas encore
+  # le droit de creer : blocage circulaire.
+  #
+  # Mesure le 2026-09-01, premiere livraison ou kratos.yml changeait :
+  #   MountVolume.SetUp failed for volume "kratos-config" :
+  #   configmap "kratos-config-m5hhm9dkbg" not found        (x13 en 10 minutes)
+  # La phase PreSync ne s'achevant jamais, la synchronisation entiere restait en
+  # suspens -- y compris la creation de la ConfigMap attendue.
+  #
+  # ⚠️ Le piege est que ce Job PASSE tant que la configuration ne bouge pas :
+  # l'ancienne ConfigMap est encore la et le montage reussit. C'est exactement
+  # ce qui a laisse `kibana-setup` reussir le meme jour, son hash n'ayant pas
+  # change. La panne n'apparait qu'a la livraison suivante.
+  #
+  # En phase Sync, Argo ordonne par type a l'interieur d'une vague et applique
+  # les ConfigMaps avant les Jobs. Ce que l'on perd : la garantie que la
+  # migration precede le demarrage de Kratos. Elle n'a jamais existe avant le
+  # 2026-09-01 (le Job etait une ressource ordinaire), et Kratos retente.
+  #
+  # ⇒ Regle : **un hook qui monte une ConfigMap generee ne peut pas etre
+  #   PreSync.** `backend/migrate-job.yaml` n'en monte aucune -- il reste
+  #   PreSync, et sa migration precede bien le deploiement du backend.
   annotations:
-    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 5

@@ -5,15 +5,28 @@ metadata:
   namespace: urbanconnect
   labels:
     app: kibana-setup
-  # ⚠️ Hook Argo PreSync : ce Job monte la ConfigMap kibana-dashboards, dont le
-  # nom porte desormais un hash. Modifier un tableau de bord change ce nom,
-  # donc la spec du Job, qu'`apply` refuserait alors de modifier.
+  # Hook Argo : ce Job monte la ConfigMap kibana-dashboards, dont le nom porte
+  # un hash. Modifier un tableau de bord change ce nom, donc la spec du Job,
+  # qu'`apply` refuserait alors de modifier. `BeforeHookCreation` le recree.
   #
-  # `PreSync` alors que ce Job attend que Kibana soit `available` : il porte
-  # deja cette attente lui-meme (voir son en-tete), la phase ne la remplace
-  # pas. C'est l'immuabilite qu'on traite ici, pas l'ordonnancement.
+  # ⚠️ **`Sync` et NON `PreSync`** : la phase PreSync s'execute avant que la
+  # moindre ressource ne soit appliquee, donc avant que la ConfigMap hashee
+  # n'existe. Ce Job l'attendrait indefiniment, et la synchronisation avec lui.
+  #
+  # ⚠️ Ce Job a REUSSI en PreSync le 2026-09-01, et c'est precisement ce qui
+  # rend le defaut traitre : `dashboards.ndjson` n'avait pas change, donc le
+  # hash non plus, donc l'ancienne ConfigMap etait encore la. Son jumeau
+  # `kratos/migrate-job.yaml`, dont la configuration avait bouge, est reste
+  # bloque 10 minutes sur « configmap not found ». La panne n'attendait qu'une
+  # modification de tableau de bord.
+  #
+  # ⇒ Regle : **un hook qui monte une ConfigMap generee ne peut pas etre
+  #   PreSync.** Voir kratos/migrate-job.yaml pour le detail mesure.
+  #
+  # L'attente que Kibana soit `available` n'est pas portee par la phase mais par
+  # le Job lui-meme (voir son en-tete) : la changer ne touche pas a cet ordre.
   annotations:
-    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   # One-shot : importe les tableaux de bord UrbanLink dans Kibana. Miroir du
