@@ -198,24 +198,40 @@ spec:
             summary: "Outbox poisoned (evenements en erreur permanente)"
 
     # --- OTel Collector -------------------------------------------------------
+    #
+    # Noms releves sur /metrics du collecteur 0.108 reellement deploye, pas
+    # deduits de la documentation. La telemetrie interne passe par le SDK
+    # OpenTelemetry-Go (bloc `readers` de otel-collector-config.yaml), qui
+    # n'expose PAS la meme chose que l'ancien exporteur :
+    #   - `otelcol_process_*` est absent -- l'alerte memoire qui s'y appuyait
+    #     ne pouvait pas tirer. La memoire du pod est de toute facon deja
+    #     couverte par HighMemoryUsage, qui vaut pour tout le namespace ;
+    #   - `otelcol_processor_send_failed_spans_total` n'existe pas. Le compteur
+    #     reel des spans perdus est cote EXPORTEUR.
     - name: urbanlink.otel
       rules:
         - alert: OTelCollectorDrops
           expr: >-
-            increase(otelcol_processor_send_failed_spans_total[5m]) > 0
+            increase(otelcol_exporter_send_failed_spans_total[5m]) > 0
           labels:
             severity: critical
           annotations:
-            summary: "OTel Collector droppe des spans"
+            summary: >-
+              OTel Collector : {{ $value | humanize }} spans non exportes vers
+              {{ $labels.exporter }} en 5 min
 
-        - alert: OTelHighMemory
+        # La file d'export qui se remplit precede la perte : c'est le signal
+        # qu'on veut voir AVANT que les spans commencent a tomber.
+        - alert: OTelQueueNearFull
           expr: >-
-            otelcol_process_resident_memory_bytes > 400 * 1024 * 1024
+            otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.8
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "OTel Collector memoire > 400MB"
+            summary: >-
+              OTel Collector : file d'export {{ $labels.exporter }} pleine a
+              {{ $value | humanizePercentage }}
 
     # --- TLS / Certificats ----------------------------------------------------
     #
