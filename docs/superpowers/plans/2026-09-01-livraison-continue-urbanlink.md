@@ -38,8 +38,82 @@ chaque tâche pose d'abord une **vérification qui échoue**, on l'exécute pour
 constater l'échec, on implémente, on la relance pour constater le succès. Les
 commandes et leur sortie attendue sont écrites en entier.
 
-**Accès aux machines.** Depuis le nœud PVE (`192.168.100.50`). Les VMs ne sont
-pas joignables directement depuis le poste Windows : passer par `ssh -J`.
+### Où s'exécute quoi — à lire avant la première commande
+
+⚠️ **Ansible n'est PAS installé sur le poste Windows, et c'est voulu.** Le
+README l'énonce : « Sur ton poste Windows — rien d'autre que git et ssh ». Le
+seul endroit où Ansible tourne est le nœud PVE, dans `/root/infra/ansible`.
+Constaté à la tâche 1 : ni Windows natif, ni WSL kali, ni WSL Ubuntu ne l'ont.
+
+⚠️ **Et `/root/infra` sur le PVE n'est PAS un clone git** — `git status` y
+répond « not a git repository ». Un `git pull` est donc impossible : il faut y
+déposer les fichiers modifiés avant de jouer quoi que ce soit.
+
+| Outil | Poste Windows | Nœud PVE |
+|---|---|---|
+| `git` | ✅ (le dépôt vit ici) | ❌ (copie, pas un clone) |
+| `ssh` | ✅ | ✅ |
+| `ansible` / `ansible-playbook` | ❌ | ✅ (core 2.19.4) |
+| `kubectl` | ✅ | ❌ |
+| `kustomize` autonome | ❌ | à vérifier |
+
+**Règle de lecture du plan :** toute commande commençant par
+`cd .../infra/ansible` se joue **sur le PVE**, après synchronisation. Toute
+commande `git`, `kubectl kustomize`, `bash -n` ou d'édition de fichier se joue
+**sur le poste**.
+
+**Synchroniser le poste vers le nœud de contrôle**, avant chaque exécution
+d'Ansible (`rsync` n'existe pas sur le poste, `tar` sur SSH fait le même
+travail) :
+
+```bash
+cd C:/Users/nbeny/Documents/GitHub/infra
+tar -czf - --exclude=.git ansible kube \
+  | ssh root@192.168.100.50 'tar -xzf - -C /root/infra'
+```
+
+Puis :
+
+```bash
+ssh root@192.168.100.50 'cd /root/infra/ansible && ansible-playbook playbooks/<le playbook>.yml'
+```
+
+⚠️ **Cette copie est destructrice pour tout travail non commité présent sur le
+nœud.** Elle écrase `/root/infra/ansible` et `/root/infra/kube` par l'état du
+poste. Vérifier d'abord qu'on n'y écrase rien :
+
+```bash
+ssh root@192.168.100.50 'ls -la /root/infra; find /root/infra -newer /root/infra/README.md -type f -not -path "*/facts_cache/*" | head'
+```
+
+⚠️ **Ne pas laisser de fichiers de travail sur le nœud.** Il sert de nœud de
+contrôle pour tout le lab ; y abandonner une version intermédiaire d'un
+inventaire ferait diverger silencieusement ce qui s'exécute de ce qui est
+versionné.
+
+**Pour `kustomize build`** (tâches 4 et 5), `kubectl kustomize .` fait le même
+travail et `kubectl` est présent sur le poste. ⚠️ En revanche `kustomize edit
+set image` (tâche 10) n'a **pas** d'équivalent `kubectl` : c'est le job de CI
+qui le télécharge dans `$RUNNER_TEMP`, comme il le fait déjà aujourd'hui.
+
+**Accès aux VMs.** Elles vivent sur `vmbr1` (`10.0.0.0/24`) et ne sont pas
+joignables depuis le LAN. Le rebond part **du poste**, jamais du PVE (dont la
+clé RSA correspondante n'existe plus) :
+
+```bash
+ssh -J root@192.168.100.50 debian@10.0.0.130     # ci-runner
+```
+
+⚠️ **`urbanlink` (10.0.0.111) refuse ce rebond** en `publickey`, même avec
+`-i ~/.ssh/id_rsa`. Pour agir dessus, passer par Ansible depuis le PVE, qui a
+la bonne clé :
+
+```bash
+ssh root@192.168.100.50 'cd /root/infra/ansible && ansible urbanlink -b -m shell -a "kubectl -n urbanconnect get pods"'
+```
+
+Les commandes du plan écrites `ssh -J … nbeny@10.0.0.111 '…'` sont donc à
+traduire sous cette forme.
 
 ---
 
