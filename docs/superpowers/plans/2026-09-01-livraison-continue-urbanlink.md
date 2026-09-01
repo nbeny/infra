@@ -159,7 +159,7 @@ traduire sous cette forme.
 - Modify: `ansible/inventory/00-static.yml`
 - Create: `ansible/inventory/group_vars/ci_nodes.yml`
 
-- [ ] **Étape 1 : Confirmer les valeurs relevées sur la machine**
+- [x] **Étape 1 : Confirmer les valeurs relevées sur la machine**
 
 Relevées le 2026-09-01. ⚠️ `ci-runner` n'a **pas d'agent QEMU** : `qm guest exec`
 répond « QEMU guest agent is not running », et un `ssh` depuis le nœud PVE
@@ -197,7 +197,7 @@ un build meurt sans message.
 code un état qui n'existait jusqu'ici que sur la machine, et que rien ne
 rétablirait après une reconstruction.
 
-- [ ] **Étape 2 : Vérifier que l'hôte n'est pas résolu (l'échec attendu)**
+- [x] **Étape 2 : Vérifier que l'hôte n'est pas résolu (l'échec attendu)**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/ansible
@@ -207,7 +207,7 @@ ansible ci-runner --list-hosts
 Attendu : `[WARNING]: Could not match supplied host pattern, ignoring: ci-runner`
 et un code de retour non nul.
 
-- [ ] **Étape 3 : Déclarer le groupe et l'hôte**
+- [x] **Étape 3 : Déclarer le groupe et l'hôte**
 
 Dans `ansible/inventory/00-static.yml`, ajouter après le bloc `kali_nodes` :
 
@@ -239,7 +239,7 @@ Puis, dans le groupe parapluie `guests`, ajouter `ci_nodes:` à la liste des
         ci_nodes:
 ```
 
-- [ ] **Étape 4 : Donner à ce groupe ses variables**
+- [x] **Étape 4 : Donner à ce groupe ses variables**
 
 Créer `ansible/inventory/group_vars/ci_nodes.yml` :
 
@@ -266,7 +266,7 @@ docker_containerd_systemd_cgroup: false
 ci_runner_service_user: debian   # <- valeur relevee a la tache 1, etape 1
 ```
 
-- [ ] **Étape 5 : Relancer la vérification**
+- [x] **Étape 5 : Relancer la vérification**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/ansible
@@ -287,7 +287,7 @@ ansible ci-runner -m ping -e pve_connection=ssh
 
 Attendu : `ci-runner | SUCCESS => {"ping": "pong"}`
 
-- [ ] **Étape 6 : Vérifier qu'on ne l'a pas rangée dans le mauvais groupe**
+- [x] **Étape 6 : Vérifier qu'on ne l'a pas rangée dans le mauvais groupe**
 
 ```bash
 ansible ci-runner --list-hosts --limit debian_nodes
@@ -296,7 +296,7 @@ ansible ci-runner --list-hosts --limit debian_nodes
 Attendu : aucun hôte. Si `ci-runner` apparaît, le groupe est mal placé et
 `site.yml` lui installerait Kubernetes.
 
-- [ ] **Étape 7 : Commit**
+- [x] **Étape 7 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -316,7 +316,7 @@ git commit -m "feat(inventaire): la VM de CI n'etait declaree nulle part"
 - Create: `ansible/roles/registry/tasks/main.yml`
 - Create: `ansible/playbooks/35-ci-registry.yml`
 
-- [ ] **Étape 1 : Vérifier que rien n'écoute (l'échec attendu)**
+- [x] **Étape 1 : Vérifier que rien n'écoute (l'échec attendu)**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/ansible
@@ -326,7 +326,7 @@ ansible ci-runner -e pve_connection=ssh -m uri \
 
 Attendu : `FAILED` — `Connection refused`.
 
-- [ ] **Étape 2 : Écrire les valeurs par défaut**
+- [x] **Étape 2 : Écrire les valeurs par défaut**
 
 Créer `ansible/roles/registry/defaults/main.yml` :
 
@@ -357,7 +357,7 @@ registry_data_dir: /var/lib/lab-registry
 registry_bind_address: "{{ ansible_host }}"
 ```
 
-- [ ] **Étape 3 : Écrire l'unité systemd**
+- [x] **Étape 3 : Écrire l'unité systemd**
 
 Créer `ansible/roles/registry/templates/lab-registry.service.j2` :
 
@@ -395,7 +395,7 @@ sans elle l'API répond `405 Method Not Allowed` sur toute suppression de
 manifeste, et la purge de la tâche 9 devient un no-op **silencieux** — le
 disque se remplit sans qu'aucune commande n'échoue.
 
-- [ ] **Étape 4 : Écrire le handler**
+- [x] **Étape 4 : Écrire le handler**
 
 Créer `ansible/roles/registry/handlers/main.yml` :
 
@@ -408,7 +408,7 @@ Créer `ansible/roles/registry/handlers/main.yml` :
     daemon_reload: true
 ```
 
-- [ ] **Étape 5 : Écrire les tâches**
+- [x] **Étape 5 : Écrire les tâches**
 
 Créer `ansible/roles/registry/tasks/main.yml` :
 
@@ -465,7 +465,7 @@ Créer `ansible/roles/registry/tasks/main.yml` :
   changed_when: false
 ```
 
-- [ ] **Étape 6 : Écrire le playbook**
+- [x] **Étape 6 : Écrire le playbook**
 
 Créer `ansible/playbooks/35-ci-registry.yml` :
 
@@ -506,7 +506,7 @@ Créer `ansible/playbooks/35-ci-registry.yml` :
           - "Catalogue :  curl http://{{ ansible_host }}:{{ registry_port }}/v2/_catalog"
 ```
 
-- [ ] **Étape 7 : Jouer le playbook**
+- [x] **Étape 7 : Jouer le playbook**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/ansible
@@ -515,7 +515,7 @@ ansible-playbook playbooks/35-ci-registry.yml -e pve_connection=ssh
 
 Attendu : `ok=7 changed=3 failed=0`.
 
-- [ ] **Étape 8 : Relancer la vérification de l'étape 1**
+- [x] **Étape 8 : Relancer la vérification de l'étape 1**
 
 ```bash
 ansible ci-runner -e pve_connection=ssh -m uri \
@@ -524,7 +524,7 @@ ansible ci-runner -e pve_connection=ssh -m uri \
 
 Attendu : `SUCCESS`, `status: 200`.
 
-- [ ] **Étape 9 : Vérifier l'idempotence**
+- [x] **Étape 9 : Vérifier l'idempotence**
 
 ```bash
 ansible-playbook playbooks/35-ci-registry.yml -e pve_connection=ssh
@@ -533,7 +533,7 @@ ansible-playbook playbooks/35-ci-registry.yml -e pve_connection=ssh
 Attendu : `changed=0`. Un `changed` au second passage signifie qu'une tâche
 n'est pas idempotente et redémarrerait le registre à chaque exécution.
 
-- [ ] **Étape 10 : Commit**
+- [x] **Étape 10 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -550,7 +550,7 @@ git commit -m "feat(registry): les images construites sur ci-runner etaient invi
 - Modify: `ansible/roles/docker/tasks/main.yml`
 - Modify: `ansible/inventory/host_vars/urbanlink.yml`
 
-- [ ] **Étape 1 : Constater l'échec du pull (la vérification qui échoue)**
+- [x] **Étape 1 : Constater l'échec du pull (la vérification qui échoue)**
 
 D'abord pousser une image de test depuis `ci-runner` :
 
@@ -577,7 +577,7 @@ http: server gave HTTP response to HTTPS client`.
 ⚠️ Noter le message : containerd parle **https** à un registre en clair. C'est
 le symptôme exact que corrige cette tâche.
 
-- [ ] **Étape 2 : Ajouter la variable par défaut**
+- [x] **Étape 2 : Ajouter la variable par défaut**
 
 Dans `ansible/roles/docker/defaults/main.yml`, ajouter :
 
@@ -591,7 +591,7 @@ Dans `ansible/roles/docker/defaults/main.yml`, ajouter :
 docker_insecure_registries: []
 ```
 
-- [ ] **Étape 3 : Poser `config_path` et les `hosts.toml`**
+- [x] **Étape 3 : Poser `config_path` et les `hosts.toml`**
 
 Dans `ansible/roles/docker/tasks/main.yml`, à la fin du bloc « Configurer
 containerd », ajouter :
@@ -668,7 +668,7 @@ containerd », ajouter :
       notify: Redemarrer containerd
 ```
 
-- [ ] **Étape 4 : Vérifier que le handler existe**
+- [x] **Étape 4 : Vérifier que le handler existe**
 
 ```bash
 cat C:/Users/nbeny/Documents/GitHub/infra/ansible/roles/docker/handlers/main.yml
@@ -687,7 +687,7 @@ Si aucun handler `Redemarrer containerd` n'y figure, l'ajouter :
 ⚠️ containerd relit `config.toml` au **démarrage**, pas en continu. Sans ce
 redémarrage, la configuration est correcte sur le disque et sans effet.
 
-- [ ] **Étape 5 : Déclarer le registre côté `urbanlink`**
+- [x] **Étape 5 : Déclarer le registre côté `urbanlink`**
 
 Dans `ansible/inventory/host_vars/urbanlink.yml`, ajouter :
 
@@ -704,7 +704,7 @@ docker_insecure_registries:
   - "10.0.0.130:5000"   # <- ci-runner, valeur relevee a la tache 1
 ```
 
-- [ ] **Étape 6 : Appliquer sur `urbanlink`**
+- [x] **Étape 6 : Appliquer sur `urbanlink`**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/ansible
@@ -713,7 +713,7 @@ ansible-playbook playbooks/20-debian-k8s.yml -l urbanlink -e pve_connection=ssh 
 
 Si le playbook n'a pas de tag `docker`, le jouer en entier — il est idempotent.
 
-- [ ] **Étape 7 : Relancer la vérification de l'étape 1**
+- [x] **Étape 7 : Relancer la vérification de l'étape 1**
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
@@ -725,14 +725,14 @@ Attendu : `Image is up to date for ...` puis une ligne listant l'image.
 **C'est la vérification qui compte dans toute cette tâche** : elle valide d'un
 coup la route réseau, le `hosts.toml`, le `config_path` et le redémarrage.
 
-- [ ] **Étape 8 : Nettoyer l'image de test**
+- [x] **Étape 8 : Nettoyer l'image de test**
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
   'sudo crictl rmi 10.0.0.130:5000/alpine:test'
 ```
 
-- [ ] **Étape 9 : Commit**
+- [x] **Étape 9 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -748,7 +748,7 @@ git commit -m "feat(containerd): un registre en clair etait injoignable, et le h
 - Create: `kube/urbanlink/config/` (copie initiale, à la main)
 - Modify: `kube/urbanlink/kustomization.yaml`
 
-- [ ] **Étape 1 : Constater que kustomize ne génère rien (l'échec attendu)**
+- [x] **Étape 1 : Constater que kustomize ne génère rien (l'échec attendu)**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/kube/urbanlink
@@ -764,7 +764,7 @@ build aujourd'hui — elles sont toutes créées hors kustomize, par
 
 ⇒ **Le compte attendu après cette tâche est donc `6`, pas `5`.**
 
-- [ ] **Étape 2 : Déposer une première copie de `config/`**
+- [x] **Étape 2 : Déposer une première copie de `config/`**
 
 Cette copie sera ensuite écrasée par la CI à chaque livraison ; elle est faite
 à la main ici pour que le kustomization soit buildable tout de suite.
@@ -803,7 +803,7 @@ suppression ci-dessus retire la cause plutôt que d'assouplir la garde ; élargi
 le filtre `CHANGE_ME|REPLACE` aurait au contraire ouvert la porte au jour où un
 vrai secret passerait.
 
-- [ ] **Étape 3 : Écrire le `configMapGenerator`**
+- [x] **Étape 3 : Écrire le `configMapGenerator`**
 
 À la fin de `kube/urbanlink/kustomization.yaml`, après le bloc `resources:` :
 
@@ -867,7 +867,7 @@ configMapGenerator:
       - config/common/kibana/dashboards.ndjson
 ```
 
-- [ ] **Étape 4 : Vérifier que les cinq ConfigMaps sortent du build**
+- [x] **Étape 4 : Vérifier que les cinq ConfigMaps sortent du build**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/kube/urbanlink
@@ -876,7 +876,7 @@ kustomize build . | grep -c "kind: ConfigMap"
 
 Attendu : `6` — les cinq du generator, plus `oathkeeper/configmap.yaml`.
 
-- [ ] **Étape 5 : Vérifier que les références sont réécrites**
+- [x] **Étape 5 : Vérifier que les références sont réécrites**
 
 C'est le point qui fait tout marcher. Si les Deployments pointent encore sur
 `kratos-config` sans suffixe, les pods ne redémarreront jamais.
@@ -888,7 +888,7 @@ kustomize build . | grep -o "kratos-config[a-z0-9-]*" | sort -u
 Attendu : **une seule valeur**, de la forme `kratos-config-<hash>`. Si
 `kratos-config` nu apparaît aussi, une référence n'a pas été réécrite.
 
-- [ ] **Étape 6 : Vérifier la forme des deux ConfigMaps d'environnement**
+- [x] **Étape 6 : Vérifier la forme des deux ConfigMaps d'environnement**
 
 ```bash
 kustomize build . | grep -A6 "name: pgbouncer-config"
@@ -897,7 +897,7 @@ kustomize build . | grep -A6 "name: pgbouncer-config"
 Attendu : plusieurs clés (`DB_HOST`, `POOL_MODE`, …), **pas** une clé unique
 nommée `pgbouncer.env`.
 
-- [ ] **Étape 7 : Vérifier que le hash bouge avec le contenu**
+- [x] **Étape 7 : Vérifier que le hash bouge avec le contenu**
 
 ⚠️ **La sonde doit être une vraie paire `CLÉ=valeur`, pas un commentaire.**
 Mesure du 2026-09-01 : `echo "# test" >> pgbouncer.env` laisse le hash
@@ -927,7 +927,7 @@ diff kube/urbanlink/config/prod/pgbouncer/pgbouncer.env \
 
 Attendu : aucune différence.
 
-- [ ] **Étape 8 : Commit**
+- [x] **Étape 8 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -944,7 +944,7 @@ git commit -m "feat(config): un changement dans config/ n'atteignait jamais le c
 - Modify: `kube/urbanlink/kratos/migrate-job.yaml`
 - Modify: `kube/urbanlink/kibana/setup-job.yaml`
 
-- [ ] **Étape 1 : Constater l'absence d'annotation (l'échec attendu)**
+- [x] **Étape 1 : Constater l'absence d'annotation (l'échec attendu)**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/kube/urbanlink
@@ -960,7 +960,7 @@ immutable » — c'est pour ça que `31-urbanlink-deploy.yml:478` les supprime
 d'abord. `Replace=false` et `ApplyOutOfSyncOnly=true` ne sauvent pas : le Job
 sera hors-sync, donc appliqué, donc en échec.
 
-- [ ] **Étape 2 : Annoter `backend/migrate-job.yaml`**
+- [x] **Étape 2 : Annoter `backend/migrate-job.yaml`**
 
 Dans les `metadata:` du Job (autour de la ligne 31) :
 
@@ -982,7 +982,7 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 ```
 
-- [ ] **Étape 3 : Annoter `kratos/migrate-job.yaml`**
+- [x] **Étape 3 : Annoter `kratos/migrate-job.yaml`**
 
 Mêmes annotations, avec ce commentaire :
 
@@ -996,7 +996,7 @@ Mêmes annotations, avec ce commentaire :
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 ```
 
-- [ ] **Étape 4 : Annoter `kibana/setup-job.yaml`**
+- [x] **Étape 4 : Annoter `kibana/setup-job.yaml`**
 
 ```yaml
   # ⚠️ Hook Argo PreSync : ce Job monte la ConfigMap kibana-dashboards, dont
@@ -1011,7 +1011,7 @@ Mêmes annotations, avec ce commentaire :
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 ```
 
-- [ ] **Étape 5 : Ne PAS annoter `minio-init` ni `elasticsearch-setup`**
+- [x] **Étape 5 : Ne PAS annoter `minio-init` ni `elasticsearch-setup`**
 
 Vérifier qu'ils sont restés intacts :
 
@@ -1025,7 +1025,7 @@ Attendu : `0` pour les deux. Ni leur image (`minio/mc`, `curlimages/curl` ou
 hors-sync, donc le problème d'immuabilité ne les touche pas. Les convertir les
 ferait rejouer à chaque synchronisation sans raison.
 
-- [ ] **Étape 6 : Relancer la vérification**
+- [x] **Étape 6 : Relancer la vérification**
 
 ```bash
 kustomize build . | grep -c "argocd.argoproj.io/hook:"
@@ -1039,7 +1039,7 @@ kustomize build . | grep -B3 "argocd.argoproj.io/hook:" | grep "name:"
 
 Attendu : `backend-migrate`, `kratos-migrate`, et le nom du Job de setup Kibana.
 
-- [ ] **Étape 7 : Commit**
+- [x] **Étape 7 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -1056,7 +1056,7 @@ git commit -m "fix(argo): trois Jobs immuables auraient fait echouer chaque sync
 **Files:**
 - Modify: `ansible/playbooks/31-urbanlink-deploy.yml:188-266`
 
-- [ ] **Étape 1 : Constater le doublon (l'échec attendu)**
+- [x] **Étape 1 : Constater le doublon (l'échec attendu)**
 
 ```bash
 grep -c "Creer les ConfigMaps prerequises" \
@@ -1067,12 +1067,12 @@ Attendu : `1`. Laisser cette tâche recréerait les cinq ConfigMaps **sans**
 suffixe de hash, à côté de celles d'Argo : des objets que plus personne ne
 monte, et qui laisseraient croire que la configuration vient de là.
 
-- [ ] **Étape 2 : Supprimer la tâche**
+- [x] **Étape 2 : Supprimer la tâche**
 
 Retirer entièrement le bloc `- name: Creer les ConfigMaps prerequises` (l.188 à
 l.266, jusqu'à `changed_when: true` inclus).
 
-- [ ] **Étape 3 : Réécrire l'en-tête du playbook**
+- [x] **Étape 3 : Réécrire l'en-tête du playbook**
 
 Remplacer la description des prérequis en tête de fichier par :
 
@@ -1094,7 +1094,7 @@ Remplacer la description des prérequis en tête de fichier par :
 #   4. Le namespace et ses labels de maillage.
 ```
 
-- [ ] **Étape 4 : Documenter le couplage résiduel**
+- [x] **Étape 4 : Documenter le couplage résiduel**
 
 Juste avant la tâche `- name: Lire la configuration Kratos de l'environnement`
 (vers la l.361 avant suppression), ajouter :
@@ -1113,7 +1113,7 @@ Juste avant la tâche `- name: Lire la configuration Kratos de l'environnement`
     # seule la connexion Google repond « Impossible d'initier la connexion ».
 ```
 
-- [ ] **Étape 5 : Vérifier la syntaxe**
+- [x] **Étape 5 : Vérifier la syntaxe**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/ansible
@@ -1122,7 +1122,7 @@ ansible-playbook playbooks/31-urbanlink-deploy.yml --syntax-check
 
 Attendu : `playbook: playbooks/31-urbanlink-deploy.yml`, sans erreur.
 
-- [ ] **Étape 6 : Relancer la vérification de l'étape 1**
+- [x] **Étape 6 : Relancer la vérification de l'étape 1**
 
 ```bash
 grep -c "Creer les ConfigMaps prerequises" \
@@ -1140,7 +1140,7 @@ grep -c "Creer le Secret applicatif" \
 
 Attendu : `1`.
 
-- [ ] **Étape 7 : Commit**
+- [x] **Étape 7 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -1155,7 +1155,7 @@ git commit -m "refactor(ansible): les ConfigMaps auraient fait doublon avec cell
 **Files:**
 - Modify: `ansible/playbooks/32-argocd.yml`
 
-- [ ] **Étape 1 : Constater l'état actuel (l'échec attendu)**
+- [x] **Étape 1 : Constater l'état actuel (l'échec attendu)**
 
 ```bash
 grep -n "prune: false" C:/Users/nbeny/Documents/GitHub/infra/ansible/playbooks/32-argocd.yml
@@ -1164,7 +1164,7 @@ grep -n "prune: false" C:/Users/nbeny/Documents/GitHub/infra/ansible/playbooks/3
 Attendu : une ligne trouvée. Avec `prune: false`, chaque livraison ajoute cinq
 ConfigMaps hashées que rien ne supprime jamais.
 
-- [ ] **Étape 2 : Basculer `prune`**
+- [x] **Étape 2 : Basculer `prune`**
 
 Remplacer le commentaire (l.317-326) et la valeur :
 
@@ -1196,7 +1196,7 @@ et dans le manifeste :
                 selfHeal: true
 ```
 
-- [ ] **Étape 3 : Réécrire l'en-tête du playbook**
+- [x] **Étape 3 : Réécrire l'en-tête du playbook**
 
 Le bloc « Ce qu'Argo CD ne peut PAS reprendre » (l.14-41) perd son point 1 et
 son avertissement final. Le remplacer par :
@@ -1227,7 +1227,7 @@ son avertissement final. Le remplacer par :
 #   passerelle, certificat, namespace), Argo CD reconcilie tout le reste.
 ```
 
-- [ ] **Étape 4 : Vérifier la syntaxe et relancer la vérification**
+- [x] **Étape 4 : Vérifier la syntaxe et relancer la vérification**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/ansible
@@ -1242,7 +1242,7 @@ Attendu : syntaxe OK, puis `1` et `0`.
 synchronisation échoue peut supprimer ce qu'elle n'arrive pas à recréer. La
 tâche 11 dit à quel moment le jouer.
 
-- [ ] **Étape 5 : Commit**
+- [x] **Étape 5 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -1257,7 +1257,7 @@ git commit -m "feat(argo): sans elagage, cinq ConfigMaps de plus s'accumulaient 
 **Files:**
 - Modify: `UrbanConnct/.github/workflows/ci.yml:327-425`
 
-- [ ] **Étape 1 : Constater la dépendance à GHCR (l'échec attendu)**
+- [x] **Étape 1 : Constater la dépendance à GHCR (l'échec attendu)**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
@@ -1271,14 +1271,14 @@ Pourquoi c'est un défaut : le plan GitHub Free plafonne les paquets privés à
 Node ; le quota saute au premier build, et le `cache-to: mode=max` actuel
 pousse en plus toutes les couches intermédiaires.
 
-- [ ] **Étape 2 : Créer la branche**
+- [x] **Étape 2 : Créer la branche**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
 git checkout -b feat/ci-registry-locale
 ```
 
-- [ ] **Étape 3 : Remplacer le corps du job `images`**
+- [x] **Étape 3 : Remplacer le corps du job `images`**
 
 Conserver `name`, `needs`, `if`, `runs-on`, `strategy` et la matrice à
 l'identique. Remplacer `permissions`, `outputs` et `steps` par :
@@ -1343,7 +1343,7 @@ relire. Si l'expression pose problème, la remplacer par un `if:` sur deux
 étapes distinctes — une pour le frontend, une pour les deux autres — plutôt
 que par une simplification qui perdrait un argument.
 
-- [ ] **Étape 4 : Déclarer la variable de dépôt**
+- [x] **Étape 4 : Déclarer la variable de dépôt**
 
 Sur GitHub, `Settings → Secrets and variables → Actions → Variables` :
 
@@ -1354,7 +1354,7 @@ Sur GitHub, `Settings → Secrets and variables → Actions → Variables` :
 Une **variable** et non un secret : ce n'est pas une donnée sensible, et un
 secret serait masqué dans les journaux, rendant tout diagnostic aveugle.
 
-- [ ] **Étape 5 : Relancer la vérification**
+- [x] **Étape 5 : Relancer la vérification**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
@@ -1371,7 +1371,7 @@ grep -c "build-arg" .github/workflows/ci.yml
 
 Attendu : `10`.
 
-- [ ] **Étape 6 : Valider la syntaxe du workflow**
+- [x] **Étape 6 : Valider la syntaxe du workflow**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
@@ -1380,7 +1380,7 @@ python -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml')); pr
 
 Attendu : `YAML valide`.
 
-- [ ] **Étape 7 : Commit**
+- [x] **Étape 7 : Commit**
 
 ```bash
 git add .github/workflows/ci.yml
@@ -1395,7 +1395,7 @@ git commit -m "fix(ci): GHCR prive plafonne a 500 Mo, que le premier build depas
 - Create: `UrbanConnct/scripts/ci/registry-purge.sh`
 - Modify: `UrbanConnct/.github/workflows/ci.yml` (job `images`)
 
-- [ ] **Étape 1 : Constater l'absence de rétention (l'échec attendu)**
+- [x] **Étape 1 : Constater l'absence de rétention (l'échec attendu)**
 
 ```bash
 ls C:/Users/nbeny/Documents/GitHub/UrbanConnct/scripts/ci/registry-purge.sh
@@ -1404,7 +1404,7 @@ ls C:/Users/nbeny/Documents/GitHub/UrbanConnct/scripts/ci/registry-purge.sh
 Attendu : `No such file or directory`. Sans purge, trois images par livraison
 s'empilent indéfiniment dans `/var/lib/lab-registry`.
 
-- [ ] **Étape 2 : Écrire le script**
+- [x] **Étape 2 : Écrire le script**
 
 Créer `UrbanConnct/scripts/ci/registry-purge.sh` :
 
@@ -1501,7 +1501,7 @@ chmod +x C:/Users/nbeny/Documents/GitHub/UrbanConnct/scripts/ci/registry-purge.s
 git update-index --chmod=+x scripts/ci/registry-purge.sh
 ```
 
-- [ ] **Étape 3 : Le brancher dans un job distinct, après la matrice**
+- [x] **Étape 3 : Le brancher dans un job distinct, après la matrice**
 
 ⚠️ **Pas une étape du job `images`.** Trois runners sont enregistrés pour ce
 dépôt sur `ci-runner` : les trois entrées de la matrice tournent en parallèle,
@@ -1544,7 +1544,7 @@ quel : un échec de rétention ne doit jamais empêcher une livraison par ailleu
 valide de partir. Le disque a 58 Go libres — un tour de purge manqué n'est pas
 un incident.
 
-- [ ] **Étape 4 : Vérifier que `jq` est présent sur le runner**
+- [x] **Étape 4 : Vérifier que `jq` est présent sur le runner**
 
 ```bash
 ssh -J root@192.168.100.50 debian@10.0.0.130 'command -v jq curl docker'
@@ -1556,7 +1556,7 @@ Attendu : trois chemins. Si `jq` manque :
 ssh -J root@192.168.100.50 debian@10.0.0.130 'sudo apt-get install -y jq'
 ```
 
-- [ ] **Étape 5 : Tester le script à vide**
+- [x] **Étape 5 : Tester le script à vide**
 
 Sur une image qui n'existe pas, il doit sortir proprement :
 
@@ -1567,7 +1567,7 @@ ssh -J root@192.168.100.50 debian@10.0.0.130 \
 
 Attendu : un JSON listant le catalogue (`{"repositories":[...]}`), même vide.
 
-- [ ] **Étape 6 : Relancer la vérification de l'étape 1**
+- [x] **Étape 6 : Relancer la vérification de l'étape 1**
 
 ```bash
 ls -l C:/Users/nbeny/Documents/GitHub/UrbanConnct/scripts/ci/registry-purge.sh
@@ -1576,7 +1576,7 @@ bash -n C:/Users/nbeny/Documents/GitHub/UrbanConnct/scripts/ci/registry-purge.sh
 
 Attendu : le fichier existe, et `bash -n` ne renvoie rien (syntaxe valide).
 
-- [ ] **Étape 7 : Commit**
+- [x] **Étape 7 : Commit**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
@@ -1593,7 +1593,7 @@ git commit -m "feat(ci): trois images par livraison s'empilaient sans jamais etr
 - Modify: `UrbanConnct/.github/workflows/ci.yml` (job `deploy`)
 - Modify: `UrbanConnct/config/prod/kratos/kratos.yml` (en-tête)
 
-- [ ] **Étape 1 : Constater que `config/` ne part pas (l'échec attendu)**
+- [x] **Étape 1 : Constater que `config/` ne part pas (l'échec attendu)**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
@@ -1603,7 +1603,7 @@ grep -c "config/" .github/workflows/ci.yml
 Attendu : `0` dans le job `deploy`. Le job n'écrit aujourd'hui que le tag des
 images.
 
-- [ ] **Étape 2 : Écrire la garde**
+- [x] **Étape 2 : Écrire la garde**
 
 Créer `UrbanConnct/scripts/ci/check-config-declared.sh` :
 
@@ -1669,7 +1669,7 @@ chmod +x scripts/ci/check-config-declared.sh
 git update-index --chmod=+x scripts/ci/check-config-declared.sh
 ```
 
-- [ ] **Étape 3 : Vérifier que la garde passe sur l'état actuel**
+- [x] **Étape 3 : Vérifier que la garde passe sur l'état actuel**
 
 Elle doit être verte avant d'être branchée, sinon on ne saura pas distinguer un
 vrai défaut d'une garde mal écrite.
@@ -1681,7 +1681,7 @@ cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
 
 Attendu : `Tous les fichiers de configuration sont declares.`
 
-- [ ] **Étape 4 : Vérifier qu'elle attrape un ajout**
+- [x] **Étape 4 : Vérifier qu'elle attrape un ajout**
 
 ```bash
 touch config/common/kratos/nouveau-fichier.json
@@ -1694,7 +1694,7 @@ Attendu : code de retour `1` et un message nommant `nouveau-fichier.json`.
 rm config/common/kratos/nouveau-fichier.json
 ```
 
-- [ ] **Étape 5 : Étendre le job `deploy`**
+- [x] **Étape 5 : Étendre le job `deploy`**
 
 Dans `.github/workflows/ci.yml`, entre l'étape « Épingler les trois images » et
 « Publier le bump » :
@@ -1736,7 +1736,7 @@ Et modifier le message de commit de l'étape « Publier le bump » :
 vide. Cette logique reste correcte : elle couvre maintenant deux sources de
 changement au lieu d'une.
 
-- [ ] **Étape 6 : Modifier `kustomize edit set image` pour le registre local**
+- [x] **Étape 6 : Modifier `kustomize edit set image` pour le registre local**
 
 Dans l'étape « Épingler les trois images », remplacer la boucle :
 
@@ -1747,7 +1747,7 @@ Dans l'étape « Épingler les trois images », remplacer la boucle :
           done
 ```
 
-- [ ] **Étape 7 : Documenter le couplage dans `kratos.yml`**
+- [x] **Étape 7 : Documenter le couplage dans `kratos.yml`**
 
 En tête de `config/prod/kratos/kratos.yml`, ajouter :
 
@@ -1768,7 +1768,7 @@ En tête de `config/prod/kratos/kratos.yml`, ajouter :
 # du fournisseur concerne repond « Impossible d'initier la connexion ».
 ```
 
-- [ ] **Étape 8 : Relancer les vérifications**
+- [x] **Étape 8 : Relancer les vérifications**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
@@ -1780,7 +1780,7 @@ grep -c "ghcr.io" .github/workflows/ci.yml
 
 Attendu : `YAML valide`, rien pour `bash -n`, `2`, `0`.
 
-- [ ] **Étape 9 : Commit**
+- [x] **Étape 9 : Commit**
 
 ```bash
 git add scripts/ci/check-config-declared.sh .github/workflows/ci.yml config/prod/kratos/kratos.yml
@@ -1797,7 +1797,7 @@ git commit -m "feat(ci): un changement dans config/ n'atteignait jamais le clust
 sur une Application dont la synchronisation échoue peut supprimer ce qu'elle
 n'arrive pas à recréer.
 
-- [ ] **Étape 1 : Relever l'état de départ**
+- [x] **Étape 1 : Relever l'état de départ**
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
@@ -1809,7 +1809,7 @@ ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
 Noter la liste des ConfigMaps (elles serviront à l'étape 6) et l'état d'Argo,
 qui doit être `Synced/Healthy` avant de commencer.
 
-- [ ] **Étape 2 : Fusionner la branche `infra` sur `master`**
+- [x] **Étape 2 : Fusionner la branche `infra` sur `master`**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -1823,7 +1823,7 @@ entre sessions, et un `push` envoie `HEAD`.
 git checkout master && git merge --no-ff feat/livraison-continue && git push
 ```
 
-- [ ] **Étape 3 : Observer la première synchronisation**
+- [x] **Étape 3 : Observer la première synchronisation**
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
@@ -1843,7 +1843,7 @@ ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
 ⚠️ Le message `field is immutable` signifie qu'un Job a été oublié à la
 tâche 5. Ne pas continuer.
 
-- [ ] **Étape 4 : Vérifier que les ConfigMaps hashées sont montées**
+- [x] **Étape 4 : Vérifier que les ConfigMaps hashées sont montées**
 
 ```bash
 ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
@@ -1854,7 +1854,7 @@ ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
 Attendu : un nom **avec** suffixe de hash (`kratos-config-…`). Un
 `kratos-config` nu signifie qu'Argo sert encore l'ancienne définition.
 
-- [ ] **Étape 5 : Activer `prune`**
+- [x] **Étape 5 : Activer `prune`**
 
 Seulement maintenant, et seulement si l'étape 3 a donné `Synced/Healthy`.
 
@@ -1874,7 +1874,7 @@ ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
 
 Attendu : `true`.
 
-- [ ] **Étape 6 : Supprimer les ConfigMaps héritées d'Ansible**
+- [x] **Étape 6 : Supprimer les ConfigMaps héritées d'Ansible**
 
 Argo ne les a pas créées : `prune` ne les touchera jamais. Elles ne sont plus
 montées par rien depuis l'étape 4.
@@ -1895,14 +1895,14 @@ ssh -J root@192.168.100.50 nbeny@10.0.0.111 \
 
 Attendu : aucune ligne hormis l'en-tête.
 
-- [ ] **Étape 7 : Fusionner la branche applicative et déclencher la chaîne**
+- [x] **Étape 7 : Fusionner la branche applicative et déclencher la chaîne**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
 git checkout main && git merge --no-ff feat/ci-registry-locale && git push
 ```
 
-- [ ] **Étape 8 : Suivre la chaîne complète**
+- [x] **Étape 8 : Suivre la chaîne complète**
 
 ```bash
 gh run watch --repo nbeny/UrbanConnct
@@ -1918,7 +1918,7 @@ Puis, dans l'ordre :
 | Les pods portent la bonne image | `kubectl -n urbanconnect get deploy backend -o jsonpath='{..image}'` | `10.0.0.130:5000/urbanconnect-backend:sha-…` |
 | La migration a tourné avant | `kubectl -n urbanconnect get job backend-migrate -o jsonpath='{.status.succeeded}'` | `1` |
 
-- [ ] **Étape 9 : Vérifier qu'une variable se propage**
+- [x] **Étape 9 : Vérifier qu'une variable se propage**
 
 Le test qui valide la moitié config de la chaîne, et qu'aucune autre étape ne
 couvre.
@@ -1947,7 +1947,7 @@ récemment redémarré.
 git revert --no-edit HEAD && git push
 ```
 
-- [ ] **Étape 10 : Vérifier que la purge borne le registre**
+- [x] **Étape 10 : Vérifier que la purge borne le registre**
 
 Après quelques livraisons :
 
@@ -1966,7 +1966,7 @@ Attendu : au plus `10`.
 - Modify: `infra/README.md`
 - Modify: `infra/ansible/playbooks/30-urbanlink-images.yml` (en-tête)
 
-- [ ] **Étape 1 : Constater le manque (l'échec attendu)**
+- [x] **Étape 1 : Constater le manque (l'échec attendu)**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -1977,7 +1977,7 @@ Attendu : `0` partout. Aucun des trois READMEs ne mentionne Argo CD, alors
 qu'il pilote tout le déploiement — un lecteur du dépôt ne peut pas deviner qui
 fait quoi.
 
-- [ ] **Étape 2 : Écrire la section dans `kube/README.md`**
+- [x] **Étape 2 : Écrire la section dans `kube/README.md`**
 
 ```markdown
 ## Livraison — qui fait quoi
@@ -2009,7 +2009,7 @@ rejouer le playbook 31 — sinon Kratos démarre et seule la connexion Google
 échoue.
 ```
 
-- [ ] **Étape 3 : Mettre à jour la section « Charges applicatives » du README racine**
+- [x] **Étape 3 : Mettre à jour la section « Charges applicatives » du README racine**
 
 Ajouter, après le paragraphe sur l'ingress :
 
@@ -2021,7 +2021,7 @@ dans le registre du lab, et écrit ici le tag et la configuration. Détail du
 partage des rôles dans [`kube/README.md`](kube/README.md).
 ```
 
-- [ ] **Étape 4 : Réécrire l'en-tête de `30-urbanlink-images.yml`**
+- [x] **Étape 4 : Réécrire l'en-tête de `30-urbanlink-images.yml`**
 
 Après la première ligne de description, ajouter :
 
@@ -2038,7 +2038,7 @@ Après la première ligne de description, ajouter :
 # celles qu'Argo epingle.
 ```
 
-- [ ] **Étape 5 : Relancer la vérification de l'étape 1**
+- [x] **Étape 5 : Relancer la vérification de l'étape 1**
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra
@@ -2047,7 +2047,7 @@ grep -ric "argo" README.md kube/README.md
 
 Attendu : une valeur non nulle pour les deux.
 
-- [ ] **Étape 6 : Commit**
+- [x] **Étape 6 : Commit**
 
 ```bash
 git add README.md kube/README.md ansible/playbooks/30-urbanlink-images.yml
@@ -2089,3 +2089,64 @@ plus) ne joignent cette machine.
 `images` bâtit donc les trois images en parallèle. C'est ce qui impose le job
 `registry-gc` distinct de la tâche 9 : un ramasse-miettes concurrent d'un push
 supprime des blobs en cours de téléversement.
+
+---
+
+## Exécution — 2026-09-01, ce que le plan n'avait pas prévu
+
+Les douze tâches sont faites. Quatre écarts, tous mesurés sur la machine.
+
+### 1. Le démon Docker de `ci-runner` refusait le registre qu'il héberge
+
+Le plan annonçait « le push réussit (Docker traite les adresses IP privées comme
+des registres non sécurisés par défaut) ». **C'est faux.** Docker 29.7.2 ne tient
+pour non sécurisé que `127.0.0.0/8` ; `docker push 10.0.0.130:5000/alpine:test`
+échoue sur `http: server gave HTTP response to HTTPS client` — **le message exact
+du défaut containerd**, pour une cause distincte et un fichier différent. De quoi
+croire que le correctif containerd n'a pas pris.
+
+⇒ Le rôle `docker` gère désormais `insecure-registries` dans
+`/etc/docker/daemon.json` (fusion, jamais écrasement : le fichier porte déjà la
+rotation des journaux), et `35-ci-registry.yml` applique `docker` **avant**
+`registry`. `docker_containerd_is_cri: false` sur `ci_nodes` évite d'y chercher
+une section registry dans un `config.toml` que rien ne génère.
+
+### 2. `20-debian-k8s.yml` n'avait pas de tags — désormais si
+
+Rejouer le rôle `docker` sur `urbanlink` imposait de retraverser le rôle
+`kubernetes`, donc kubeadm, sur une VM dont l'etcd fsync à 3,7 ms. Les trois
+rôles portent leur nom en tag ; la garde de distribution est en `always`.
+
+### 3. `git diff --quiet` puis `commit -am` ne voyaient pas un fichier NEUF
+
+Le job `deploy` aurait annoncé « rien à publier » et rendu **0** sur un ajout de
+configuration parfaitement réel — la panne la plus muette de toute la chaîne.
+C'est `git add -A` puis `git diff --cached --quiet`.
+
+### 4. La vérification du § 5 du plan (« une seule valeur ») est trop naïve
+
+`kustomize build | grep -o "kratos-config[a-z0-9-]*" | sort -u` rend **deux**
+valeurs, et c'est normal : `kratos-config` nu y est un **nom de volume**
+(`volumes[].name`, `volumeMounts[].name`), pas une référence. La bonne
+vérification énumère les `configMap.name` / `configMapRef.name` — faite en
+cluster, elle rend les six noms hashés et rien d'autre.
+
+### Fausse piste coûteuse, à ne pas refaire
+
+Un `grep -c $'\r'` sous Git Bash **compte toutes les lignes** (le motif se réduit
+à la chaîne vide) : de quoi conclure que tout `config/` est commité en CRLF, ce
+qui aurait cassé `envs:` (`DB_HOST=postgres\r`). Mesure Python sur les blobs :
+**LF partout, dans les deux dépôts.** Seule la copie de travail Windows est en
+CRLF, et Argo lit le blob. Le commentaire de `.gitattributes` du dépôt
+applicatif — « `config/` est commité en CRLF » — est faux, et c'est lui qui
+lance sur cette piste.
+
+### Ce qui bloquait vraiment le déclenchement
+
+La porte `Backend (NestJS)` était rouge depuis le 2026-08-31 sur **7 tests**,
+sans aucun rapport avec cette chaîne. Le plus grave : `PLATFORM_FEE_RATE`,
+retiré de `stripe.constants.ts` par `7d57b9eb`, était toujours importé par
+`scripts/dac7-backfill-core.ts` — hors du `tsconfig`, donc invisible à `tsc`.
+La constante valait `undefined`, donc `NaN`, donc **toute pré-autorisation
+partait en exception** dans le backfill DAC7. Corrigé sur la branche
+`fix/porte-backend-rouge` du dépôt applicatif.
