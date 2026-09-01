@@ -49,6 +49,19 @@ grafana:
       label: grafana_datasource
       labelValue: "1"
       searchNamespace: {{ k8s_observability_namespace }}
+      # ⚠️ Le chart pose SA PROPRE source « Prometheus », uid `prometheus` --
+      # exactement le nom et l'uid que declare grafana-datasources.yaml. Grafana
+      # refuse deux sources de meme nom : le provisionnement rend 500, et le
+      # sidecar abandonne apres ses tentatives. Les QUATRE sources du depot
+      # applicatif (Prometheus appli, Prometheus mesh, Tempo, Loki) restaient
+      # alors absentes, sans aucun message dans l'UI -- seuls les tableaux de
+      # bord, eux, apparaissaient. Mesure le 2026-09-01 :
+      #   ERROR ... /api/admin/provisioning/datasources/reload: too many 500
+      #
+      # La source de verite est le depot applicatif, pas le chart : c'est donc
+      # celle du chart qui s'efface. Son Alertmanager, lui, ne fait doublon avec
+      # rien et reste actif.
+      defaultDatasourceEnabled: false
     dashboards:
       enabled: true
       # Tableaux de bord UrbanLink, etiquetes `grafana_dashboard: "1"`.

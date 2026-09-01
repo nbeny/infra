@@ -103,6 +103,44 @@ ansible-playbook playbooks/33-urbanlink-edge.yml               # attendu : chang
 
 ---
 
+## Le piège qui bloque tout le rôle : deux bouncers CrowdSec
+
+Le rôle valide la configuration nginx **complète** avant de la publier, et son
+`rescue` retire tout ce qu'il a posé si `nginx -t` échoue. Une configuration
+déjà cassée pour une raison étrangère au rôle fait donc échouer le playbook
+*et* déposer les vhosts — l'inverse de ce qu'on veut.
+
+C'est arrivé le 2026-09-01 :
+
+```
+nginx: [emerg] "lua_package_path" directive is duplicate
+       in /etc/nginx/conf.d/crowdsec_nginx.conf:1
+```
+
+**Deux** bouncers CrowdSec déclaraient `lua_package_path` dans
+`/etc/nginx/conf.d/` :
+
+| Fichier | Bouncer | État |
+|---|---|---|
+| `10-crowdsec_nginx.conf` | `crowdsec-openresty-bouncer` v1.1.3 | **Le vrai.** `cscli bouncers list` le montre en train de puller. |
+| `crowdsec_nginx.conf` | `crowdsec-nginx-bouncer` v1.2.2 (paquet Debian) | Déposé par `apt` le 2026-08-31. Enregistré dans CrowdSec mais **jamais un seul pull**. |
+
+Le second a été écarté (`/root/crowdsec_nginx.conf.disabled-2026-09-01`), pas
+supprimé. Conséquence à connaître : `nginx -t` échouait — donc **tout
+rechargement** — depuis le 2026-08-31 sans que rien ne le signale, openresty
+continuant de servir la configuration chargée en mémoire. Le premier
+redémarrage du service aurait fait tomber `nbeny.fr` **et** `urbanlink.fr`.
+
+Si le paquet `crowdsec-nginx-bouncer` est réinstallé ou mis à jour, il
+redéposera son fichier. Vérifier alors :
+
+```bash
+grep -rl lua_package_path /etc/nginx/conf.d/     # doit rendre UN seul fichier
+/usr/local/openresty/nginx/sbin/nginx -t
+```
+
+---
+
 ## Revenir en arrière
 
 Tout refermer, sans Ansible :
