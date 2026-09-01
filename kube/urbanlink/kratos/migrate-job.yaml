@@ -5,6 +5,15 @@ metadata:
   namespace: urbanconnect
   labels:
     app: kratos-migrate
+  # ⚠️ Hook Argo PreSync. La ConfigMap kratos-config etant desormais generee
+  # avec un suffixe de hash, la reference montee par ce Job change des que la
+  # configuration de Kratos change -- donc sa spec change, donc `apply`
+  # echouerait sur l'immuabilite des champs d'un Job.
+  #
+  # Et la migration doit preceder le demarrage de Kratos.
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 5
   template:
