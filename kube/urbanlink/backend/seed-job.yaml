@@ -23,6 +23,28 @@
 #  ⚠️ Image DEDIEE, et non celle du backend : l'image de production n'a ni
 #  `ts-node`, ni `scripts/`, ni `front/src/` -- dont le seed a besoin tous les
 #  trois. Voir l'en-tete de `Dockerfile.seed` (depot applicatif, a la racine).
+#
+#  ⚠️ **MinIO N'EST PAS PURGE, et les images s'y accumulent.** Le seed vide la
+#  base mais pas le bucket : les objets de l'execution precedente deviennent
+#  orphelins et restent. Mesure le 2026-09-01 apres trois passages : 10 319
+#  objets dont **6 722 orphelins, 570,8 Mo**.
+#
+#  Le seed ne les supprime pas lui-meme, et ce n'est pas un oubli : ses prefixes
+#  (`profiles/avatars/`, `profiles/covers/`) sont les MEMES que ceux des envois
+#  reels des membres. Une purge par prefixe effacerait la photo d'un vrai
+#  compte. Le seul critere sur est « aucune ligne de la base ne le designe ».
+#
+#  Purge : lister les cles referencees (users.avatar / .coverPhoto,
+#  profiles.coverPhoto / .cv, conversations.avatar, messages.attachmentUrl,
+#  order_items.imageUrl, local_events.imageUrls, artefact_images.url + .key,
+#  post_images.url + .key, user_project_images.url + .path), les comparer a
+#  `mc ls --recursive`, supprimer la difference.
+#  ⚠️ Ecarter les valeurs pointant un AUTRE hote (les avatars Google sont des
+#  URL externes) : les normaliser en cles ferait passer des objets bien
+#  references pour des orphelins. `backTs/src/modules/storage/object-key.util.ts`
+#  (`toObjectKey`) fait exactement cette normalisation.
+#  ⚠️ Ne supprimer que les objets d'un certain age : un envoi en cours n'a pas
+#  encore sa ligne en base.
 # =============================================================================
 apiVersion: batch/v1
 kind: Job
