@@ -1,0 +1,77 @@
+# ============================================================================
+#  Prometheus APPLICATIF -- PRODUCTION (Kubernetes, namespace urbanconnect)
+# ----------------------------------------------------------------------------
+#  ⚠️ IL Y A DEUX PROMETHEUS SUR CE CLUSTER. Ne pas les confondre :
+#
+#    | ou                    | quoi                     | expose sous          |
+#    |-----------------------|--------------------------|----------------------|
+#    | istio-system          | metriques du MESH        | prometheus.urbanlink.fr
+#    |   (addon Istio,       | (Envoy : latence, codes  |                      |
+#    |    installe par       |  HTTP, mTLS, trafic      |                      |
+#    |    roles/kubernetes)  |  inter-services)         |                      |
+#    | urbanconnect          | metriques METIER du      | metrics.urbanlink.fr |
+#    |   (ce fichier)        | backend (prom-client) +  |                      |
+#    |                       | sante du collecteur      |                      |
+#
+#  POURQUOI DEUX, alors que le mesh en a deja un. L'addon Istio decouvre ses
+#  cibles par les annotations `prometheus.io/scrape` des pods -- un mecanisme
+#  qui ne sait PAS porter d'en-tete d'authentification. Or en production
+#  `GET /metrics` du backend exige un `Authorization: Bearer <METRICS_TOKEN>`
+#  et repond 403 sans lui (MetricsController : « l'absence de jeton FERME
+#  l'endpoint plutot que de l'ouvrir »). Annoter le pod donnerait donc une
+#  cible perpetuellement en erreur.
+#
+#  L'alternative -- retirer le jeton pour plaire au collecteur -- reviendrait a
+#  publier la forme interne de l'application (noms d'operations GraphQL, tables,
+#  volumetrie metier) a tout ce qui atteint le pod. Un second Prometheus coute
+#  ~300 Mo ; c'est moins cher.
+#
+#  Les deux sont branches cote a cote dans Grafana (datasources.yaml), qui reste
+#  la seule fenetre a ouvrir.
+# ============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: urbanlink
+    environment: production
+
+scrape_configs:
+  # --- Backend applicatif --------------------------------------------------
+  # Le Service `backend` est un ClusterIP : le resoudre en `backend:4000`
+  # donnerait UNE cible qui equilibre entre les replicas -- donc des series qui
+  # sautent d'un pod a l'autre, sans qu'on puisse jamais dire lequel derive.
+  # `dns_sd_configs` en mode `A` sur le Service headless resout chaque pod, et
+  # chacun devient sa propre cible.
+  - job_name: urbanconnect-backend
+    metrics_path: /metrics
+    scheme: http
+    # Le jeton est monte depuis le Secret `urbanconnect-secrets` par
+    # `prometheus/statefulset.yaml` du depot infra. Jamais en clair ici : ce
+    # fichier est versionne.
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/METRICS_TOKEN
+    dns_sd_configs:
+      - names: ['backend-headless.urbanconnect.svc.cluster.local']
+        type: A
+        port: 4000
+    relabel_configs:
+      - target_label: service
+        replacement: urbanconnect-backend
+      # `__meta_dns_name` vaut le nom interroge, pas l'adresse resolue :
+      # l'instance utile est l'IP du pod, dans __address__.
+      - source_labels: [__address__]
+        target_label: instance
+
+  # --- Sante du collecteur OTLP -------------------------------------------
+  # Un collecteur qui perd des lots doit pouvoir le dire. Sans cette cible, une
+  # saturation memoire se traduit par « il manque des traces » et rien d'autre.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector.urbanconnect.svc.cluster.local:8888']
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

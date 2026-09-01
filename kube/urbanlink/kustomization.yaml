@@ -166,3 +166,61 @@ resources:
   #   appliquee separement par playbooks/31-urbanlink-deploy.yml.
   - ingress/gateway.yaml
   - ingress/virtualservices.yaml
+
+# ============================================================================
+#  ConfigMaps de configuration applicative
+# ============================================================================
+# Les fichiers de config/ viennent du depot APPLICATIF (UrbanConnct), a cote
+# du docker-compose.yml qui monte les memes en dev. C'est ce qui empeche un
+# reglage de diverger entre les deux environnements -- il n'existe qu'une fois.
+# La CI de ce depot-la les recopie ici a chaque livraison sur main.
+#
+# ⚠️ **Le suffixe de hash est le mecanisme, pas un effet de bord.** Le nom
+# genere depend du CONTENU (kratos-config-7f3d9k) : changer un fichier change
+# le nom, kustomize reecrit toutes les references dans le meme build, la spec
+# des Deployments change, et les pods redemarrent. C'est la seule facon
+# d'obtenir un redemarrage automatique -- modifier une ConfigMap en place n'en
+# provoque aucun.
+#
+# ⚠️ Consequence a connaitre AVANT de toucher a ces fichiers : un changement
+# dans postgres-init redemarre Postgres, un changement dans nominatim.env
+# redemarre Nominatim (33 Go d'OSM importes, le PVC est conserve mais le
+# redemarrage est long).
+#
+# ⚠️ **`envs:` et non `files:` pour les deux fichiers d'environnement.**
+# pgbouncer et nominatim les consomment par `envFrom: configMapRef:`, qui
+# attend une ConfigMap dont CHAQUE CLE est une variable. `files:` produirait
+# une cle unique nommee comme le fichier, contenant tout son texte : le pod
+# echoue alors sur une variable absente alors qu'elle figure bien dedans.
+# Mesure sur la VM : pgbouncer refusait de demarrer sur « DB_HOST: Setup
+# pgbouncer config error! » avec DB_HOST=postgres present dans le fichier.
+#
+# ⚠️ **Liste explicite, kustomize n'acceptant pas de repertoire.** Deux ecarts
+# assumes par rapport a ce que produisait 31-urbanlink-deploy.yml, tous deux
+# sans effet fonctionnel :
+#   - CLAUDE.md n'entre plus dans kratos-config. Il y etait par accident,
+#     `--from-file=<repertoire>` prenant tout ce qu'il trouve.
+#   - Les sous-repertoires common/kratos/{email,email-templates,scripts}
+#     restent exclus. Ils l'etaient deja : --from-file ne recurse pas.
+# Une garde cote depot applicatif echouera si un fichier apparait dans config/
+# sans etre liste ici -- sans elle, l'ajout d'un fichier le laisserait
+# silencieusement hors du cluster.
+configMapGenerator:
+  - name: kratos-config
+    files:
+      - config/common/kratos/identity.schema.json
+      - config/common/kratos/oidc.google.jsonnet
+      - config/prod/kratos/kratos.yml
+  - name: postgres-init
+    files:
+      - config/common/postgres-init/create-databases.sh
+      - config/common/postgres-init/init-db.sql
+  - name: pgbouncer-config
+    envs:
+      - config/prod/pgbouncer/pgbouncer.env
+  - name: nominatim-config
+    envs:
+      - config/prod/nominatim/nominatim.env
+  - name: kibana-dashboards
+    files:
+      - config/common/kibana/dashboards.ndjson

@@ -1,0 +1,62 @@
+# ============================================================================
+#  Loki -- stockage des journaux applicatifs, recus en OTLP via le collecteur
+# ----------------------------------------------------------------------------
+#  COMMUN aux deux environnements : meme raison que tempo.yaml, aucun reglage
+#  ne depend de l'environnement pour un deploiement mono-noeud.
+#
+#  Consommateurs :
+#    - Kubernetes : ConfigMap `observability-config` -> observability/loki/
+#    - docker compose : ./observability/loki.yaml (profil `observability`)
+# ============================================================================
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Les journaux d'un conteneur redemarre peuvent arriver legerement dans le
+  # passe ; le defaut les rejetterait purement et simplement -- et on perdrait
+  # precisement les lignes qui expliquent le redemarrage.
+  reject_old_samples: false
+
+  # Sans cette option, les attributs de ressource OTLP (service.name,
+  # deployment.environment.name) ne deviennent pas des etiquettes Loki et il
+  # devient impossible de filtrer par service dans Grafana. C'est le pendant du
+  # processeur `resource` du collecteur : l'un les pose, l'autre les indexe.
+  # Retirer l'un des deux rend l'autre inutile, silencieusement.
+  otlp_config:
+    resource_attributes:
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - deployment.environment.name
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
