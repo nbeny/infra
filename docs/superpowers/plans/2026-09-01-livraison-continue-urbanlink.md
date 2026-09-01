@@ -730,11 +730,17 @@ git commit -m "feat(containerd): un registre en clair etait injoignable, et le h
 
 ```bash
 cd C:/Users/nbeny/Documents/GitHub/infra/kube/urbanlink
-kustomize build . | grep -c "kind: ConfigMap"
+kubectl kustomize . | grep -c "kind: ConfigMap"
 ```
 
-Attendu : `0`. Aucune ConfigMap ne sort du build aujourd'hui — elles sont
-toutes créées hors kustomize, par `31-urbanlink-deploy.yml`.
+Attendu : **`1`**, et non `0`. ⚠️ Cette ConfigMap-là est
+`oathkeeper/configmap.yaml`, déjà listée en ressource : elle porte les règles
+d'accès d'Oathkeeper, elle ne vient pas de `config/` et n'a rien à voir avec
+cette tâche. Aucune des cinq ConfigMaps de configuration applicative ne sort du
+build aujourd'hui — elles sont toutes créées hors kustomize, par
+`31-urbanlink-deploy.yml`.
+
+⇒ **Le compte attendu après cette tâche est donc `6`, pas `5`.**
 
 - [ ] **Étape 2 : Déposer une première copie de `config/`**
 
@@ -746,6 +752,13 @@ cd C:/Users/nbeny/Documents/GitHub/infra
 mkdir -p kube/urbanlink/config
 cp -r C:/Users/nbeny/Documents/GitHub/UrbanConnct/config/common kube/urbanlink/config/
 cp -r C:/Users/nbeny/Documents/GitHub/UrbanConnct/config/prod   kube/urbanlink/config/
+# ⚠️ La documentation ne part PAS dans le cluster et n'a rien a faire ici.
+# `config/common/kratos/CLAUDE.md` et `config/common/kibana/README.md` ne sont
+# montes par rien (ils ne figurent dans aucun configMapGenerator) : les copier
+# n'ajouterait que du bruit -- et CLAUDE.md documente le format JSON du bloc
+# `providers` de Kratos avec un exemple contenant les chaines `GOCSPX-` et
+# `apps.googleusercontent.com`, ce qui declenche la garde ci-dessous pour rien.
+find kube/urbanlink/config -name CLAUDE.md -o -name README.md | xargs -r rm
 ```
 
 Vérifier qu'aucun secret réel n'y entre :
@@ -754,11 +767,19 @@ Vérifier qu'aucun secret réel n'y entre :
 grep -rn "GOCSPX-\|apps.googleusercontent.com" kube/urbanlink/config/ | grep -v "CHANGE_ME\|REPLACE"
 ```
 
-Attendu : aucune sortie. Les identifiants Google réels vivent dans le Secret,
-pas dans `config/` — les fichiers ne portent que des placeholders.
+Attendu : aucune sortie.
 
 ⚠️ Si cette commande renvoie quelque chose, **arrêter** : un identifiant réel
 s'apprête à être commité dans un dépôt git.
+
+⚠️ **Ne pas relâcher la garde sur un faux positif sans avoir lu la ligne.**
+Constaté le 2026-09-01 sur `config/common/kratos/CLAUDE.md` : le `client_id` y
+vaut `…apps.googleusercontent.com` — une ellipse, aucun identifiant — et le
+`client_secret` vaut `GOCSPX-le-vrai-secret`, c'est-à-dire l'étiquette
+« le-vrai-secret », pas une valeur. C'était bien de la documentation. La
+suppression ci-dessus retire la cause plutôt que d'assouplir la garde ; élargir
+le filtre `CHANGE_ME|REPLACE` aurait au contraire ouvert la porte au jour où un
+vrai secret passerait.
 
 - [ ] **Étape 3 : Écrire le `configMapGenerator`**
 
@@ -831,7 +852,7 @@ cd C:/Users/nbeny/Documents/GitHub/infra/kube/urbanlink
 kustomize build . | grep -c "kind: ConfigMap"
 ```
 
-Attendu : `5`.
+Attendu : `6` — les cinq du generator, plus `oathkeeper/configmap.yaml`.
 
 - [ ] **Étape 5 : Vérifier que les références sont réécrites**
 
@@ -1653,8 +1674,16 @@ Dans `.github/workflows/ci.yml`, entre l'étape « Épingler les trois images »
         run: |
           set -euo pipefail
           mkdir -p infra/kube/urbanlink/config
-          rsync -a --delete config/common/ infra/kube/urbanlink/config/common/
-          rsync -a --delete config/prod/   infra/kube/urbanlink/config/prod/
+          # ⚠️ La documentation reste ici. CLAUDE.md et README.md ne sont montes
+          # par rien (aucun configMapGenerator ne les liste) : les copier
+          # n'ajouterait que du bruit dans le depot d'infrastructure. Et le
+          # CLAUDE.md de kratos documente le format du bloc `providers` avec un
+          # exemple contenant `GOCSPX-` et `apps.googleusercontent.com` -- de
+          # quoi declencher pour rien la garde a secrets de ce depot-la.
+          rsync -a --delete --exclude=CLAUDE.md --exclude=README.md \
+            config/common/ infra/kube/urbanlink/config/common/
+          rsync -a --delete --exclude=CLAUDE.md --exclude=README.md \
+            config/prod/   infra/kube/urbanlink/config/prod/
 ```
 
 Et modifier le message de commit de l'étape « Publier le bump » :
