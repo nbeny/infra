@@ -534,6 +534,14 @@ confort : ce stack a trois Jobs et un pod `hostNetwork`, que des sidecars
 casseraient. Détail de la correspondance Traefik → Istio, et des deux
 régressions assumées (CrowdSec, ACME), dans [`kube/README.md`](kube/README.md).
 
+**Le déploiement est piloté par Argo CD**, qui suit `master` de ce dépôt et
+réconcilie `kube/urbanlink/`. La CI du dépôt applicatif n'exécute aucun
+`kubectl` sur les charges de travail : elle construit les images, les pousse
+dans le registre du lab (`ansible/roles/registry`, sur la VM `ci-runner`), et
+écrit **ici** le tag et la configuration. Un `git push` sur `main` d'UrbanConnct
+suffit donc à mettre le cluster à jour. Partage des rôles détaillé dans
+[`kube/README.md`](kube/README.md).
+
 ### Sécurité
 
 [`docs/audit-securite.md`](docs/audit-securite.md) est l'audit du nœud, réalisé

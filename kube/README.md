@@ -9,6 +9,42 @@ application.
 
 ---
 
+## Livraison — qui fait quoi
+
+Un `git push` sur `main` du dépôt applicatif suffit. Le partage des rôles :
+
+| Ce qui change | Qui l'applique | Automatique |
+|---|---|---|
+| Code applicatif | CI → registre du lab → bump du tag ici → Argo CD | oui |
+| Variables de `config/` | CI → copie dans `urbanlink/config/` → `configMapGenerator` → Argo CD | oui |
+| Manifests `urbanlink/**` | Argo CD, sur push `master` | oui |
+| Secret `urbanconnect-secrets` | `31-urbanlink-deploy.yml` | non — `secrets.env` n'est pas versionné |
+| `AuthorizationPolicy` de la passerelle | `31-urbanlink-deploy.yml` | non — autre namespace |
+| vhosts nginx du nœud PVE | `33-urbanlink-edge.yml` | non |
+
+**Le redémarrage des pods vient du suffixe de hash du `configMapGenerator`** :
+le nom de la ConfigMap dépend de son contenu, donc la spec du Deployment change,
+donc les pods redémarrent. Modifier une ConfigMap en place n'en provoque aucun —
+c'est pour ça que la propagation de `config/` et le redémarrage sont le **même**
+mécanisme, et pas deux.
+
+**Les images vivent dans un registre local à la VM `ci-runner`**
+(`ansible/roles/registry`), et non sur GHCR : le plan GitHub Free plafonne les
+paquets privés à 500 Mo, que le premier build dépasse.
+
+⚠️ **Un `kubectl apply` manuel sur une ressource gérée par Argo CD est annulé,
+et `apply` répond quand même « configured ».** Le signe :
+`app.kubernetes.io/instance: urbanlink` dans les labels. Toute modification de
+manifest passe par un commit ici.
+
+⚠️ **Un seul endroit où `config/` ne se propage pas entièrement** : le bloc
+`providers` de `config/prod/kratos/kratos.yml` sert de gabarit à
+`KRATOS_OIDC_PROVIDERS` du Secret. Changer les fournisseurs OIDC impose de
+rejouer le playbook 31 — sinon Kratos démarre et seule la connexion Google
+échoue, sans un mot dans les journaux.
+
+---
+
 ## `urbanlink/`
 
 ### Provenance

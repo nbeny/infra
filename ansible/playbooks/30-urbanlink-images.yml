@@ -2,6 +2,20 @@
 # Construit les trois images applicatives UrbanLink sur la VM cible et les rend
 # visibles par kubelet.
 #
+# ⚠️ **CE PLAYBOOK EST UN CHEMIN D'AMORCAGE, PLUS LE CHEMIN NORMAL.**
+# Depuis le 2026-09-01, la CI du depot applicatif construit les images sur la VM
+# ci-runner et les pousse dans le registre du lab ; Argo CD deploie le tag. Voir
+# kube/README.md.
+#
+# Il reste utile pour : un premier demarrage avant que la CI n'ait tourne, un
+# cluster reconstruit hors CI, ou un diagnostic ou l'on veut batir une image a
+# la main.
+#
+# ⚠️ Les images qu'il produit portent le tag `prod` et vivent dans le containerd
+# d'urbanlink, sans passer par le registre : ce ne sont donc PAS celles qu'Argo
+# epingle. Le kustomization pointe sur `10.0.0.130:5000/urbanconnect-*:sha-...`
+# -- construire ici ne change rien a ce qui tourne tant qu'Argo reconcilie.
+#
 # Elles n'existent dans aucun registre : le depot amont ne fournit que des
 # Dockerfiles. Sans elles, backend / frontend / temporal-worker restent en
 # ErrImageNeverPull.
