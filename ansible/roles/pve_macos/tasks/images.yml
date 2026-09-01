@@ -48,13 +48,26 @@
       p = sys.argv[1]
       d = plistlib.load(open(p, 'rb'))
       d['Misc']['Boot']['Timeout'] = {{ pve_macos_opencore_timeout }}
+      {% if pve_macos_boot_args | length > 0 %}
+      # 7C436110-AB2A-4BBB-A880-FE41995C9F82 est le GUID Apple qui porte les
+      # boot-args : OpenCore les injecte au noyau XNU a chaque demarrage.
+      # Renseigne seulement si pve_macos_boot_args a ete fourni -- un runner
+      # n'a personne pour lire un demarrage verbeux.
+      d.setdefault('NVRAM', {}).setdefault('Add', {})
+      boot_key = '7C436110-AB2A-4BBB-A880-FE41995C9F82'
+      d['NVRAM']['Add'].setdefault(boot_key, {})['boot-args'] = '{{ pve_macos_boot_args }}'
+      {% endif %}
       plistlib.dump(d, open(p, 'wb'))
-      print('Timeout =', plistlib.load(open(p, 'rb'))['Misc']['Boot']['Timeout'])
+      out = plistlib.load(open(p, 'rb'))
+      print('Timeout =', out['Misc']['Boot']['Timeout'])
+      print('boot-args =', out.get('NVRAM', {}).get('Add', {})
+            .get('7C436110-AB2A-4BBB-A880-FE41995C9F82', {})
+            .get('boot-args', '(aucun)'))
       PY
       sync
-      touch '{{ pve_macos_work_dir }}/.opencore-timeout-set'
+      touch '{{ pve_macos_work_dir }}/.opencore-configured'
     executable: /bin/bash
-    creates: "{{ pve_macos_work_dir }}/.opencore-timeout-set"
+    creates: "{{ pve_macos_work_dir }}/.opencore-configured"
 
 # --- Image de recuperation macOS -------------------------------------------
 

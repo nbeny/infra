@@ -57,3 +57,92 @@
   register: pve_macos_storage_check
   changed_when: false
   failed_when: pve_macos_storage_check.rc != 0
+
+# ---------------------------------------------------------------------------
+#  DHCP sur le bridge du lab, pour l'environnement de recuperation de macOS.
+#
+#  L'installeur macOS ne se configure qu'en DHCP : l'ecran de reglage IP
+#  manuel n'existe qu'une fois le systeme installe, et macOS n'a pas de
+#  cloud-init. Sans bail, l'invite n'a aucune route et l'installeur reste
+#  bloque -- il telecharge ~12 Go chez Apple.
+#
+#  ATTENTION : ce bloc deborde du perimetre macOS. dnsmasq sert le bridge du
+#  lab en entier, pas seulement la VM 9200. Il est volontairement en DHCP
+#  seul (`port=0`) pour ne pas exposer un resolveur DNS de plus sur 10.0.0.1,
+#  et sa plage evite les IPs statiques distribuees a la main.
+#  Desactivable par pve_macos_dhcp_enabled=false.
+# ---------------------------------------------------------------------------
+
+- name: Servir le DHCP du bridge du lab
+  when: pve_macos_dhcp_enabled | bool
+  block:
+
+    - name: Installer dnsmasq
+      ansible.builtin.apt:
+        name: dnsmasq
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: "Configurer dnsmasq sur {{ pve_macos_dhcp_interface }} (DHCP seul)"
+      ansible.builtin.copy:
+        content: |
+          # {{ ansible_managed }} -- role pve_macos.
+          # DHCP pour les invites macOS en cours d'installation. La plage
+          # {{ pve_macos_dhcp_range_start }}-{{ pve_macos_dhcp_range_end }}
+          # laisse libres les IPs statiques deja attribuees a la main.
+
+          # port=0 : DHCP uniquement. Sans ca dnsmasq ouvre aussi un resolveur
+          # DNS sur {{ pve_macos_dhcp_gateway }}:53, que personne n'a demande.
+          # Les invites recoivent {{ pve_macos_dhcp_dns }} en direct.
+          port=0
+
+          interface={{ pve_macos_dhcp_interface }}
+          bind-interfaces
+          dhcp-range={{ pve_macos_dhcp_range_start }},{{ pve_macos_dhcp_range_end }},{{ pve_macos_dhcp_netmask }},{{ pve_macos_dhcp_lease_time }}
+          dhcp-option=option:router,{{ pve_macos_dhcp_gateway }}
+          dhcp-option=option:dns-server,{{ pve_macos_dhcp_dns }}
+        dest: /etc/dnsmasq.d/lab-macos.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Redemarrer dnsmasq
+
+    - name: Activer et demarrer dnsmasq
+      ansible.builtin.systemd:
+        name: dnsmasq
+        enabled: true
+        state: started
+
+    # -----------------------------------------------------------------------
+    #  ufw : le DHCP arrive sur le noeud lui-meme, pas en transit.
+    #
+    #  La politique d'entree du noeud est en deny. Un DISCOVER (UDP 67) est
+    #  donc jete avant d'atteindre dnsmasq -- tcpdump voit la requete, le
+    #  journal de dnsmasq reste muet. La regle de forward, elle, n'est utile
+    #  que si la politique routee passe un jour en deny : elle documente le
+    #  besoin autant qu'elle l'autorise.
+    # -----------------------------------------------------------------------
+
+    - name: Verifier si ufw est actif
+      ansible.builtin.command: ufw status
+      register: pve_macos_ufw_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Autoriser le DHCP entrant sur {{ pve_macos_dhcp_interface }}"
+      when: "'Status: active' in pve_macos_ufw_status.stdout"
+      community.general.ufw:
+        rule: allow
+        proto: udp
+        port: "67:68"
+        direction: in
+        interface: "{{ pve_macos_dhcp_interface }}"
+        comment: DHCP des invites macOS en cours d'installation
+
+    - name: Autoriser le trafic route des invites du lab
+      when: "'Status: active' in pve_macos_ufw_status.stdout"
+      community.general.ufw:
+        rule: allow
+        direction: routed
+        from_addr: "{{ pve_macos_dhcp_network }}"

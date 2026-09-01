@@ -96,12 +96,51 @@ pve_macos_memory: 8192
 # runtime de simulateur ajoute 8 a 12 Go.
 pve_macos_disk_size: 200
 
-# macOS embarque un pilote VirtIO reseau depuis Big Sur. Si l'interface
-# n'apparait pas dans Preferences Systeme apres l'installation, basculer sur
-# `vmxnet3` : c'est le repli connu.
-pve_macos_net_model: virtio
+# vmxnet3 : mesure le 2026-09-01, l'invite obtient son bail DHCP et sort sur
+# Internet des le mode Recovery. macOS embarque bien un pilote VirtIO reseau
+# depuis Big Sur, mais l'environnement de recuperation ne le charge pas
+# toujours -- et sans interface, l'installeur ne peut rien telecharger.
+pve_macos_net_model: vmxnet3
 
 # --- Comportement -----------------------------------------------------------
 # `true` detruit et reconstruit le template. Sans effet utile apres
 # l'installation graphique : la reconstruction la fait recommencer a zero.
 pve_macos_force: false
+
+# --- DHCP du bridge du lab (mode Recovery / installation) -------------------
+# L'environnement de recuperation de macOS ne configure une interface que par
+# DHCP : il n'a pas d'ecran de reglage IP manuel, et il n'existe pas de
+# cloud-init sur macOS. Sans bail, l'installeur ne telecharge rien.
+#
+# Le role pose donc un dnsmasq. C'est un service qui deborde du perimetre
+# macOS : il sert le bridge du lab en entier. Il est en DHCP seul (`port=0`,
+# pas de resolveur DNS expose) et la plage evite les IPs statiques deja
+# distribuees a la main :
+#
+#   10.0.0.102  urbanlink (DNAT SSH)
+#   10.0.0.111  urbanlink
+#   10.0.0.130  ci-runner
+#   10.0.0.140  macOS CI (terraform)
+#
+# Mettre a `false` sur un noeud qui a deja un serveur DHCP sur ce bridge :
+# deux DHCP sur le meme segment se marchent dessus.
+pve_macos_dhcp_enabled: true
+pve_macos_dhcp_interface: "{{ lab_bridge | default('vmbr1') }}"
+pve_macos_dhcp_range_start: 10.0.0.200
+pve_macos_dhcp_range_end: 10.0.0.250
+pve_macos_dhcp_netmask: 255.255.255.0
+pve_macos_dhcp_lease_time: 12h
+pve_macos_dhcp_gateway: "{{ lab_gateway | default('10.0.0.1') }}"
+pve_macos_dhcp_dns: "1.1.1.1,9.9.9.9"
+pve_macos_dhcp_network: "{{ lab_subnet | default('10.0.0.0/24') }}"
+
+# --- Boot-args du noyau macOS -----------------------------------------------
+# Injectes par OpenCore a chaque demarrage. Vide par defaut : un runner n'a
+# personne pour lire un demarrage verbeux. Pour diagnostiquer une panique,
+# rejouer le playbook avec :
+#
+#   -e pve_macos_boot_args='-v debug=0x100 keepsyms=1'
+#
+# `-v` affiche les logs du noyau, `debug=0x100` empeche le redemarrage
+# automatique sur panique, `keepsyms=1` garde les symboles dans la trace.
+pve_macos_boot_args: ""

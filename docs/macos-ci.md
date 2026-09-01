@@ -101,8 +101,10 @@ Le rôle [`pve_macos`](../ansible/roles/pve_macos/README.md) :
 1. **Refuse tout de suite** si l'OSK manque, ou si la version demandée exige
    AVX2 — plutôt que de laisser découvrir le problème trois heures plus tard
    devant une pomme figée.
-2. **Prépare le nœud** — `ignore_msrs=Y` (immédiat + persistant), `dmg2img`.
-   Sans `ignore_msrs`, l'invité panique avant même le logo Apple.
+2. **Prépare le nœud** — `ignore_msrs=Y` (immédiat + persistant), `dmg2img`,
+   et un **DHCP** (`dnsmasq`, plage `10.0.0.200-250`, DHCP seul sans DNS) sur
+   le bridge du lab. Sans `ignore_msrs`, l'invité panique avant même le logo
+   Apple ; sans DHCP, l'installeur n'a aucun réseau (voir § 4).
 3. **Récupère les images** — OpenCore v21 (dont il corrige le `Timeout`, voir
    plus bas) et l'image de récupération Apple, convertie en image brute.
 4. **Vérifie ce qu'Apple a réellement envoyé** — voir ci-dessous, ce n'est pas
@@ -165,13 +167,54 @@ Ouvrir **la console noVNC de la VM 9200** dans l'interface Proxmox, démarrer,
 puis :
 
 1. Dans le sélecteur OpenCore, choisir **macOS Base System**.
-2. **Utilitaire de disque** → afficher tous les périphériques → sélectionner le
-   disque VirtIO de 200 Go → **Effacer** → format **APFS**, schéma **Table de
-   partition GUID**, nom `Macintosh HD`.
-3. Quitter, **Installer macOS Monterey**, cibler `Macintosh HD`.
+2. **Partitionner le disque — l'étape à ne pas sauter.** Un disque brut n'est
+   pas proposé comme cible : si on lance l'installeur d'abord, sa sélection de
+   disque n'affiche que `macOS Base System` grisé, sans le moindre message
+   expliquant que les 200 Go existent mais sont vides. C'est le piège le plus
+   coûteux de ce runbook.
+
+   Au choix, **Utilitaire de disque** → afficher tous les périphériques →
+   disque VirtIO de 200 Go → **Effacer** → **APFS**, **Table de partition
+   GUID**, nom `Macintosh HD`.
+
+   Ou, plus sûr et vérifiable, **Utilitaires → Terminal** :
+
+   ```bash
+   diskutil list physical      # reperer le disque de 214.7 GB (= 200 Gio)
+   diskutil eraseDisk APFS "Macintosh HD" GPT /dev/disk0
+   ```
+
+   La sortie doit finir par `Finished erase on disk0`. Vérifier au passage que
+   le réseau est là — sans lui l'installeur ne téléchargera rien :
+
+   ```bash
+   ipconfig getifaddr en0      # une IP dans 10.0.0.200-250, servie par dnsmasq
+   ping -c 2 17.253.144.10     # un serveur Apple
+   ```
+
+3. **Désactiver la veille — sans ça l'installation ne finit pas.** Toujours
+   dans le Terminal de Recovery :
+
+   ```bash
+   pmset -a sleep 0 displaysleep 0 disksleep 0
+   pmset -g | grep -E 'sleep'   # doit afficher trois 0
+   ```
+
+   Le mode Recovery sort avec **`sleep 10`**. Le téléchargement dure deux
+   heures et personne ne touche la souris : la VM s'endort, l'installeur est
+   tué, et on retrouve le menu Recovery **sans le moindre message d'erreur** —
+   `/var/log/install.log` ne montre qu'un `Assertion TimedOut.
+   Type:InternalPreventSleep` suivi de `Display is turned off`. Mesuré le
+   2026-09-01 : perdu après 12 Go déjà téléchargés.
+
+   `pmset` se réinitialise à chaque démarrage du mode Recovery : le refaire
+   après chaque redémarrage tant que l'installation n'est pas finie.
+
+4. Quitter, **Réinstaller macOS Monterey**, cibler `Macintosh HD`.
+   Le téléchargement fait ~12 Go et annonce 2 à 3 h.
    La VM redémarre plusieurs fois : **toujours reprendre l'entrée `macOS
    Installer`** dans OpenCore jusqu'à la fin.
-4. Assistant de configuration : créer le compte administrateur en le nommant
+5. Assistant de configuration : créer le compte administrateur en le nommant
    **`nbeny`** (la valeur de `lab_admin_user`) — sinon l'inventaire Ansible ne
    tombera pas en face.
 
@@ -180,8 +223,11 @@ puis :
 Toujours dans la console graphique, quatre choses, sans lesquelles rien de la
 suite ne fonctionne :
 
-**a. IP statique** — il n'y a **pas de DHCP sur `vmbr1`** et pas de cloud-init
-sur macOS. Préférences Système → Réseau → Configurer IPv4 : Manuellement.
+**a. IP statique** — le `dnsmasq` du nœud sert un bail à l'installeur, mais
+c'est une béquille pour la phase d'installation : elle vient de la plage
+`10.0.0.200-250` et changera. Terraform et l'inventaire Ansible attendent une
+adresse fixe, et macOS n'a pas de cloud-init pour la poser.
+Préférences Système → Réseau → Configurer IPv4 : Manuellement.
 
 ```
 Adresse IP    10.0.0.140       (doit correspondre au champ `ip` de terraform.tfvars)
@@ -334,7 +380,11 @@ non-attendue.
 | Diagnostiquer une panique | Ajouter `-v` à `NVRAM > Add > 7C43…9F82 > boot-args` dans `config.plist` : le texte de la panique s'affiche à l'écran |
 | OpenCore ne démarre pas, OVMF refuse | Clés Secure Boot pré-chargées — `pre-enrolled-keys=0` |
 | L'installeur ne voit aucun disque | Images attachées en `media=cdrom` au lieu de disques |
-| Pas d'interface réseau dans Préférences Système | Basculer `net_model` sur `vmxnet3` |
+| Pas d'interface réseau dans Préférences Système | `net_model` doit valoir `vmxnet3` : le pilote VirtIO réseau n'est pas toujours chargé en mode Recovery |
+| **L'installeur ne propose que `macOS Base System`, grisé** | **Le disque de 200 Go est brut. Un disque non partitionné n'est pas une cible : l'effacer en APFS/GUID d'abord (§ 4)** |
+| L'installeur ne télécharge rien, reste sur « Loading installation information » | Pas de bail DHCP. `ipconfig getifaddr en0` dans le Terminal de Recovery ; côté nœud, `journalctl -u dnsmasq` doit montrer un `DHCPACK` |
+| **Retour au menu Recovery en pleine installation, sans erreur** | **Veille du mode Recovery (`sleep 10`). `pmset -a sleep 0 displaysleep 0 disksleep 0` avant de relancer (§ 4). Signature dans `/var/log/install.log` : `Assertion TimedOut. Type:InternalPreventSleep`** |
+| Le nœud ne répond pas au DHCP alors que dnsmasq tourne | La requête arrive **sur** le nœud, pas en transit : c'est la politique d'entrée d'ufw qui la jette, pas la politique de forward |
 | Aucun paquet CLT proposé par `softwareupdate` | La VM n'a pas d'accès sortant — l'IP statique n'a pas été saisie |
 | Ansible : « Don't run this as root! » | Une tâche Homebrew a perdu son `become: false` (`ansible.cfg` active `become` globalement) |
 | Terraform attend puis échoue à lire l'IP | Un `agent.enabled = true` a été réintroduit : il n'existe pas d'agent QEMU pour macOS |

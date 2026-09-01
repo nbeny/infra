@@ -27,17 +27,38 @@ Pour lever ce plafond, il faut changer de CPU (Haswell minimum).
 ## Ce que le rôle fait
 
 1. **Prépare l'hôte** — `ignore_msrs=Y` (immédiat + persistant via
-   `/etc/modprobe.d/kvm-macos.conf`), installe `dmg2img` et `python3-requests`.
+   `/etc/modprobe.d/kvm-macos.conf`), installe `dmg2img` et `python3-requests`,
+   et pose un **DHCP** sur le bridge du lab (voir plus bas).
 2. **Récupère les images** — OpenCore (`thenickdude/KVM-Opencore`, version
    figée) et l'image de récupération Apple via `fetch-macOS-v2.py`, convertie
    en image brute par `dmg2img`.
 3. **Crée la VM 9200** — q35, OVMF sans clés pré-chargées, `ostype other`,
-   VirtIO réseau et disque, ballooning désactivé, et la ligne `args:` qui porte
-   le SMC Apple émulé.
+   disque VirtIO, réseau `vmxnet3`, ballooning désactivé, et la ligne `args:`
+   qui porte le SMC Apple émulé.
 
 Tout est idempotent : rejouer le playbook ne retélécharge rien et ne touche
 pas une VM déjà construite (sauf `-e pve_macos_force=true`, qui **détruit**
 l'installation existante).
+
+## Le DHCP, et pourquoi il déborde du macOS
+
+L'environnement de récupération de macOS **ne se configure qu'en DHCP**.
+L'écran de réglage IP manuel n'existe qu'une fois le système installé, et il
+n'y a pas de cloud-init sur macOS. Sans bail, l'installeur n'a aucune route :
+il ne peut pas télécharger les ~12 Go de payload chez Apple.
+
+Le rôle installe donc `dnsmasq` sur le nœud. **C'est le seul endroit où il
+sort de son périmètre** : dnsmasq sert le bridge du lab en entier, pas
+seulement la VM 9200. Deux garde-fous :
+
+- **`port=0`** — DHCP seul. Sans ça dnsmasq ouvrirait aussi un résolveur DNS
+  sur `10.0.0.1:53` que personne n'a demandé. Les invités reçoivent
+  `1.1.1.1, 9.9.9.9` directement en option DHCP.
+- **plage `10.0.0.200-250`** — hors des IPs statiques attribuées à la main
+  (`.102`, `.111`, `.130`, `.140`).
+
+`-e pve_macos_dhcp_enabled=false` sur un nœud qui a déjà un DHCP sur ce
+bridge : deux serveurs sur le même segment se marchent dessus.
 
 ## L'OSK
 
@@ -64,7 +85,9 @@ est en `no_log` pour qu'elle ne finisse pas dans les journaux Ansible.
 | `pve_macos_cores` | `4` | Doit être une puissance de 2, sinon kernel panic |
 | `pve_macos_memory` | `8192` | Le nœud est déjà surengagé, voir le README racine |
 | `pve_macos_disk_size` | `200` | Xcode ≈ 40 Go, chaque simulateur 8-12 Go |
-| `pve_macos_net_model` | `virtio` | Replier sur `vmxnet3` si l'interface n'apparaît pas |
+| `pve_macos_net_model` | `vmxnet3` | Le pilote VirtIO réseau n'est pas toujours chargé en mode Recovery |
+| `pve_macos_dhcp_enabled` | `true` | Pose `dnsmasq` sur le bridge du lab — sans lui l'installeur n'a pas de réseau |
+| `pve_macos_boot_args` | *(vide)* | `-v debug=0x100 keepsyms=1` pour diagnostiquer une panique |
 
 ## Pièges rencontrés
 
@@ -95,5 +118,16 @@ est en `no_log` pour qu'elle ne finisse pas dans les journaux Ansible.
 - **`ignore_msrs`** — sans ça, l'invité panique avant même le logo Apple, donc
   sans le moindre message exploitable.
 - **Cœurs en puissance de 2** — 6 cœurs donnent un kernel panic au démarrage.
-- **Pas de DHCP sur `vmbr1`** — l'IP statique se saisit à la main pendant
-  l'installation. Il n'y a pas de cloud-init sur macOS pour le faire.
+- **Le disque de 200 Go n'apparaît pas comme cible d'installation.** C'est le
+  piège qui coûte le plus de temps, parce qu'il ne ressemble pas à une erreur :
+  l'installeur affiche sa sélection de disque avec le seul `macOS Base System`
+  grisé, et rien n'indique pourquoi. Un disque **brut** n'est pas proposé — il
+  faut d'abord le partitionner. Mesuré le 2026-09-01 : `diskutil list physical`
+  montrait `/dev/disk0  214.7 GB` sans schéma de partition. Voir
+  [`docs/macos-ci.md`](../../../docs/macos-ci.md) § 4.
+- **Le DHCP n'est pas un confort.** Le mode Recovery n'a pas d'écran de
+  réglage IP manuel : sans bail, l'installeur ne télécharge rien.
+- **Le mode Recovery s'endort au bout de 10 minutes** (`pmset -g` :
+  `sleep 10`). Un téléchargement de deux heures sans personne devant la
+  console meurt en silence — retour au menu Recovery, aucune erreur.
+  `pmset -a sleep 0 displaysleep 0 disksleep 0` avant de lancer l'installation.
