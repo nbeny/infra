@@ -343,6 +343,21 @@
             destination:
               server: https://kubernetes.default.svc
               namespace: {{ urbanlink_namespace }}
+            # backend et frontend sont pilotes par un HPA : leur .spec.replicas
+            # vivant differe du git des que la charge monte. Sans ces deux
+            # entrees, l'Application reste OutOfSync en permanence et selfHeal
+            # se bat avec le HPA (Argo redescend a 2, le HPA remonte a 3).
+            ignoreDifferences:
+              - group: apps
+                kind: Deployment
+                name: backend
+                jsonPointers:
+                  - /spec/replicas
+              - group: apps
+                kind: Deployment
+                name: frontend
+                jsonPointers:
+                  - /spec/replicas
             syncPolicy:
               automated:
                 prune: true
@@ -357,6 +372,10 @@
                 # echoue sur « field is immutable » des qu'un Job existe deja.
                 - Replace=false
                 - ApplyOutOfSyncOnly=true
+                # Sans ce reglage, ignoreDifferences ne joue qu'au diff : la
+                # synchronisation appliquerait quand meme replicas depuis git
+                # et ecraserait la decision du HPA.
+                - RespectIgnoreDifferences=true
           YAML
         executable: /bin/bash
       changed_when: true
