@@ -118,6 +118,46 @@
           proteger
           {{ edge_basic_services | map(attribute='name') | join(', ') }}.
 
+    # ⚠️ Verifier AVANT de recalculer. bcrypt tire un sel aleatoire a chaque
+    # appel : deux empreintes du meme mot de passe ne se ressemblent pas. Un
+    # `copy` inconditionnel reecrivait donc le fichier a CHAQUE passage, et
+    # rechargeait openresty pour rien -- le playbook ne pouvait jamais rendre
+    # `changed=0`, alors que c'est le critere d'acceptation du role.
+    #
+    # `checkpw` fait l'inverse : il relit le sel de l'empreinte existante et
+    # compare. Le fichier n'est reecrit que si le mot de passe a reellement
+    # change, ou si l'empreinte est absente ou illisible.
+    - name: Verifier l'empreinte deja en place
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import bcrypt, sys
+            user, password, path = sys.argv[1], sys.argv[2], sys.argv[3]
+            try:
+                line = open(path).read().strip()
+            except OSError:
+                print('absent'); raise SystemExit
+            name, _, digest = line.partition(':')
+            if name != user or not digest:
+                print('different'); raise SystemExit
+            # nginx lit `$2y$`, python-bcrypt n'accepte que `$2b$` : meme
+            # algorithme, prefixe different. On retablit le sien pour comparer.
+            try:
+                ok = bcrypt.checkpw(password.encode(),
+                                    digest.replace('$2y$', '$2b$', 1).encode())
+            except ValueError:
+                print('illisible'); raise SystemExit
+            print('identique' if ok else 'different')
+          - "{{ edge_basic_user }}"
+          - "{{ edge_basic_password }}"
+          - "{{ edge_urbanlink_htpasswd }}"
+      register: edge_basic_state
+      changed_when: false
+      failed_when: false
+      no_log: true
+
     # ⚠️ `$2y$` et non le `$2b$` que produit python-bcrypt. Les deux designent
     # le meme algorithme, mais `$2y$` est le prefixe historiquement reconnu par
     # nginx et Apache ; certaines implementations de crypt(3) ignorent `$2b$` et
@@ -134,6 +174,7 @@
           - "{{ edge_basic_password }}"
       register: edge_basic_hash
       changed_when: false
+      when: edge_basic_state.stdout | trim != 'identique'
       no_log: true
 
     # Lisible par les workers (www-data) et par personne d'autre : un hash
@@ -145,8 +186,19 @@
         owner: root
         group: www-data
         mode: "0640"
+      when: edge_basic_state.stdout | trim != 'identique'
       no_log: true
       notify: reload openresty
+
+    # Les droits et le proprietaire, eux, doivent etre garantis a chaque
+    # passage : sans cela, un fichier deja correct mais devenu lisible par tous
+    # le resterait, la tache ci-dessus etant sautee.
+    - name: Garantir les droits du fichier de mots de passe
+      ansible.builtin.file:
+        path: "{{ edge_urbanlink_htpasswd }}"
+        owner: root
+        group: www-data
+        mode: "0640"
 
 # Le port 80 avait deja son hote par defaut (20-default-deny.conf, hors de ce
 # role) ; le 443 n'en avait aucun. Voir l'en-tete du template.
