@@ -603,15 +603,37 @@ containerd », ajouter :
     # VIDE. Les hosts.toml sont alors ecrits, presents, lisibles -- et jamais
     # consultes. Le pull echoue sur une erreur TLS qui n'evoque rien du
     # probleme : « server gave HTTP response to HTTPS client ».
+    #
+    # ⚠️ **La section a change de nom en containerd 2.x.** Le noeud tourne
+    # v2.3.4 (releve le 2026-09-01), ou elle s'ecrit
+    # `[plugins.'io.containerd.cri.v1.images'.registry]` -- en guillemets
+    # SIMPLES. L'ancienne `[plugins."io.containerd.grpc.v1.cri".registry]`
+    # n'existe plus : un `insertafter` qui la cherche ne matche jamais, et
+    # `lineinfile` ajoute alors la ligne EN FIN DE FICHIER, hors de toute
+    # section.
+    #
+    # ⚠️ Et surtout, PAS de `lineinfile` avec un `regexp` nu ici : le fichier
+    # contient TROIS lignes `config_path` (registre, plugin NRI, plugin de
+    # transfert). `lineinfile` remplace la DERNIERE correspondance -- il
+    # toucherait celle du transfert d'images, pas celle du registre. D'ou le
+    # `replace` ancre sur l'en-tete de section, qui ne peut viser qu'elle.
     - name: Faire lire /etc/containerd/certs.d par containerd
-      ansible.builtin.lineinfile:
+      ansible.builtin.replace:
         path: /etc/containerd/config.toml
-        # La section existe toujours dans une configuration generee par
-        # `containerd config default`.
-        insertafter: '^\s*\[plugins\."io\.containerd\.grpc\.v1\.cri"\.registry\]\s*$'
-        regexp: '^\s*config_path\s*='
-        line: '      config_path = "/etc/containerd/certs.d"'
+        regexp: >-
+          (\[plugins\.'io\.containerd\.cri\.v1\.images'\.registry\]\s*\n\s*config_path\s*=\s*)'[^']*'
+        replace: "\\1'/etc/containerd/certs.d'"
       notify: Redemarrer containerd
+
+    # Un `replace` qui ne matche rien ne signale RIEN -- il rapporte
+    # simplement `changed: false`, indistinguable d'un fichier deja correct.
+    # Cette verification transforme ce silence en echec.
+    - name: Verifier que config_path a bien ete pose
+      ansible.builtin.command:
+        cmd: >-
+          grep -Pzo (?s)\[plugins\.'io\.containerd\.cri\.v1\.images'\.registry\].*?config_path\s*=\s*'/etc/containerd/certs\.d'
+          /etc/containerd/config.toml
+      changed_when: false
 
 - name: Declarer les registres en clair
   when: docker_insecure_registries | length > 0
