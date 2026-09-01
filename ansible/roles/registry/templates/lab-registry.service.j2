@@ -1,0 +1,26 @@
+# GERE PAR ANSIBLE -- roles/registry. Toute modification manuelle sera ecrasee.
+[Unit]
+Description=Registre d'images du lab (registry:2)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=5
+# ⚠️ Le `-` en tete rend l'echec non fatal : au tout premier demarrage aucun
+# conteneur ne porte ce nom, et `docker rm` sortirait en erreur, empechant
+# ExecStart de s'executer. Sur un redemarrage en revanche, un conteneur
+# orphelin peut subsister et tenir le port -- d'ou le nettoyage.
+ExecStartPre=-/usr/bin/docker rm -f {{ registry_container_name }}
+# `--rm` et non `-d` : c'est systemd qui supervise, pas le demon Docker. Un
+# conteneur detache rendrait la main immediatement et systemd considererait le
+# service comme termine.
+ExecStart=/usr/bin/docker run --rm --name {{ registry_container_name }} \
+  -p {{ registry_bind_address }}:{{ registry_port }}:5000 \
+  -v {{ registry_data_dir }}:/var/lib/registry \
+  -e REGISTRY_STORAGE_DELETE_ENABLED=true \
+  {{ registry_image }}
+ExecStop=/usr/bin/docker stop {{ registry_container_name }}
+
+[Install]
+WantedBy=multi-user.target

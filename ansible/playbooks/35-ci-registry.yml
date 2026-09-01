@@ -1,0 +1,65 @@
+---
+# Installe le registre d'images du lab sur la VM de CI.
+#
+#   ansible-playbook playbooks/35-ci-registry.yml
+#
+# Pourquoi un registre, alors que 30-urbanlink-images.yml s'en passe : ce
+# playbook-la construit les images SUR urbanlink, et un `ctr import` local
+# suffit. Le runner GitHub, lui, tourne sur ci-runner -- les deux containerd
+# sont distincts, et une image construite sur l'un est invisible de l'autre.
+#
+# ⚠️ Ce playbook ne suffit pas a rendre les images tirables : il faut aussi
+# autoriser containerd, cote urbanlink, a parler a un registre en clair.
+# C'est le role `docker` qui le fait, via `docker_insecure_registries`.
+#
+# ============================================================================
+#  AMORCAGE DE L'ACCES -- a faire UNE FOIS, a la main
+# ============================================================================
+# `ci-runner` a ete montee a la main, hors Terraform : elle n'a ni l'agent
+# QEMU (donc `qm guest exec` ne repond pas) ni la cle du noeud de controle dans
+# les `authorized_keys` de `debian`. Ce playbook echouait donc en
+# `UNREACHABLE / Permission denied (publickey)` avant sa premiere tache.
+#
+# La cle ed25519 du noeud est desormais declaree dans `lab_ssh_public_keys`
+# (group_vars/all.yml), mais la poser exige deja de joindre l'hote : c'est
+# circulaire. Le geste d'amorcage, depuis le POSTE (le seul a pouvoir faire le
+# rebond -- la cle RSA du noeud n'existe plus) :
+#
+#   ssh root@192.168.100.50 'cat /root/.ssh/id_ed25519.pub' \
+#     | ssh -J root@192.168.100.50 debian@10.0.0.130 \
+#         'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+#
+# A refaire si `ci-runner` est un jour reconstruite. Verifier ensuite :
+#   ssh root@192.168.100.50 'cd /root/infra/ansible && ansible ci-runner -m ping'
+
+- name: Installer le registre d'images du lab
+  hosts: ci_nodes
+  gather_facts: true
+  become: true
+
+  roles:
+    # ⚠️ `docker` AVANT `registry`, et pas seulement parce que le registre est
+    # un conteneur : c'est ce role qui declare le registre en clair aupres du
+    # demon Docker local (docker_insecure_registries, group_vars/ci_nodes.yml).
+    # Sans lui, le registre tourne parfaitement et le `docker push` du job
+    # `images` echoue quand meme -- Docker ne considere comme non securise que
+    # 127.0.0.0/8, jamais une adresse RFC1918.
+    - role: docker
+      tags: docker
+    - role: registry
+      tags: registry
+
+  post_tasks:
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "Registre : http://{{ ansible_host }}:{{ registry_port }}/v2/"
+          - ""
+          - "Push depuis cette VM : autorise par docker_insecure_registries"
+          - "  (group_vars/ci_nodes.yml), applique par le role docker ci-dessus."
+          - ""
+          - "Pull depuis urbanlink : renseigner docker_insecure_registries dans"
+          - "  host_vars/urbanlink.yml, puis :"
+          - "  ansible-playbook playbooks/20-debian-k8s.yml -l urbanlink --tags docker"
+          - ""
+          - "Catalogue :  curl http://{{ ansible_host }}:{{ registry_port }}/v2/_catalog"

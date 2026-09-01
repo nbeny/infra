@@ -1,0 +1,6 @@
+---
+- name: Redemarrer le registre
+  ansible.builtin.systemd:
+    name: lab-registry
+    state: restarted
+    daemon_reload: true

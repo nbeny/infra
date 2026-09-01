@@ -1,11 +1,29 @@
 ---
-# Deploie le stack UrbanLink (kube/urbanlink/) sur le cluster de la VM cible.
+# Amorce le stack UrbanLink : ce qu'Argo CD ne peut PAS reconcilier.
+#
+# ⚠️ Ce playbook ne DEPLOIE plus le stack, et ne cree plus les cinq ConfigMaps
+# de configuration. Depuis le 2026-09-01, celles-ci sont generees par le
+# `configMapGenerator` de kube/urbanlink/, depuis la copie de `config/` que la
+# CI du depot applicatif ecrit dans ce depot-ci. Les recreer ici produirait des
+# doublons NON HASHES, que plus rien ne monte, et qui laisseraient croire que la
+# configuration vient d'ici.
+#
+# Ce qui reste, et pourquoi Argo ne peut pas le reprendre :
+#   1. Le Secret urbanconnect-secrets, construit depuis un secrets.env
+#      DELIBEREMENT non versionne. Un GitOps qui lirait les secrets dans git
+#      supposerait qu'ils y soient -- exactement ce qu'on refuse.
+#   2. L'AuthorizationPolicy de la passerelle, qui doit vivre dans
+#      istio-ingress alors que le kustomization force namespace: urbanconnect.
+#   3. Le certificat auto-signe de la passerelle.
+#   4. Le namespace et ses labels de maillage.
 #
 # Prerequis :
-#   1. Le cluster existe, avec sa StorageClass et Traefik/CrowdSec
+#   1. Le cluster existe, avec sa StorageClass et sa passerelle
 #      -> ansible-playbook playbooks/20-debian-k8s.yml -l urbanlink
-#   2. Les trois images applicatives sont construites
-#      -> ansible-playbook playbooks/30-urbanlink-images.yml
+#   2. `config/` du depot applicatif est depose sur le noeud de controle
+#      -> voir urbanlink_config_control plus bas. Il n'est plus lu que pour
+#         DERIVER KRATOS_OIDC_PROVIDERS du Secret (cf. plus bas) : la
+#         configuration elle-meme passe desormais par Argo.
 #
 #   ansible-playbook playbooks/31-urbanlink-deploy.yml
 #   ansible-playbook playbooks/31-urbanlink-deploy.yml -e urbanlink_wipe=true   # repart de zero
@@ -183,85 +201,6 @@
         apply -f {{ urbanlink_manifests_dest }}/namespace.yaml
       changed_when: true
 
-    # `create ... --dry-run=client | apply -f -` rend l'operation idempotente :
-    # `kubectl create configmap` seul echouerait au deuxieme passage.
-    - name: Creer les ConfigMaps prerequises
-      ansible.builtin.shell:
-        cmd: >-
-          kubectl --kubeconfig {{ urbanlink_kubeconfig }} -n {{ urbanlink_namespace }}
-          create configmap {{ item.name }} {{ item.src }}
-          --dry-run=client -o yaml
-          | kubectl --kubeconfig {{ urbanlink_kubeconfig }} apply -f -
-        executable: /bin/bash
-      loop:
-        # Chaque ConfigMap est construite depuis DEUX repertoires : `kubectl
-        # create configmap` accepte plusieurs --from-file et fusionne, la ou
-        # kustomize ne sait pas le faire. Cela evite de recopier dans chaque
-        # environnement ce qui n'y varie pas -- une copie qui divergerait.
-        #
-        # ⚠️ La fusion se fait par NOM DE FICHIER : deux homonymes dans common/
-        # et <env>/ se marcheraient dessus, le dernier gagnant en silence. Le
-        # decoupage est pense pour qu'il n'y en ait aucun -- voir
-        # config/README.md du depot applicatif avant d'ajouter un fichier.
-        - name: kratos-config
-          src: >-
-            --from-file={{ urbanlink_config_dest }}/common/kratos/
-            --from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/kratos/
-        - name: postgres-init
-          src: "--from-file={{ urbanlink_config_dest }}/common/postgres-init/"
-        # ⚠️ **`--from-env-file` et NON `--from-file` pour ces deux-la.**
-        # Les deux sont consommees par `envFrom: configMapRef:`, qui attend une
-        # ConfigMap dont CHAQUE CLE est une variable. `--from-file` produit au
-        # contraire UNE seule cle, nommee comme le fichier, contenant tout son
-        # texte : `envFrom` tente alors de creer une variable nommee
-        # « pgbouncer.env » — un nom invalide — et aucune des vraies variables
-        # n'est posee.
-        #
-        # Mesure sur la VM `urbanlink` : le pod refusait de demarrer sur
-        # « /entrypoint.sh: line 68: DB_HOST: Setup pgbouncer config error!
-        # You must set DB_HOST env », alors que `DB_HOST=postgres` figure bien
-        # dans le fichier. Le message accuse une variable absente, la cause est
-        # la FORME de la ConfigMap.
-        #
-        # Les identifiants restent dans le Secret : pgbouncer/deployment.yaml
-        # pose DB_NAME/DB_USER/DB_PASSWORD en `env:`, qui prime sur `envFrom:`.
-        - name: pgbouncer-config
-          src: "--from-env-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/pgbouncer/pgbouncer.env"
-        # ⚠️ **Le fichier d'environnement SEUL**, pas le repertoire `common/`.
-        # Celui-ci contient `fetch-pbf.sh`, un SCRIPT : melange a un `envFrom`,
-        # il produirait une variable nommee « fetch-pbf.sh » et ferait echouer
-        # le pod avec `InvalidVariableNames`. Le script n'est monte nulle part
-        # aujourd'hui — l'import OSM n'est pas cable sur ce cluster. Le jour ou
-        # il le sera, il lui faudra sa PROPRE ConfigMap et un `volumeMounts`,
-        # pas une place dans celle-ci.
-        - name: nominatim-config
-          src: "--from-env-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/nominatim/nominatim.env"
-        # ⚠️ **Le FICHIER seul, pas le repertoire `common/kibana/`.** Celui-ci
-        # porte aussi `build-dashboards.mjs` (le generateur) et un README :
-        # `--from-file=<repertoire>` prend TOUT ce qu'il trouve et les
-        # embarquerait dans la ConfigMap, ou le Job monterait 3 fichiers pour
-        # n'en lire qu'un. Meme piege que `nominatim-config` ci-dessus.
-        #
-        # `--from-file` et non `--from-env-file` : le Job la monte en VOLUME et
-        # passe le fichier a `curl -F`, il ne la consomme pas en `envFrom`.
-        - name: kibana-dashboards
-          src: "--from-file={{ urbanlink_config_dest }}/common/kibana/dashboards.ndjson"
-        # ⚠️ `observability-config` n'est PAS construite ici, volontairement :
-        # aucun workload de ce depot ne la monterait. La pile LGTM (collecteur
-        # OTLP, Tempo, Loki, Prometheus applicatif, Grafana) n'est pas encore
-        # deployee sur le cluster -- seule sa configuration existe, dans
-        # config/{common,prod}/observability/ du depot applicatif. Creer la
-        # ConfigMap malgre tout donnerait un objet que personne ne lit, et
-        # laisserait croire que la pile tourne.
-        # Pour l'activer : ajouter les manifests, puis
-        #   - name: observability-config
-        #     src: >-
-        #       --from-file={{ urbanlink_config_dest }}/common/observability/
-        #       --from-file={{ urbanlink_config_dest }}/{{ urbanlink_env }}/observability/
-      loop_control:
-        label: "{{ item.name }} ({{ urbanlink_env }})"
-      changed_when: true
-
     # ---------------------------------------------------------------------
     #  Secret applicatif
     # ---------------------------------------------------------------------
@@ -357,6 +296,17 @@
           declarer cote Google : https://auth.{{ urbanlink_domain }}/self-service/methods/oidc/callback/google
       when: not ul_google_ok
 
+    # ⚠️ **LE SEUL ENDROIT OU config/ NE SE PROPAGE PAS TOUT SEUL.**
+    # KRATOS_OIDC_PROVIDERS est DERIVE de config/<env>/kratos/kratos.yml : on y
+    # lit la structure `providers`, on y injecte les vrais identifiants Google,
+    # et le resultat part dans le SECRET -- pas dans la ConfigMap.
+    #
+    # Consequence : changer les fournisseurs OIDC dans ce fichier propage bien
+    # la ConfigMap tout seul (la CI la recopie, le hash change, Kratos
+    # redemarre) mais PAS le Secret. Il faut rejouer ce playbook.
+    #
+    # Et l'oubli est MUET : Kratos demarre, tout fonctionne, seule la connexion
+    # du fournisseur concerne repond « Impossible d'initier la connexion ».
     - name: Lire la configuration Kratos de l'environnement
       ansible.builtin.slurp:
         src: "{{ urbanlink_config_dest }}/{{ urbanlink_env }}/kratos/kratos.yml"

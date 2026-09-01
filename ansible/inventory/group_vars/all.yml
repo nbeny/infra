@@ -44,6 +44,23 @@ lab_ssh_public_keys:
   - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDSUylZjvfpw8wg62j+RhkydI1wVHfqo9UETPXgxfCbM+WkqBzHq9leC9UpYwPtc8flbkB+j0M7k0bRUVrQi+oGjfxLhn/7SWD3GOLAPTQSpDWjG2CTA9nNCiB8wKbIO2LUUApaFMvPdezQvUi4YYaF/PZ4SNJgO8xgG5m5uYcxlLDsSAJq//xoff/6T9zsbCoHPiPm19PKm1PjIlha2O12kfVJcjVeC/vgGo4Yuzm8XLIqpgRFDdbUiJc59js7I5zRgAXUdXrY8QmuyGcE6ACb6/U8/a42harMNvJno9uRahQsct8pdBjmWRUn6meJx1n5gFM9e+Lgiv0xm3TIy4b3n3tL1Tr5sx+lv+OdCdtNHg2ik8BId9U5eHZcKp7ZJXXiw6/W7X/MFFxu5TXcFlm5n8PtzilBAIMRCEKdURyHxfJ3Ip4k8cy8q/jBBeMEjyYM5LZpuPErXxITytzTKxNvOO2Euh04v/+JJgm9yIxPheoMsNEuP8L0c4vXaISzl6WSl0kCjCB0CeDflsKPDed2qJUHj4Z9GkVF6HOWf5uLq0LOpotR9X7CisOUf0eRD89DQlulozV5g/h/v5LeLL0b+YHyuVfWIaEJfik/noBXuU7ahGiqdaAQOGxpsWPo960wURVgReGr0s6QhkgtciC1PiNT99ENliqDq8gnodrnMQ== root@pve"
   # Poste secondaire
   - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCxdCJcurl06bHxslyeOcxDYQfbf4zqdBMU54iFjhRnO6R7lVdbTNYSh15vO+nPEvNwqsTWRYqDrZHru+O9k2ZCDY2MhESiC+yKJQU73l9MdkcHXdgf5teJaLNdyUs/mfyIrjMXGBd/DBWuxQ2OKVOBDhrQ4RBtVFNzqH+dwl9eEZiiHITP6zr8W85juO9IP728WvgkHnEITv0LqneZAo6068msBbZsVRWMMNO0eqV2UhSpEvk7CPNxOrHwHaV72zwRl9lS0RQTiMSVlb36vV7SdcfiFFqPp1T5fM2Y1cJTFRNfTirH7uUqx5j7MKeZhjE2T9MNw8IA6gf0s1k5wf5kmibaDaTUKLosvNc/kUOIa55zfrItJbkC90Pmhl88cqFjIg4jMr+sASlwWzCnqk/gykT8qwPi5ovvPfn4QyR/H/Rlgbj2gwQC7rsYeKmUzprs3B5vK06EasNCBc85uODRdHUWwsMc33t51XlkcW1bYhK11leahAsAv7852zjEMxs3YA9R/p6Ojlyo0zTuDByRXFj0oJOKpcRU8YUepNY4pLCQ1EL3m2DamJUlTjAEWwD3zoPnPvseI9WWEY4LURHXXsqwj/30FLEgd/rfVB6KO7ULjQvhZ/gX7yPJMJ4R6GcR2nyjT8ZsBRD92FEs80E3OOwTBpNruyuYFMZKdcGjYQ== nbeny@student.42.fr"
+  # ⚠️ **LA SEULE CLE DU NOEUD DONT LA PRIVEE EXISTE ENCORE.**
+  # Les deux entrees `root@pve` ci-dessus sont RSA, et /root/.ssh du noeud ne
+  # contient plus qu'une paire ed25519 : leur cle privee a disparu. Les hotes
+  # qui n'autorisaient qu'elles etaient donc INJOIGNABLES depuis le noeud de
+  # controle, alors que l'inventaire affirmait le contraire.
+  #
+  # Mesure le 2026-09-01 sur `ci-runner` : tout `ansible-playbook` lance depuis
+  # le noeud echouait en `UNREACHABLE / Permission denied (publickey)`, sans
+  # rapport avec le playbook joue. La declarer ici la repose sur chaque hote
+  # ou le role `common` passe.
+  #
+  # ⚠️ Cela ne suffit PAS a amorcer un hote neuf : y poser cette cle exige de
+  # l'atteindre, ce que seul le rebond depuis le poste
+  # (`ssh -J root@192.168.100.50 debian@10.0.0.x`) permet. Sur les VMs creees
+  # par Terraform, cloud-init s'en charge ; sur une VM montee a la main, c'est
+  # un geste manuel a faire une fois. Voir l'en-tete de playbooks/35-ci-registry.yml.
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJtDIzD15+UwiHK6YYUAoWKUdUtL7RvAUkpaNMKJNK0P pve-root@urbanlink-ops"
 
 # --- Divers ---------------------------------------------------------------
 lab_timezone: Europe/Paris

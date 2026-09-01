@@ -1,0 +1,24 @@
+---
+# Registre d'images du lab. Il existe parce que la VM qui CONSTRUIT les images
+# (ci-runner) et celle qui les EXECUTE (urbanlink) ont chacune leur containerd :
+# une image construite d'un cote est invisible de l'autre.
+#
+# ⚠️ Il n'est PAS sur urbanlink alors que c'est la que les images sont
+# consommees. Le couplage que cela cree est reel mais etroit : le tag n'etant
+# pas `latest`, imagePullPolicy vaut IfNotPresent, donc une image deja tiree
+# reste dans le containerd d'urbanlink. Un redemarrage de pod, un reboot du
+# noeud, un rescheduling ne declenchent AUCUN pull. Le registre n'est sollicite
+# que pour un tag NEUF -- donc pendant une livraison, donc quand ci-runner
+# tourne par construction. Les deux cas d'exposition restants : noeud
+# reconstruit, et eviction d'image sous pression disque (seuil haut de kubelet,
+# 85 % par defaut).
+
+registry_image: "registry:2"
+registry_container_name: lab-registry
+registry_port: 5000
+registry_data_dir: /var/lib/lab-registry
+
+# ⚠️ Liee a l'adresse de LAN, jamais 0.0.0.0. Le registre est en clair et sans
+# authentification : le restreindre a l'interface interne est la seule barriere
+# posee ici.
+registry_bind_address: "{{ ansible_host }}"

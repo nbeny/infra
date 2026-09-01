@@ -5,6 +5,16 @@ metadata:
   namespace: urbanconnect
   labels:
     app: kibana-setup
+  # ⚠️ Hook Argo PreSync : ce Job monte la ConfigMap kibana-dashboards, dont le
+  # nom porte desormais un hash. Modifier un tableau de bord change ce nom,
+  # donc la spec du Job, qu'`apply` refuserait alors de modifier.
+  #
+  # `PreSync` alors que ce Job attend que Kibana soit `available` : il porte
+  # deja cette attente lui-meme (voir son en-tete), la phase ne la remplace
+  # pas. C'est l'immuabilite qu'on traite ici, pas l'ordonnancement.
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   # One-shot : importe les tableaux de bord UrbanLink dans Kibana. Miroir du
   # service `kibana-setup` du docker-compose 10000 -- meme fichier, meme appel.

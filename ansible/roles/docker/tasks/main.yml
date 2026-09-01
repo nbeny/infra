@@ -106,6 +106,130 @@
       changed_when: false
       failed_when: "'cri' in containerd_disabled_plugins.stdout"
 
+# ============================================================================
+#  containerd : registres d'images en clair
+# ============================================================================
+# Le `config_path` et les `hosts.toml` vivent dans LE MEME bloc, et ce n'est
+# pas un rangement de confort : l'un sans l'autre ne produit aucune erreur.
+# Ecrire les hosts.toml en laissant config_path vide les rend presents,
+# lisibles -- et jamais consultes.
+- name: Declarer les registres en clair aupres de containerd
+  when:
+    - docker_insecure_registries | length > 0
+    - docker_containerd_is_cri | bool
+  block:
+
+    # ⚠️ SANS CETTE TACHE, TOUT LE RESTE EST IGNORE EN SILENCE.
+    # containerd ne lit /etc/containerd/certs.d que si `config_path` l'y
+    # envoie ; or `containerd config default` (tache plus haut) laisse ce champ
+    # VIDE. Le pull echoue alors sur une erreur TLS qui n'evoque rien du
+    # probleme : « server gave HTTP response to HTTPS client ».
+    #
+    # ⚠️ La section a change de nom en containerd 2.x. Le noeud tourne v2.3.4
+    # (releve le 2026-09-01), ou elle s'ecrit
+    # [plugins.'io.containerd.cri.v1.images'.registry] -- en guillemets
+    # SIMPLES. L'ancienne [plugins."io.containerd.grpc.v1.cri".registry]
+    # n'existe plus.
+    #
+    # ⚠️ Et surtout PAS de `lineinfile` avec un regexp nu : le fichier contient
+    # TROIS lignes `config_path` (registre, plugin NRI, plugin de transfert
+    # d'images). `lineinfile` remplace la DERNIERE correspondance -- il
+    # toucherait celle du transfert. D'ou ce `replace` ancre sur l'en-tete de
+    # section, qui ne peut viser qu'elle.
+    - name: Faire lire /etc/containerd/certs.d par containerd
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: >-
+          (\[plugins\.'io\.containerd\.cri\.v1\.images'\.registry\]\s*\n\s*config_path\s*=\s*)'[^']*'
+        replace: "\\1'/etc/containerd/certs.d'"
+      notify: Redemarrer containerd
+
+    # Un `replace` qui ne matche rien ne signale RIEN -- il rapporte
+    # simplement `changed: false`, indistinguable d'un fichier deja correct.
+    # Cette verification transforme ce silence en echec.
+    - name: Relire la configuration containerd
+      ansible.builtin.slurp:
+        src: /etc/containerd/config.toml
+      register: containerd_config_after
+
+    - name: Verifier que config_path a bien ete pose
+      ansible.builtin.assert:
+        that:
+          - >-
+            containerd_config_after.content | b64decode is search("\[plugins\.'io\.containerd\.cri\.v1\.images'\.registry\]\s*\n\s*config_path\s*=\s*'/etc/containerd/certs\.d'")
+        fail_msg: >-
+          config_path n'a pas ete pose dans la section registry de
+          /etc/containerd/config.toml. L'en-tete de section a probablement
+          change de nom avec la version de containerd : verifier
+          `grep -n "registry\]" /etc/containerd/config.toml` sur l'hote.
+        success_msg: containerd lira /etc/containerd/certs.d
+
+    - name: Creer les repertoires de configuration des registres
+      ansible.builtin.file:
+        path: "/etc/containerd/certs.d/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: "{{ docker_insecure_registries }}"
+
+    # ⚠️ `skip_verify` seul ne suffit PAS : il desactive la verification du
+    # certificat, pas le passage en HTTPS. C'est le prefixe `http://` du champ
+    # `server` qui fait parler containerd en clair.
+    - name: Deposer les hosts.toml
+      ansible.builtin.copy:
+        dest: "/etc/containerd/certs.d/{{ item }}/hosts.toml"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # GERE PAR ANSIBLE -- roles/docker, docker_insecure_registries.
+          server = "http://{{ item }}"
+
+          [host."http://{{ item }}"]
+            capabilities = ["pull", "resolve"]
+            skip_verify = true
+      loop: "{{ docker_insecure_registries }}"
+      notify: Redemarrer containerd
+
+# ⚠️ containerd NE SUFFIT PAS, et ce bloc-ci n'est pas une redite du precedent.
+# containerd gouverne le PULL du cluster ; le PUSH depuis la CI passe par le
+# demon Docker, qui tient sa propre liste dans son propre fichier.
+#
+# Et contrairement a ce qu'on lit souvent, Docker ne traite PAS les adresses
+# RFC1918 comme des registres non securises : seul 127.0.0.0/8 l'est
+# implicitement. Mesure le 2026-09-01 sur ci-runner (Docker 29.7.2),
+# `docker push 10.0.0.130:5000/...` echouait sur « http: server gave HTTP
+# response to HTTPS client » -- exactement le meme message que cote containerd,
+# pour une cause distincte et un fichier different. De quoi croire que le
+# correctif containerd n'a pas pris.
+- name: Declarer les registres en clair aupres du demon Docker
+  when: docker_insecure_registries | length > 0
+  block:
+
+    - name: Lire le daemon.json existant
+      ansible.builtin.slurp:
+        src: /etc/docker/daemon.json
+      register: docker_daemon_json_raw
+      failed_when: false
+
+    # Fusion, jamais ecrasement : ce fichier porte deja la rotation des
+    # journaux sur les hotes existants, et la reecrire de zero la perdrait.
+    - name: Declarer les registres en clair aupres du demon Docker
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: "0644"
+        content: >-
+          {{
+            ((docker_daemon_json_raw.content | default('') | b64decode | from_json)
+              if (docker_daemon_json_raw.content is defined) else {})
+            | combine({'insecure-registries': docker_insecure_registries})
+            | to_nice_json
+          }}
+      notify: Redemarrer Docker
+
 # Les handlers ne se declenchent qu'en fin de play, or le role kubernetes
 # s'execute juste apres : containerd doit deja tourner avec la nouvelle
 # configuration quand kubeadm demarre.

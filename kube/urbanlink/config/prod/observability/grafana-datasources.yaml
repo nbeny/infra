@@ -1,0 +1,71 @@
+# ============================================================================
+#  Grafana -- sources de donnees provisionnees, PRODUCTION (Kubernetes)
+# ----------------------------------------------------------------------------
+#  QUATRE sources, contre trois en dev. La quatrieme est le Prometheus du MESH
+#  (addon Istio, namespace istio-system) : il ne mesure pas la meme chose que
+#  le Prometheus applicatif, et les confondre mene a des diagnostics faux.
+#
+#      « l'API est lente »
+#        -> Prometheus (appli)  dit ou le temps est passé DANS le backend
+#        -> Prometheus (mesh)   dit si le temps est passé AVANT d'y entrer
+#
+#  ⚠️ `${__value.raw}` porte UN SEUL dollar ici, contre deux en dev. Le double
+#  est une echappement de docker compose, qui interpole les fichiers qu'il
+#  monte ; Kubernetes ne fait rien de tel et le rendrait litteral -- le lien
+#  journal -> trace pointerait alors sur une trace nommee « $ ». C'est
+#  exactement le genre de detail qu'une copie de fichier emporte sans bruit.
+# ============================================================================
+
+apiVersion: 1
+
+datasources:
+  # --- Metriques metier ----------------------------------------------------
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus.urbanconnect.svc.cluster.local:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+
+  # --- Metriques du mesh ---------------------------------------------------
+  # Installe avec Istio (addon), par le depot infra -- pas par celui-ci. Il
+  # est deja expose sous prometheus.urbanlink.fr ; le brancher ici evite
+  # d'avoir a ouvrir un second onglet pour croiser les deux.
+  - name: Prometheus (mesh Istio)
+    type: prometheus
+    uid: prometheus-mesh
+    access: proxy
+    url: http://prometheus.istio-system.svc.cluster.local:9090
+    jsonData:
+      httpMethod: POST
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo.urbanconnect.svc.cluster.local:3200
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        filterByTraceID: true
+        tags:
+          - key: service.name
+            value: service_name
+      nodeGraph:
+        enabled: true
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki.urbanconnect.svc.cluster.local:3100
+    jsonData:
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"(\w+)"'
+          url: '${__value.raw}'
+          datasourceUid: tempo

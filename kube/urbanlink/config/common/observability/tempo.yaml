@@ -1,0 +1,49 @@
+# ============================================================================
+#  Tempo -- stockage des traces
+# ----------------------------------------------------------------------------
+#  COMMUN aux deux environnements, et ce n'est pas un raccourci : rien ici ne
+#  depend de l'environnement. Le seul reglage qui aurait pu diverger est le
+#  backend de stockage, et il ne diverge pas -- `local` sur un PVC en cluster
+#  vaut `local` sur un volume Docker, pour un noeud unique. Le jour ou la prod
+#  passera en multi-noeuds, c'est ce fichier qui se dedoublera, avec S3/MinIO
+#  cote prod : un lecteur du bloc `storage` verra alors immediatement pourquoi.
+#
+#  Configuration monobloc (« monolithic ») : tous les composants dans un
+#  processus.
+#
+#  Consommateurs :
+#    - Kubernetes : ConfigMap `observability-config` -> observability/tempo/
+#    - docker compose : ./observability/tempo.yaml (profil `observability`)
+# ============================================================================
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  # Court : on veut voir la trace apparaitre dans Grafana en quelques secondes,
+  # pas attendre le cycle de flush par defaut. Le cout est un plus grand nombre
+  # de petits blocs, que le compacteur reprend derriere.
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    # Les traces ne servent qu'a expliquer un incident recent. Au-dela, ce sont
+    # les metriques et les journaux qui portent l'historique, pour bien moins
+    # cher -- une trace pese mille fois une serie de metriques.
+    block_retention: 168h # 7 jours
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks

@@ -8,3 +8,22 @@ docker_packages:
 docker_users: []
 docker_compose_plugin: true
 docker_containerd_systemd_cgroup: true
+
+# Registres joignables en HTTP, sans certificat. Vide par defaut : un registre
+# en clair est un choix, jamais un defaut.
+#
+# Chaque entree produit un /etc/containerd/certs.d/<hote>/hosts.toml, ET pose
+# le `config_path` sans lequel containerd ne lirait jamais ce repertoire.
+# Les deux vont ensemble -- voir tasks/main.yml.
+#
+#   docker_insecure_registries:
+#     - "10.0.0.42:5000"
+docker_insecure_registries: []
+
+# Ce noeud fait-il tourner containerd comme runtime CRI de kubelet ?
+#
+# Vrai sur les noeuds du cluster, faux sur la VM de CI -- qui n'execute rien
+# pour le compte de Kubernetes et n'a donc pas de /etc/containerd/config.toml
+# genere. Sur elle, seul le demon Docker a besoin de connaitre le registre en
+# clair : c'est lui qui POUSSE. Le cluster, lui, TIRE, et c'est containerd.
+docker_containerd_is_cri: true

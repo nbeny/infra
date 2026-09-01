@@ -1,0 +1,51 @@
+---
+# ============================================================================
+#  VM ci-runner -- runner GitHub Actions + registre d'images du lab
+# ============================================================================
+# Docker, et rien d'autre. Pas de kubernetes : cette VM construit les images,
+# elle n'en execute aucune pour le compte du cluster.
+#
+# ⚠️ Trois runners UrbanConnct y tournent, plus deux pour d'autres depots. La
+# matrice du job `images` bâtit donc les trois images EN PARALLELE sur cette
+# seule machine, qui n'a que 12 Go de RAM -- premier suspect si un build meurt
+# sans message.
+
+# ⚠️ ci_nodes descend de guests, dont group_vars fixe ansible_user a
+# lab_admin_user (nbeny) -- valable pour les VMs Terraform, dont le cloud-init
+# cree cet utilisateur. Cette VM a ete montee a la main (cf. inventory/00-static.yml) :
+# nbeny n'y existe pas, seul debian (uid 1000) y a un compte. Sans cette
+# surcharge, tout playbook cible sur ce groupe echoue en UNREACHABLE, publickey
+# refusee.
+ansible_user: debian
+
+docker_users:
+  - "{{ ci_runner_service_user }}"
+docker_compose_plugin: true
+
+# ⚠️ Le cgroup driver systemd de containerd n'est PAS force ici, contrairement
+# a debian_nodes.yml : il n'existe que pour satisfaire kubelet, qui n'a rien a
+# faire sur cette machine.
+docker_containerd_systemd_cgroup: false
+
+# ⚠️ Corollaire : pas de /etc/containerd/config.toml genere ici, donc pas de
+# section registry a modifier. Le role sauterait dessus et echouerait sur son
+# assertion s'il tentait d'y poser `config_path`.
+docker_containerd_is_cri: false
+
+# Le registre du lab tourne SUR cette VM (roles/registry) -- et le demon Docker
+# refuse quand meme de lui parler en clair : Docker ne considere comme non
+# securise que 127.0.0.0/8, pas les adresses RFC1918. Sans cette declaration,
+# le `docker push` du job `images` echoue sur « server gave HTTP response to
+# HTTPS client ». Mesure le 2026-09-01.
+docker_insecure_registries:
+  - "10.0.0.130:5000"
+
+# Utilisateur sous lequel tourne le service actions.runner.*. Il doit etre dans
+# le groupe docker, sans quoi le job `images` echoue des le premier
+# `docker build` sur « permission denied » du socket.
+#
+# ⚠️ Il y EST deja sur la machine (gid 989, releve le 2026-09-01) : cette
+# declaration n'est donc pas un correctif mais un garde-fou. Elle inscrit dans
+# le code un etat qui n'existait que sur la VM, et que rien ne retablirait
+# apres une reconstruction.
+ci_runner_service_user: debian

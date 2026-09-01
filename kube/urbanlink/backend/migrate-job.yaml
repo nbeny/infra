@@ -32,6 +32,21 @@ metadata:
   namespace: urbanconnect
   labels:
     app: backend-migrate
+  # ⚠️ Hook Argo, et non ressource ordinaire. La section `images:` du
+  # kustomization epingle le tag du backend, qui figure AUSSI ici : la spec de
+  # ce Job change donc a chaque livraison. Or les champs d'un Job sont
+  # immuables -- `kubectl apply` echoue en « field is immutable » des que le
+  # Job existe, et `Replace=false` / `ApplyOutOfSyncOnly=true` n'y changent
+  # rien : le Job est hors-sync, donc applique, donc en echec.
+  # `BeforeHookCreation` le supprime puis le recree, ce que
+  # 31-urbanlink-deploy.yml faisait a la main avant Argo.
+  #
+  # `PreSync` et non `Sync` : la migration doit s'achever AVANT que les
+  # nouveaux pods du backend ne demarrent. Cet ordre n'etait garanti par rien
+  # jusqu'ici.
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 5
   template:

@@ -43,6 +43,22 @@ all:
     macos_nodes:
       hosts: {}
 
+    # VM de CI -- porte le runner GitHub Actions et le registre d'images du lab.
+    #
+    # ⚠️ Groupe DISTINCT de debian_nodes, et ce n'est pas une coquetterie :
+    # ce dernier recoit le role `kubernetes` par site.yml, or cette VM n'a
+    # aucun cluster a porter. L'y ranger installerait kubeadm, kubelet et un
+    # plan de controle sur une machine dont ce n'est pas le role.
+    #
+    # ⚠️ Elle n'est PAS geree par Terraform : elle a ete montee a la main,
+    # avant ce depot. On la declare ici pour pouvoir la configurer, sans la
+    # reprendre sous Terraform -- ce serait un chantier distinct.
+    ci_nodes:
+      hosts:
+        ci-runner:
+          ansible_host: 10.0.0.130
+          vm_id: 130
+
     # Groupe parapluie : tout ce qui est une VM invitee (pas le noeud PVE)
     #
     # macos_nodes en est volontairement ABSENT : ces hotes n'ont ni apt, ni
@@ -52,3 +68,4 @@ all:
       children:
         debian_nodes:
         kali_nodes:
+        ci_nodes:

@@ -14,31 +14,25 @@
 #  Ce qu'Argo CD ne peut PAS reprendre, et pourquoi
 # ============================================================================
 #
-# Argo CD applique la sortie de `kustomize build`. Trois choses que fait
+# Argo CD applique la sortie de `kustomize build`. Deux choses que fait
 # 31-urbanlink-deploy.yml lui sont donc structurellement inaccessibles :
 #
-#   1. **Les quatre ConfigMaps de configuration.** Leur contenu vit dans
-#      `config/` du depot APPLICATIF, pas ici, et chacune fusionne DEUX
-#      repertoires (`common/<x>` + `<env>/<x>`) -- ce que kustomize ne sait pas
-#      faire. Une source multiple d'Argo CD ne resoudrait que la moitie du
-#      probleme : elle sait cloner un second depot, pas fusionner deux dossiers
-#      dans une meme ConfigMap.
-#   2. **Le Secret `urbanconnect-secrets`**, construit depuis un `secrets.env`
+#   1. **Le Secret `urbanconnect-secrets`**, construit depuis un `secrets.env`
 #      deliberement NON versionne. Un GitOps qui lirait les secrets depuis git
 #      supposerait qu'ils y soient -- exactement ce qu'on refuse.
-#   3. **L'AuthorizationPolicy de la passerelle**, qui doit vivre dans
+#   2. **L'AuthorizationPolicy de la passerelle**, qui doit vivre dans
 #      `istio-ingress` alors que le kustomization force `namespace:
 #      urbanconnect`.
 #
-# ⇒ **Le partage des roles est donc explicite** : ansible amorce (ConfigMaps,
-#   Secret, politique de passerelle), Argo CD reconcilie ensuite les charges de
-#   travail -- c'est-a-dire la seule partie qui bouge a chaque livraison
-#   applicative, le tag des trois images.
+# ⚠️ **Les ConfigMaps de configuration NE SONT PLUS dans cette liste.** Elles
+# etaient inaccessibles a Argo tant que leur source vivait uniquement dans le
+# depot applicatif ; depuis le 2026-09-01 la CI de celui-ci les recopie dans
+# kube/urbanlink/config/, et un `configMapGenerator` les monte. Un changement
+# dans `config/` se propage donc TOUT SEUL, redemarrage des pods compris --
+# le suffixe de hash change le nom de la ConfigMap, donc la spec du Deployment.
 #
-# ⚠️ **Consequence a connaitre** : un changement dans `config/` du depot
-#   applicatif ne se propage PAS tout seul. Il faut rejouer 31 (ou sa seule
-#   section ConfigMaps) puis redemarrer les pods concernes. Argo CD affichera
-#   « Synced » malgre tout, puisque de son point de vue rien n'a change.
+# ⇒ **Le partage des roles** : ansible amorce (Secret, politique de passerelle,
+#   certificat, namespace), Argo CD reconcilie tout le reste.
 #
 # ============================================================================
 
@@ -314,16 +308,23 @@
     #  L'Application
     # ----------------------------------------------------------------------
 
-    # ⚠️ `prune: false` est un choix, pas un oubli. Une suppression dans git
-    # deviendrait sinon une suppression dans le cluster sans qu'un humain la
-    # voie passer -- y compris si le chemin surveille se vide par accident
-    # (renommage, branche mal ciblee). `selfHeal: true` en revanche est acquis :
-    # il annule une modification faite a la main sur le cluster, ce qui est tout
-    # l'interet de la manoeuvre.
+    # ⚠️ `prune: true` DEPUIS que les ConfigMaps sont generees avec un suffixe
+    # de hash : chaque changement de configuration cree un objet NOUVEAU, et
+    # sans elagage l'ancien resterait indefiniment. Cinq de plus par livraison.
     #
-    # Pour activer l'elagage plus tard, une fois la chaine eprouvee :
+    # Ce que cela coute, et qui etait la raison du `false` initial : une
+    # suppression dans git devient une suppression dans le cluster sans qu'un
+    # humain la voie passer -- y compris si le chemin surveille se vide par
+    # accident (renommage, branche mal ciblee).
+    #
+    # Ce que cela ne touche PAS : ce qu'Argo n'a pas cree. Le Secret
+    # urbanconnect-secrets et l'AuthorizationPolicy, poses par
+    # 31-urbanlink-deploy.yml, n'ont pas le label app.kubernetes.io/instance et
+    # sont hors de son champ.
+    #
+    # Pour revenir en arriere :
     #   kubectl -n argocd patch application urbanlink --type merge \
-    #     -p '{"spec":{"syncPolicy":{"automated":{"prune":true}}}}'
+    #     -p '{"spec":{"syncPolicy":{"automated":{"prune":false}}}}'
     - name: Declarer l'Application UrbanLink
       ansible.builtin.shell:
         cmd: |
@@ -344,7 +345,7 @@
               namespace: {{ urbanlink_namespace }}
             syncPolicy:
               automated:
-                prune: false
+                prune: true
                 selfHeal: true
               syncOptions:
                 # Le namespace est cree par 31-urbanlink-deploy.yml, avec ses

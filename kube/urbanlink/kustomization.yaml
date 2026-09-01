@@ -1,28 +1,41 @@
-# Ne pas appliquer ce kustomize à la main : playbooks/31-urbanlink-deploy.yml
-# le fait, et il fait aussi les trois choses que `apply -k` ne peut pas faire.
+# Ne pas appliquer ce kustomize à la main : **Argo CD le fait**, en suivant
+# `master` de ce dépôt avec `selfHeal: true` et `prune: true`. Un `apply -k`
+# manuel serait annulé en moins de trois minutes.
 #
-#   ansible-playbook playbooks/31-urbanlink-deploy.yml
+# ⚠️ Corollaire : un changement ici n'a AUCUN effet tant qu'il n'est pas poussé
+# sur `master`. Pour forcer la resynchronisation au lieu d'attendre le cycle :
+#   kubectl -n argocd patch application urbanlink --type merge \
+#     -p '{"operation":{"sync":{}}}'
 #
-# Ce que le playbook ajoute, et pourquoi :
-#   1. Les quatre ConfigMaps de configuration. ⚠️ Leur contenu ne vient PAS de
-#      ce dépôt : il vit dans `config/` du dépôt APPLICATIF (UrbanConnct), à
-#      côté du docker-compose.yml qui monte les mêmes fichiers en dev. C'est ce
-#      qui empêche un réglage de diverger entre les deux environnements — il
-#      n'existe qu'une fois. `kube/urbanlink/config/`, qui en portait une copie,
-#      a été supprimé le 2026-08-30.
-#        kratos-config      common/kratos      + <env>/kratos
-#        postgres-init      common/postgres-init
-#        pgbouncer-config                        <env>/pgbouncer
-#        nominatim-config   common/nominatim   + <env>/nominatim
-#        kibana-dashboards  common/kibana/dashboards.ndjson
-#      Chacune fusionne deux répertoires, ce que kustomize ne sait pas faire et
-#      que `kubectl create configmap` fait (plusieurs --from-file).
-#      Carte complète : config/README.md du dépôt applicatif.
-#   3. Secret urbanconnect-secrets, depuis un secrets.env NON VERSIONNÉ.
+# Ce que playbooks/31-urbanlink-deploy.yml amorce à côté, et qu'Argo ne peut
+# pas reprendre :
+#   1. Secret urbanconnect-secrets, depuis un secrets.env NON VERSIONNÉ.
 #      Voir secrets.env.example. Le playbook refuse un fichier contenant
 #      encore des CHANGE_ME.
-#   4. ingress/authorization.yaml, qui doit vivre dans le namespace
+#   2. ingress/authorization.yaml, qui doit vivre dans le namespace
 #      istio-ingress alors que ce fichier force `namespace: urbanconnect`.
+#
+# ⚠️ **Les ConfigMaps de configuration ne sont PLUS dans cette liste**, et c'est
+# le changement du 2026-09-01. Elles étaient créées par le playbook, avec deux
+# conséquences : Argo affichait « Synced » alors qu'un changement de `config/`
+# n'avait pas été appliqué, et modifier une ConfigMap en place ne redémarrait
+# aucun pod. Elles sont désormais générées par le `configMapGenerator` en bas
+# de ce fichier, depuis `config/` — voir le commentaire qui l'introduit.
+#
+# ⚠️ `config/` de ce dépôt est une COPIE, écrite par la CI du dépôt applicatif
+# à chaque push sur `main`. La source de vérité reste `config/` d'UrbanConnct,
+# à côté du docker-compose.yml qui monte les mêmes fichiers en dev — c'est ce
+# qui empêche un réglage de diverger entre les deux environnements. **Ne rien y
+# éditer à la main** : le `rsync --delete` de la prochaine livraison l'écrasera.
+# Carte complète : config/README.md du dépôt applicatif.
+#
+# ⚠️ La copie est un MIROIR de `config/`, pas une sélection : elle porte aussi
+# des fichiers que rien ne monte (observability/, kratos/email/, kratos/scripts/,
+# nominatim/fetch-pbf.sh, kibana/build-dashboards.mjs). C'est délibéré — le
+# `rsync` de la CI copie tout, et une divergence entre ce qu'il dépose et ce que
+# ce fichier déclare serait une source de confusion pire que le surplus. Ce qui
+# part réellement dans le cluster est ce que le `configMapGenerator` liste,
+# et rien d'autre.
 #
 # Ingress = Istio en mode ambient. Le TLS n'est PAS terminé par la passerelle
 # mais par l'openresty du nœud Proxmox, avec un certificat wildcard
@@ -166,3 +179,61 @@ resources:
   #   appliquee separement par playbooks/31-urbanlink-deploy.yml.
   - ingress/gateway.yaml
   - ingress/virtualservices.yaml
+
+# ============================================================================
+#  ConfigMaps de configuration applicative
+# ============================================================================
+# Les fichiers de config/ viennent du depot APPLICATIF (UrbanConnct), a cote
+# du docker-compose.yml qui monte les memes en dev. C'est ce qui empeche un
+# reglage de diverger entre les deux environnements -- il n'existe qu'une fois.
+# La CI de ce depot-la les recopie ici a chaque livraison sur main.
+#
+# ⚠️ **Le suffixe de hash est le mecanisme, pas un effet de bord.** Le nom
+# genere depend du CONTENU (kratos-config-7f3d9k) : changer un fichier change
+# le nom, kustomize reecrit toutes les references dans le meme build, la spec
+# des Deployments change, et les pods redemarrent. C'est la seule facon
+# d'obtenir un redemarrage automatique -- modifier une ConfigMap en place n'en
+# provoque aucun.
+#
+# ⚠️ Consequence a connaitre AVANT de toucher a ces fichiers : un changement
+# dans postgres-init redemarre Postgres, un changement dans nominatim.env
+# redemarre Nominatim (33 Go d'OSM importes, le PVC est conserve mais le
+# redemarrage est long).
+#
+# ⚠️ **`envs:` et non `files:` pour les deux fichiers d'environnement.**
+# pgbouncer et nominatim les consomment par `envFrom: configMapRef:`, qui
+# attend une ConfigMap dont CHAQUE CLE est une variable. `files:` produirait
+# une cle unique nommee comme le fichier, contenant tout son texte : le pod
+# echoue alors sur une variable absente alors qu'elle figure bien dedans.
+# Mesure sur la VM : pgbouncer refusait de demarrer sur « DB_HOST: Setup
+# pgbouncer config error! » avec DB_HOST=postgres present dans le fichier.
+#
+# ⚠️ **Liste explicite, kustomize n'acceptant pas de repertoire.** Deux ecarts
+# assumes par rapport a ce que produisait 31-urbanlink-deploy.yml, tous deux
+# sans effet fonctionnel :
+#   - CLAUDE.md n'entre plus dans kratos-config. Il y etait par accident,
+#     `--from-file=<repertoire>` prenant tout ce qu'il trouve.
+#   - Les sous-repertoires common/kratos/{email,email-templates,scripts}
+#     restent exclus. Ils l'etaient deja : --from-file ne recurse pas.
+# Une garde cote depot applicatif echouera si un fichier apparait dans config/
+# sans etre liste ici -- sans elle, l'ajout d'un fichier le laisserait
+# silencieusement hors du cluster.
+configMapGenerator:
+  - name: kratos-config
+    files:
+      - config/common/kratos/identity.schema.json
+      - config/common/kratos/oidc.google.jsonnet
+      - config/prod/kratos/kratos.yml
+  - name: postgres-init
+    files:
+      - config/common/postgres-init/create-databases.sh
+      - config/common/postgres-init/init-db.sql
+  - name: pgbouncer-config
+    envs:
+      - config/prod/pgbouncer/pgbouncer.env
+  - name: nominatim-config
+    envs:
+      - config/prod/nominatim/nominatim.env
+  - name: kibana-dashboards
+    files:
+      - config/common/kibana/dashboards.ndjson
