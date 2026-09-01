@@ -15,6 +15,13 @@
 #  couteuses ». Ce jour est arrive -- pas parce qu'elles sont longues, mais
 #  parce que le noeud est lent et que la course se perd.
 #
+#  ⚠️ RECTIFICATION DU 2026-09-01 : la concurrence entre replicas n'etait que
+#  la moitie de l'histoire. Ce Job SEUL, sans le moindre concurrent, echouait
+#  exactement pareil -- parce qu'il passait par PGBOUNCER, en pooling par
+#  transaction, ou un verrou de session ne peut pas tenir. Voir le bloc `env`
+#  plus bas. Regrouper les migrations dans un Job unique restait juste ; ce
+#  n'etait simplement pas suffisant.
+#
 #  ⚠️ CONSEQUENCE A CONNAITRE : les replicas ne migrent plus. Si ce Job n'est
 #  pas applique, le backend demarre sur un schema perime SANS RIEN DIRE. Il
 #  fait donc partie du kustomization, au meme titre que `kratos-migrate`.
@@ -66,17 +73,17 @@ spec:
         app: backend-migrate
     spec:
       restartPolicy: OnFailure
-      # Migrer avant que pgbouncer ne soit joignable ne servirait qu'a
+      # Migrer avant que Postgres ne soit joignable ne servirait qu'a
       # consommer les 5 tentatives du backoff.
       initContainers:
-        - name: wait-for-pgbouncer
+        - name: wait-for-postgres
           image: busybox:1.36
           command:
             - sh
             - -c
             - |
-              until nc -z pgbouncer 6432; do
-                echo "Attente de pgbouncer..."
+              until nc -z postgres 5432; do
+                echo "Attente de postgres..."
                 sleep 2
               done
       containers:
@@ -87,14 +94,54 @@ spec:
           # references d'un coup — le Job ne peut donc pas deriver du Deployment.
           image: urbanconnect-backend:prod
           command: ["sh", "-c", "npx prisma migrate deploy"]
+          # ⚠️ CE JOB NE PASSE PAS PAR PGBOUNCER, et c'est la condition pour
+          # qu'il fonctionne du tout.
+          #
+          # `prisma migrate deploy` serialise les migrations avec un verrou
+          # consultatif de SESSION (`pg_advisory_lock(72707369)`). PgBouncer
+          # tourne en `POOL_MODE=transaction` : la session cliente n'est liee a
+          # aucune connexion serveur durable, le verrou est pris sur l'une et
+          # la requete suivante repart sur une autre. Prisma attend alors un
+          # verrou qu'il detient lui-meme ailleurs, et rend au bout de 10 s :
+          #
+          #   Error: P1002 -- Timed out trying to acquire a postgres advisory
+          #   lock (SELECT pg_advisory_lock(72707369)). Timeout: 10000ms
+          #
+          # Pire, l'echec ne se nettoie pas : la connexion serveur qui detenait
+          # le verrou retourne dans le pool de PgBouncer et le garde. Mesure le
+          # 2026-09-01 sur la base de production : SEIZE backends sur
+          # l'objid 72707369, dont un `idle` depuis 21 minutes -- le zombie qui
+          # bloquait les quinze autres. Chaque nouvelle tentative allongeait la
+          # file au lieu d'aboutir, et la synchronisation Argo entiere restait
+          # bloquee sur ce hook PreSync.
+          #
+          # L'URL est donc reconstruite ici vers `postgres:5432` en direct. Les
+          # trois composantes viennent du meme Secret que DATABASE_URL ; seul
+          # l'hote change. Les mots de passe generes par
+          # scripts/secrets/bootstrap.sh sont alphanumeriques (`rand`), il n'y a
+          # donc rien a echapper dans l'URL.
           env:
             - name: NODE_ENV
               value: production
-            - name: DATABASE_URL
+            - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: urbanconnect-secrets
-                  key: DATABASE_URL
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_DB
+            # `$(VAR)` est developpe par kubelet a partir des variables
+            # DECLAREES AVANT dans cette meme liste -- d'ou l'ordre.
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
           resources:
             requests:
               cpu: 100m
