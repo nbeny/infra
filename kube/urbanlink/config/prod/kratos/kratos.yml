@@ -3,6 +3,25 @@ version: v1.0.0
 # ============================================================================
 # Configuration Kratos — PRODUCTION (Kubernetes, urbanlink.fr)
 # ----------------------------------------------------------------------------
+# ⚠️ **CE FICHIER EST LE SEUL DE config/ QUI NE SE PROPAGE PAS ENTIÈREMENT.**
+#
+# Son contenu part bien dans la ConfigMap `kratos-config` à chaque push sur
+# `main` : la CI le recopie dans `nbeny/infra`, le `configMapGenerator` en
+# change le hash, Argo CD redéploie, le pod redémarre.
+#
+# Mais le bloc `selfservice.methods.oidc.config.providers` ci-dessous sert
+# AUSSI de gabarit à la variable `KRATOS_OIDC_PROVIDERS` du Secret
+# `urbanconnect-secrets` : le playbook `31-urbanlink-deploy.yml` du dépôt infra
+# lit cette structure et y injecte les vrais identifiants Google. Un Secret ne
+# vient jamais de git — donc jamais de la CI.
+#
+# ⇒ Modifier les FOURNISSEURS (en ajouter un, changer un `id`) impose de
+#   rejouer `ansible-playbook playbooks/31-urbanlink-deploy.yml`. Tout le reste
+#   du fichier se propage tout seul.
+#
+# ⚠️ Et l'oubli est MUET : Kratos démarre, tout fonctionne, seule la connexion
+# du fournisseur concerné répond « Impossible d'initier la connexion ».
+# ----------------------------------------------------------------------------
 # Le pendant de `config/dev/kratos/kratos.yml`, avec TOUTES les URLs pointant
 # sur urbanlink.fr. Le nom du fichier ne change pas d'un environnement à
 # l'autre, seul son contenu : le manifest qui le monte n'a donc jamais à

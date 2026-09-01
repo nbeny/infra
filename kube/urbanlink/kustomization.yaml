@@ -63,9 +63,7 @@ kind: Kustomization
 
 namespace: urbanconnect
 
-resources:
   # Foundation
-  - namespace.yaml
   # secrets.yaml a ete retire : un Secret en clair dans un depot est une bombe
   # a retardement, et .gitignore ne couvrait que `secrets.yml` -- une lettre
   # d'ecart suffisait a le laisser passer. Le Secret `urbanconnect-secrets`
@@ -74,85 +72,37 @@ resources:
   # non versionne. Voir kube/urbanlink/secrets.env.example.
 
   # Databases
-  - postgres/statefulset.yaml
-  - postgres/service.yaml
-  - postgres-nominatim/statefulset.yaml
-  - postgres-nominatim/service.yaml
 
   # Connection pooler
-  - pgbouncer/deployment.yaml
-  - pgbouncer/service.yaml
 
   # Cache
-  - redis/statefulset.yaml
-  - redis/service.yaml
 
   # Couche async — Kafka (événementiel / fanout) + Temporal (workflows durables)
-  - kafka/statefulset.yaml
-  - kafka/service.yaml
-  - kafka-ui/deployment.yaml
-  - kafka-ui/service.yaml
-  - temporal/deployment.yaml
-  - temporal/service.yaml
-  - temporal-ui/deployment.yaml
-  - temporal-ui/service.yaml
 
   # Recherche & feeds — Elasticsearch (index de lecture) + Kibana (exploration)
-  - elasticsearch/statefulset.yaml
-  - elasticsearch/service.yaml
-  - elasticsearch/setup-job.yaml
-  - kibana/deployment.yaml
-  - kibana/service.yaml
-  - kibana/setup-job.yaml
 
   # Object storage
-  - minio/statefulset.yaml
-  - minio/service.yaml
-  - minio/init-job.yaml
 
   # Auth
-  - kratos/migrate-job.yaml
-  - kratos/deployment.yaml
-  - kratos/service.yaml
 
   # Access proxy — Oathkeeper (forward-auth Kratos à l'edge)
   # oathkeeper/middleware.yaml retiré : c'était un Middleware Traefik.
   # Son équivalent est l'AuthorizationPolicy de ingress/authorization.yaml.
-  - oathkeeper/configmap.yaml
-  - oathkeeper/deployment.yaml
-  - oathkeeper/service.yaml
 
   # CMS
-  - directus/deployment.yaml
-  - directus/service.yaml
 
   # Geocoding
-  - nominatim/statefulset.yaml
-  - nominatim/service.yaml
 
   # GeoIP
-  - geoipupdate/pvc.yaml
-  - geoipupdate/cronjob.yaml
 
   # Admin tools
-  - pgadmin/deployment.yaml
-  - pgadmin/service.yaml
 
   # Application
   # ⚠️ Le Job de migration doit rester liste ICI : depuis qu'il existe, les
   # replicas du backend ne migrent plus. L'oublier ferait demarrer le backend
   # sur un schema perime sans rien dire. Voir l'en-tete du fichier.
-  - backend/migrate-job.yaml
-  - backend/deployment.yaml
-  - backend/service.yaml
-  - backend/hpa.yaml
-  - temporal-worker/deployment.yaml
-  - frontend/deployment.yaml
-  - frontend/service.yaml
-  - frontend/hpa.yaml
 
   # WebRTC (appels) — STUN/TURN sur les nœuds publics (hostNetwork)
-  - coturn/daemonset.yaml
 
   # Edge security — CrowdSec
   #   crowdsec/middleware.yaml est retiré : c'était le câblage du plugin
@@ -177,8 +127,58 @@ resources:
   #   aupres des pods de la passerelle -- c'est le seul endroit ou l'ext_authz
   #   L7 s'applique en mode ambient (ztunnel ne fait que du L4). Elle est
   #   appliquee separement par playbooks/31-urbanlink-deploy.yml.
-  - ingress/gateway.yaml
-  - ingress/virtualservices.yaml
+resources:
+- namespace.yaml
+- postgres/statefulset.yaml
+- postgres/service.yaml
+- postgres-nominatim/statefulset.yaml
+- postgres-nominatim/service.yaml
+- pgbouncer/deployment.yaml
+- pgbouncer/service.yaml
+- redis/statefulset.yaml
+- redis/service.yaml
+- kafka/statefulset.yaml
+- kafka/service.yaml
+- kafka-ui/deployment.yaml
+- kafka-ui/service.yaml
+- temporal/deployment.yaml
+- temporal/service.yaml
+- temporal-ui/deployment.yaml
+- temporal-ui/service.yaml
+- elasticsearch/statefulset.yaml
+- elasticsearch/service.yaml
+- elasticsearch/setup-job.yaml
+- kibana/deployment.yaml
+- kibana/service.yaml
+- kibana/setup-job.yaml
+- minio/statefulset.yaml
+- minio/service.yaml
+- minio/init-job.yaml
+- kratos/migrate-job.yaml
+- kratos/deployment.yaml
+- kratos/service.yaml
+- oathkeeper/configmap.yaml
+- oathkeeper/deployment.yaml
+- oathkeeper/service.yaml
+- directus/deployment.yaml
+- directus/service.yaml
+- nominatim/statefulset.yaml
+- nominatim/service.yaml
+- geoipupdate/pvc.yaml
+- geoipupdate/cronjob.yaml
+- pgadmin/deployment.yaml
+- pgadmin/service.yaml
+- backend/migrate-job.yaml
+- backend/deployment.yaml
+- backend/service.yaml
+- backend/hpa.yaml
+- temporal-worker/deployment.yaml
+- frontend/deployment.yaml
+- frontend/service.yaml
+- frontend/hpa.yaml
+- coturn/daemonset.yaml
+- ingress/gateway.yaml
+- ingress/virtualservices.yaml
 
 # ============================================================================
 #  ConfigMaps de configuration applicative
@@ -219,21 +219,31 @@ resources:
 # sans etre liste ici -- sans elle, l'ajout d'un fichier le laisserait
 # silencieusement hors du cluster.
 configMapGenerator:
-  - name: kratos-config
-    files:
-      - config/common/kratos/identity.schema.json
-      - config/common/kratos/oidc.google.jsonnet
-      - config/prod/kratos/kratos.yml
-  - name: postgres-init
-    files:
-      - config/common/postgres-init/create-databases.sh
-      - config/common/postgres-init/init-db.sql
-  - name: pgbouncer-config
-    envs:
-      - config/prod/pgbouncer/pgbouncer.env
-  - name: nominatim-config
-    envs:
-      - config/prod/nominatim/nominatim.env
-  - name: kibana-dashboards
-    files:
-      - config/common/kibana/dashboards.ndjson
+- files:
+  - config/common/kratos/identity.schema.json
+  - config/common/kratos/oidc.google.jsonnet
+  - config/prod/kratos/kratos.yml
+  name: kratos-config
+- files:
+  - config/common/postgres-init/create-databases.sh
+  - config/common/postgres-init/init-db.sql
+  name: postgres-init
+- envs:
+  - config/prod/pgbouncer/pgbouncer.env
+  name: pgbouncer-config
+- envs:
+  - config/prod/nominatim/nominatim.env
+  name: nominatim-config
+- files:
+  - config/common/kibana/dashboards.ndjson
+  name: kibana-dashboards
+images:
+- name: urbanconnect-backend
+  newName: 10.0.0.130:5000/urbanconnect-backend
+  newTag: sha-d154fc56
+- name: urbanconnect-frontend
+  newName: 10.0.0.130:5000/urbanconnect-frontend
+  newTag: sha-d154fc56
+- name: urbanconnect-temporal-worker
+  newName: 10.0.0.130:5000/urbanconnect-temporal-worker
+  newTag: sha-d154fc56
