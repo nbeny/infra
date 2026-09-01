@@ -10,6 +10,14 @@
 # seule machine, qui n'a que 12 Go de RAM -- premier suspect si un build meurt
 # sans message.
 
+# ⚠️ ci_nodes descend de guests, dont group_vars fixe ansible_user a
+# lab_admin_user (nbeny) -- valable pour les VMs Terraform, dont le cloud-init
+# cree cet utilisateur. Cette VM a ete montee a la main (cf. inventory/00-static.yml) :
+# nbeny n'y existe pas, seul debian (uid 1000) y a un compte. Sans cette
+# surcharge, tout playbook cible sur ce groupe echoue en UNREACHABLE, publickey
+# refusee.
+ansible_user: debian
+
 docker_users:
   - "{{ ci_runner_service_user }}"
 docker_compose_plugin: true
