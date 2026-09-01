@@ -1,0 +1,33 @@
+---
+# Installe le registre d'images du lab sur la VM de CI.
+#
+#   ansible-playbook playbooks/35-ci-registry.yml
+#
+# Pourquoi un registre, alors que 30-urbanlink-images.yml s'en passe : ce
+# playbook-la construit les images SUR urbanlink, et un `ctr import` local
+# suffit. Le runner GitHub, lui, tourne sur ci-runner -- les deux containerd
+# sont distincts, et une image construite sur l'un est invisible de l'autre.
+#
+# ⚠️ Ce playbook ne suffit pas a rendre les images tirables : il faut aussi
+# autoriser containerd, cote urbanlink, a parler a un registre en clair.
+# C'est le role `docker` qui le fait, via `docker_insecure_registries`.
+
+- name: Installer le registre d'images du lab
+  hosts: ci_nodes
+  gather_facts: true
+  become: true
+
+  roles:
+    - registry
+
+  post_tasks:
+    - name: Recapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "Registre : http://{{ ansible_host }}:{{ registry_port }}/v2/"
+          - ""
+          - "Cote urbanlink, pour que containerd accepte ce registre en clair :"
+          - "  renseigner docker_insecure_registries dans host_vars/urbanlink.yml"
+          - "  puis rejouer le role docker sur cet hote."
+          - ""
+          - "Catalogue :  curl http://{{ ansible_host }}:{{ registry_port }}/v2/_catalog"

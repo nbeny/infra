@@ -1,0 +1,50 @@
+---
+- name: Creer le repertoire de donnees du registre
+  ansible.builtin.file:
+    path: "{{ registry_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deposer l'unite systemd du registre
+  ansible.builtin.template:
+    src: lab-registry.service.j2
+    dest: /etc/systemd/system/lab-registry.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Redemarrer le registre
+
+- name: Activer et demarrer le registre
+  ansible.builtin.systemd:
+    name: lab-registry
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Les handlers ne se declenchent qu'en fin de play : sans ce vidage, la
+# verification ci-dessous interrogerait l'ancien conteneur.
+- name: Appliquer un eventuel changement d'unite avant de verifier
+  ansible.builtin.meta: flush_handlers
+
+- name: Verifier que le registre repond
+  ansible.builtin.uri:
+    url: "http://{{ registry_bind_address }}:{{ registry_port }}/v2/"
+    status_code: 200
+  register: registry_probe
+  retries: 12
+  delay: 5
+  until: registry_probe.status is defined and registry_probe.status == 200
+
+# Une suppression refusee ici signifie que REGISTRY_STORAGE_DELETE_ENABLED n'a
+# pas pris : le registre fonctionnerait, mais sans jamais pouvoir etre purge.
+# Un digest inexistant doit repondre 404 (« je ne l'ai pas ») et non 405
+# (« je ne sais pas supprimer »).
+- name: Verifier que la suppression de manifeste est autorisee
+  ansible.builtin.uri:
+    url: >-
+      http://{{ registry_bind_address }}:{{ registry_port }}/v2/inexistant/manifests/sha256:{{ '0' * 64 }}
+    method: DELETE
+    status_code: [404, 400]
+  changed_when: false
