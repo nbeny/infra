@@ -130,38 +130,40 @@ kubectl create secret generic crowdsec-bouncer-apikey -n traefik --from-literal=
 
 ### 3.3 ConfigMaps — la configuration vient du dépôt applicatif
 
-Elles ne sont **pas** à créer à la main : `playbooks/31-urbanlink-deploy.yml`
-s'en charge, parce que chacune fusionne deux répertoires — ce que kustomize ne
-sait pas faire et ce qu'une commande recopiée à la main finit toujours par
-faire à moitié.
+Elles sont générées par le `configMapGenerator` de `kustomization.yaml`,
+déployé par **Argo CD**. Leur contenu vit dans `config/` du dépôt
+**UrbanConnct**, à côté du `docker-compose.yml` qui monte les mêmes fichiers
+en développement — une seule version, pour deux environnements.
 
-> ⚠️ **Leur contenu ne vit pas dans ce dépôt.** Il est dans `config/` du dépôt
-> **UrbanConnct**, à côté du `docker-compose.yml` qui monte les mêmes fichiers
-> en développement. C'est ce qui empêche un réglage de diverger entre les deux
-> environnements : il n'existe qu'une fois. `kube/urbanlink/config/`, qui en
-> portait une copie, a été supprimé le 2026-08-30.
+> ⚠️ `kube/urbanlink/config/` est une **copie** (mirror), écrite par la CI du
+> dépôt applicatif à chaque push sur `main`. La source de vérité reste
+> `config/` d'UrbanConnct. **Ne rien y éditer à la main** : le `rsync --delete`
+> de la prochaine livraison l'écrasera. Ce qui part réellement dans le cluster
+> est ce que le `configMapGenerator` liste, et rien d'autre — la copie porte
+> aussi des fichiers que rien ne monte (observability/, kratos/email/…).
 
-| ConfigMap | Construite depuis | Montée par |
+| ConfigMap | Construite depuis | Déployé par / monté par |
 |---|---|---|
-| `kratos-config` | `common/kratos/` + `<env>/kratos/` | kratos, kratos-migrate |
-| `postgres-init` | `common/postgres-init/` | postgres |
-| `pgbouncer-config` | `<env>/pgbouncer/` | pgbouncer (`envFrom`) |
-| `nominatim-config` | `common/nominatim/` + `<env>/nominatim/` | nominatim (`envFrom`) |
+| `kratos-config` | `common/kratos/` + `<env>/kratos/` | Argo — kratos, kratos-migrate |
+| `postgres-init` | `common/postgres-init/` | Argo — postgres |
+| `pgbouncer-config` | `<env>/pgbouncer/` | Argo — pgbouncer (`envFrom`) |
+| `nominatim-config` | `common/nominatim/` + `<env>/nominatim/` | Argo — nominatim (`envFrom`) |
+| `observability-config` | `common/observability/` + `<env>/observability/` (otel/tempo/loki) | Argo — otel-collector, tempo, loki |
 
-`<env>` vaut `prod` par défaut (`urbanlink_env`). Le répertoire arrive sur le
-nœud de contrôle par le même `tar` que les sources applicatives — voir l'en-tête
-de `30-urbanlink-images.yml`, qui emporte désormais `config` en plus de
-`backTs` et `front`. Le playbook s'arrête en le disant s'il ne le trouve pas,
-plutôt que de créer des ConfigMaps vides.
+`<env>` vaut `prod` par défaut (`urbanlink_env`). Le suffixe de hash ajouté par
+`configMapGenerator` dépend du **contenu** : changer un fichier change le nom de
+la ConfigMap et redémarre les pods qui la montent — c'est le mécanisme voulu,
+pas un effet de bord (voir l'en-tête de `kustomization.yaml`).
 
-Carte de l'arbre et raisons du découpage : `config/README.md` du dépôt
-applicatif.
-
-> `config/{common,prod}/observability/` existe déjà (collecteur OTLP, Tempo,
-> Loki, Prometheus applicatif, datasources Grafana) mais **aucune ConfigMap
-> n'en est construite** : les manifests de la pile LGTM ne sont pas dans ce
-> dépôt, personne ne la monterait. La ligne est prête, commentée, dans le
-> playbook.
+> **Observabilité.** Les tableaux de bord Grafana (8 JSON dans
+> `grafana-dashboards/`) et les sources de données (`grafana-datasources.yaml`)
+> sont construits en ConfigMaps et découverts par le sidecar Grafana du
+> kube-prometheus-stack, via les labels `grafana_dashboard: "1"` et
+> `grafana_datasource: "1"`. Le Prometheus/Grafana/Alertmanager eux-mêmes sont
+> déployés par **Helm** (`ansible/roles/kubernetes/tasks/observability.yml`),
+> pas par Argo — les valeurs viennent du template
+> `kube-prometheus-stack-values.yaml.j2`, le mot de passe admin et le SMTP via
+> `secrets.env` (clés `GRAFANA_*`).
 
 ### 3.4 Secrets
 

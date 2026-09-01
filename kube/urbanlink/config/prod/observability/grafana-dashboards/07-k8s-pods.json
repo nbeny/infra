@@ -1,0 +1,52 @@
+{
+  "title": "Kubernetes - Pods",
+  "uid": "urbanlink-k8s-pods",
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "30s",
+  "tags": ["urbanlink", "kubernetes"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Replicas desired vs ready",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "kube_deployment_spec_replicas{namespace=\"urbanconnect\"}",
+          "legendFormat": "{{deployment}} desired"
+        },
+        {
+          "expr": "kube_deployment_status_ready_replicas{namespace=\"urbanconnect\"}",
+          "legendFormat": "{{deployment}} ready"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "CPU utilisation (% limits)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by(pod) (rate(container_cpu_usage_seconds_total{namespace=\"urbanconnect\"}[5m]) / on(pod) group_left() max(kube_pod_container_resource_limits{resource=\"cpu\", namespace=\"urbanconnect\"}) by (pod)) * 100",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Memoire utilisation (% limits)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by(pod) (container_memory_working_set_bytes{namespace=\"urbanconnect\"} / on(pod) group_left() max(kube_pod_container_resource_limits{resource=\"memory\", namespace=\"urbanconnect\"}) by (pod)) * 100",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    }
+  ],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" }
+}

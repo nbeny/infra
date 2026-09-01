@@ -1,0 +1,84 @@
+{
+  "title": "Kubernetes - Cluster",
+  "uid": "urbanlink-k8s-cluster",
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "30s",
+  "tags": ["urbanlink", "kubernetes"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Pods Ready / Total",
+      "type": "stat",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(kube_pod_status_ready{namespace=\"urbanconnect\"})",
+          "legendFormat": "ready"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Pods redemarres (10 min)",
+      "type": "stat",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarting_total{namespace=\"urbanconnect\"}[10m]))",
+          "legendFormat": "restarts"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "CPU par pod (cores)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by(pod) (rate(container_cpu_usage_seconds_total{namespace=\"urbanconnect\"}[5m]))",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Memoire par pod (working set)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by(pod) (container_memory_working_set_bytes{namespace=\"urbanconnect\"})",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "PVC utilisation",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes * 100",
+          "legendFormat": "{{persistentvolumeclaim}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Nœuds up",
+      "type": "stat",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(up)",
+          "legendFormat": "nodes up"
+        }
+      ]
+    }
+  ],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" }
+}

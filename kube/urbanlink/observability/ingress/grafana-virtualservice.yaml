@@ -1,0 +1,29 @@
+# ============================================================================
+#  Grafana -- expose l'UI (kube-prometheus-stack)
+# ----------------------------------------------------------------------------
+#  Grafana tourne dans urbanconnect (Grafana du chart kube-prometheus-stack,
+#  Service `kube-prometheus-stack-grafana`). Restreint au tier `internal`
+#  (AuthorizationPolicy), comme Kiali/pgAdmin/etc -- l'observabilite n'est
+#  jamais publique.
+#
+#  Les metriques du Mesh restent sur prometheus.urbanlink.fr (istio-system),
+#  expose par ingress/virtualservices.yaml.
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-grafana
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "grafana.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: kube-prometheus-stack-grafana.urbanconnect.svc.cluster.local
+            port:
+              number: 80

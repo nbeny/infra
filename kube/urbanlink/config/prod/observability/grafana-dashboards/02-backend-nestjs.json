@@ -1,0 +1,92 @@
+{
+  "title": "Backend NestJS",
+  "uid": "urbanlink-backend",
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "30s",
+  "tags": ["urbanlink", "backend"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Requetes HTTP / s (par statut)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by(status) (rate(urbanconnect_http_requests_total[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Latence HTTP p50/p95/p99",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(urbanconnect_http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(urbanconnect_http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(urbanconnect_http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Operations GraphQL / s (par issue)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by(outcome) (rate(urbanconnect_graphql_operations_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Node.js heap",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes",
+          "legendFormat": "rss"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Outbox pending (par etat)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "urbanconnect_outbox_pending",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Kafka messages / s (par issue)",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by(outcome) (rate(urbanconnect_kafka_messages_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    }
+  ],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" }
+}

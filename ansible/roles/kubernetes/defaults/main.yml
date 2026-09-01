@@ -84,6 +84,16 @@ k8s_istio_namespaces:
 # Prometheus + Kiali : le graphe de service et les metriques du mesh.
 k8s_istio_observability: true
 
+# --- Observabilite applicative ---------------------------------------------
+# kube-prometheus-stack (Prometheus + Grafana + Alertmanager). Helm, comme
+# istiod/metrics-server -- PAS par Argo (chart non-Kustomizable). A cote de
+# ce que pose Argo dans `urbanconnect` : OTel/Tempo/Loki + PrometheusRule
+# (kube/urbanlink/observability/). Le Prometheus du MESH (k8s_istio_*)
+# reste celui de Kiali et ne leur est pas melange.
+k8s_observability_enabled: true
+k8s_observability_namespace: urbanconnect
+k8s_kube_prometheus_stack_chart_version: "88.3.0"
+
 # Passerelle d'entree Istio. Quand elle est active, elle REMPLACE Traefik et
 # reprend ses NodePort : les deux ne peuvent pas ecouter sur les memes ports.
 k8s_istio_gateway: false

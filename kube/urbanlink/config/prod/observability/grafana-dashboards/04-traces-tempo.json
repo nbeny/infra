@@ -1,0 +1,52 @@
+{
+  "title": "Traces - Tempo",
+  "uid": "urbanlink-traces",
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "30s",
+  "tags": ["urbanlink", "traces"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Spans recus par le collecteur",
+      "type": "timeseries",
+      "datasource": { "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(otelcol_receiver_otlp_spans_received_total[5m]))",
+          "legendFormat": "spans/s"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Volume traces par service",
+      "type": "timeseries",
+      "datasource": { "uid": "tempo" },
+      "targets": [
+        {
+          "expr": "trace_json('{\"service.name\": \"ingester\"}')",
+          "legendFormat": "ingester"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Recherche / exploration de traces",
+      "type": "traces",
+      "datasource": { "uid": "tempo" },
+      "targets": [{ "query": "${query}", "queryType": "traceql" }]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "query",
+        "type": "constant",
+        "hide": 2,
+        "query": "{}"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" }
+}

@@ -179,6 +179,24 @@ resources:
 - coturn/daemonset.yaml
 - ingress/gateway.yaml
 - ingress/virtualservices.yaml
+- observability/otel-collector/deployment.yaml
+- observability/otel-collector/service.yaml
+- observability/tempo/statefulset.yaml
+- observability/tempo/service.yaml
+- observability/loki/statefulset.yaml
+- observability/loki/service.yaml
+- observability/prometheus-alias.yaml
+- observability/ingress/grafana-virtualservice.yaml
+- observability/prometheus-alerts.yaml
+
+  # Observability — OTel Collector + Tempo + Loki + Prometheus (kube-stack)
+  #   Le kube-prometheus-stack (Prometheus, Alertmanager, Grafana) est deploie
+  #   par Ansible (helm_release), PAS par Argo (chart externes/non-Kustomizable).
+  #   OTel, Tempo et Loki vivent ici, a cote des configs observability-config.
+  #   prometheus-alias.yaml expose kube-prometheus-stack sous l'ancien nom
+  #   `prometheus.urbanconnect.svc.cluster.local:9090` (compat datasources).
+  #   prometheus-alerts.yaml = PrometheusRule selectionne par kube-stack.
+  #   ingress/grafana-virtualservice.yaml = expose Grafana (tier internal).
 
 # ============================================================================
 #  ConfigMaps de configuration applicative
@@ -237,6 +255,28 @@ configMapGenerator:
 - files:
   - config/common/kibana/dashboards.ndjson
   name: kibana-dashboards
+- files:
+  - config/prod/observability/otel-collector-config.yaml
+  - config/common/observability/tempo.yaml
+  - config/common/observability/loki.yaml
+  name: observability-config
+- files:
+  - config/prod/observability/grafana-dashboards/01-k8s-cluster.json
+  - config/prod/observability/grafana-dashboards/02-backend-nestjs.json
+  - config/prod/observability/grafana-dashboards/03-istio-mesh.json
+  - config/prod/observability/grafana-dashboards/04-traces-tempo.json
+  - config/prod/observability/grafana-dashboards/05-logs-loki.json
+  - config/prod/observability/grafana-dashboards/06-otel-collector.json
+  - config/prod/observability/grafana-dashboards/07-k8s-pods.json
+  - config/prod/observability/grafana-dashboards/08-overview.json
+  name: grafana-dashboards
+  labels:
+    grafana_dashboard: "1"
+- files:
+  - config/prod/observability/grafana-datasources.yaml
+  name: grafana-datasources
+  labels:
+    grafana_datasource: "1"
 images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend

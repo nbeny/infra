@@ -1,0 +1,105 @@
+---
+# ---------------------------------------------------------------------------
+#  Observabilite applicative -- kube-prometheus-stack
+# ---------------------------------------------------------------------------
+# Met en place, par Helm (comme istiod/traefik/metrics-server), la plateforme
+# d'observabilite : Prometheus (avec son operator), Grafana et Alertmanager.
+# Elle vit dans `urbanconnect`, a cote de l'observabilite posee par Argo
+# (OTel/Tempo/Loki). C'est Argo qui deploie ces trois-là et le PrometheusRule
+# (kube/urbanlink/observability/) ; ici on ne pose QUE le Helm chart -- le
+# reste du travail est scripte sans Helm, par kustomize.
+#
+# Ce PLAYBOOK est volontairement separe d'istio.yml : le Prometheus du MESH
+# (addon Istio) reste celui de Kiali. Deux Prometheus distincts, un par role.
+#
+# Secrets : lus depuis secrets.env sur le noeud de controle (meme source que
+# 31-urbanlink-deploy.yml et 34-console-accounts.yml), jamais ecrits ici.
+
+- name: "[obs] Verifier le fichier de secrets"
+  ansible.builtin.stat:
+    path: /opt/urbanlink-kube/secrets.env
+  register: obs_secrets
+
+- name: "[obs] Exiger le fichier de secrets"
+  ansible.builtin.assert:
+    that: obs_secrets.stat.exists
+    fail_msg: >
+      /opt/urbanlink-kube/secrets.env est absent. Il est depose par
+      playbooks/31-urbanlink-deploy.yml (rsync du depot). Le creer depuis
+      kube/urbanlink/secrets.env.example ou lancer scripts/secrets/bootstrap.sh.
+
+# Le mot de passe admin de Grafana est OBLIGATOIRE : Grafana refuse de
+# demarrer sans adminPassword explicite.
+- name: "[obs] Lire GRAFANA_ADMIN_PASSWORD depuis secrets.env"
+  ansible.builtin.shell:
+    cmd: "sed -n 's/^GRAFANA_ADMIN_PASSWORD=//p' /opt/urbanlink-kube/secrets.env | head -1"
+    executable: /bin/bash
+  register: obs_grafana_admin
+  changed_when: false
+  no_log: true
+
+- name: "[obs] Exiger le mot de passe admin Grafana"
+  ansible.builtin.assert:
+    that: obs_grafana_admin.stdout | trim | length > 0
+    fail_msg: >
+      GRAFANA_ADMIN_PASSWORD est vide dans secrets.env. Il est genere par
+      scripts/secrets/bootstrap.sh -- le relancer ou le renseigner.
+
+- name: "[obs] Lire les parametres SMTP d'Alertmanager depuis secrets.env"
+  ansible.builtin.shell:
+    cmd: |
+      sed -n 's/^GRAFANA_SMTP_SMARTHOST=//p' /opt/urbanlink-kube/secrets.env | head -1
+      sed -n 's/^GRAFANA_SMTP_USERNAME=//p'  /opt/urbanlink-kube/secrets.env | head -1
+      sed -n 's/^GRAFANA_SMTP_PASSWORD=//p'  /opt/urbanlink-kube/secrets.env | head -1
+    executable: /bin/bash
+  register: obs_smtp
+  changed_when: false
+  no_log: true
+
+- name: "[obs] Relever les parametres SMTP"
+  ansible.builtin.set_fact:
+    grafana_admin_password: "{{ obs_grafana_admin.stdout | trim }}"
+    grafana_smtp_smarthost: "{{ obs_smtp.stdout_lines[0] | default('', true) | trim }}"
+    grafana_smtp_username:  "{{ obs_smtp.stdout_lines[1] | default('', true) | trim }}"
+    grafana_smtp_password:  "{{ obs_smtp.stdout_lines[2] | default('', true) | trim }}"
+
+# Alertmanager demarre meme sans SMTP : l'email n'est alors pas envoye, mais
+# la pile tourne. On le signale pour que ce soit un choix, pas un oubli.
+- name: "[obs] Avertir si le SMTP d'Alertmanager est vide"
+  ansible.builtin.debug:
+    msg: >-
+      GRAFANA_SMTP_* sont vides : les emails d'alerte ne partiront pas.
+      Renseigner dans secrets.env (voir kube/urbanlink/secrets.env.example).
+  when: grafana_smtp_smarthost | length == 0
+
+- name: "[obs] Ajouter le depot Helm prometheus-community"
+  ansible.builtin.command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  register: obs_repo
+  changed_when: "'has been added' in obs_repo.stdout"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: "[obs] Mettre a jour les depots Helm"
+  ansible.builtin.command: helm repo update
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+
+- name: "[obs] Deposer les valeurs Helm du kube-prometheus-stack"
+  ansible.builtin.template:
+    src: kube-prometheus-stack-values.yaml.j2
+    dest: /root/kube-prometheus-stack-values.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: "[obs] Installer le kube-prometheus-stack"
+  ansible.builtin.include_tasks: helm_release.yml
+  vars:
+    hr_name: kube-prometheus-stack
+    hr_chart: prometheus-community/kube-prometheus-stack
+    hr_namespace: "{{ k8s_observability_namespace }}"
+    hr_version: "{{ k8s_kube_prometheus_stack_chart_version }}"
+    hr_values: /root/kube-prometheus-stack-values.yaml
+    hr_timeout: 15m

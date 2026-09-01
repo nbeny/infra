@@ -1,0 +1,199 @@
+# ============================================================================
+#  PrometheusRule -- alertes UrbanLink
+# ----------------------------------------------------------------------------
+#  CRD appliquee par kube-prometheus-stack. Le Prometheus du chart la selec-
+#  tionne via le label `release: kube-prometheus-stack` (regle par defaut du
+#  chart). Les alertes resolues partent dans Alertmanager, route email.
+#
+#  Metriques sources :
+#    - urbanconnect_*          : backend NestJS (additionalScrapeConfigs)
+#    - kube_*                  : kube-state-metrics
+#    - otelcol_*               : collecteur OTel
+#
+#  L'alerte ne vaut que si la metrique existe. Les metriques redis_*/pg_* ne
+#  sont PAS scrapees (aucun exporter) -- pas de regle les concernant.
+# ============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: urbanlink-alerts
+  namespace: urbanconnect
+  labels:
+    release: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    # --- Disponibilite --------------------------------------------------------
+    - name: urbanlink.availability
+      rules:
+        - alert: PodCrashLooping
+          expr: >-
+            increase(kube_pod_container_status_restarting_total{
+              namespace="urbanconnect"
+            }[10m]) > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.pod }} en CrashLoop ({{ $value | humanize }} restarts/10min)"
+
+        - alert: PodNotReady
+          expr: >-
+            kube_pod_status_ready{
+              namespace="urbanconnect",
+              condition="false"
+            } == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} not ready depuis 5min"
+
+        - alert: DeploymentReplicasMismatch
+          expr: >-
+            kube_deployment_spec_replicas{namespace="urbanconnect"}
+            != kube_deployment_status_ready_replicas{namespace="urbanconnect"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Deployment {{ $labels.deployment }} :
+              {{ $value }} replicas prets sur {{ with query
+              "kube_deployment_spec_replicas{namespace='urbanconnect',deployment='{{ $labels.deployment }}'}"
+              }}{{ . | first | value }}{{ end }} desirees
+
+    # --- Ressources -----------------------------------------------------------
+    - name: urbanlink.resources
+      rules:
+        - alert: HighCPUUsage
+          expr: >-
+            (rate(container_cpu_usage_seconds_total{namespace="urbanconnect"}[5m])
+            / on(pod) group_left()
+            kube_pod_container_resource_limits{
+              resource="cpu", namespace="urbanconnect"
+            }) > 0.8
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} CPU > 80% ({{ $value | humanizePercentage }})"
+
+        - alert: HighMemoryUsage
+          expr: >-
+            (container_memory_working_set_bytes{namespace="urbanconnect"}
+            / on(pod) group_left()
+            kube_pod_container_resource_limits{
+              resource="memory", namespace="urbanconnect"
+            }) > 0.85
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.pod }} memoire > 85% ({{ $value | humanizePercentage }})"
+
+        - alert: PVCNearFull
+          expr: >-
+            kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              PVC {{ $labels.persistentvolumeclaim }} plein a
+              {{ $value | humanizePercentage }}
+
+        - alert: OOMKillDetected
+          expr: >-
+            kube_pod_container_status_last_terminated_reason{
+              namespace="urbanconnect"
+            } == "OOMKilled"
+          labels:
+            severity: critical
+          annotations:
+            summary: "OOMKill sur {{ $labels.pod }}"
+
+    # --- Backend NestJS -------------------------------------------------------
+    - name: urbanlink.backend
+      rules:
+        - alert: BackendHighErrorRate
+          expr: >-
+            rate(urbanconnect_http_requests_total{status=~"5.."}[5m])
+            / rate(urbanconnect_http_requests_total[5m]) > 0.01
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend 5xx > 1% ({{ $value | humanizePercentage }})"
+
+        - alert: BackendHighLatency
+          expr: >-
+            histogram_quantile(0.99,
+              rate(urbanconnect_http_request_duration_seconds_bucket[5m])
+            ) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backend p99 latency > 2s ({{ $value }}s)"
+
+        - alert: GraphQLErrorsSpike
+          expr: >-
+            rate(urbanconnect_graphql_operations_total{
+              outcome="error"
+            }[5m]) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GraphQL errors > 5/s ({{ $value }}/s)"
+
+    # --- Kafka / Outbox -------------------------------------------------------
+    - name: urbanlink.kafka
+      rules:
+        - alert: KafkaDLQMessages
+          expr: >-
+            rate(urbanconnect_kafka_messages_total{outcome="dlq"}[5m]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Messages en DLQ sur topic {{ $labels.topic }}"
+
+        - alert: OutboxPoisoned
+          expr: urbanconnect_outbox_pending{state="poisoned"} > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Outbox poisoned (evenements en erreur permanente)"
+
+    # --- OTel Collector -------------------------------------------------------
+    - name: urbanlink.otel
+      rules:
+        - alert: OTelCollectorDrops
+          expr: >-
+            increase(otelcol_processor_send_failed_spans_total[5m]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "OTel Collector droppe des spans"
+
+        - alert: OTelHighMemory
+          expr: >-
+            otelcol_process_resident_memory_bytes > 400 * 1024 * 1024
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "OTel Collector memoire > 400MB"
+
+    # --- TLS / Certificats ----------------------------------------------------
+    - name: urbanlink.tls
+      rules:
+        - alert: CertExpiringSoon
+          expr: >-
+            certmanager_certificate_expiration_timestamp_seconds
+            - time() < 86400 * 30
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificat {{ $labels.name }} expire dans < 30 jours"
