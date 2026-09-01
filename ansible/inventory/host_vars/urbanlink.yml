@@ -37,3 +37,16 @@ k8s_istio_observability: true
 k8s_ingress_controller: none
 k8s_istio_gateway: true
 k8s_istio_replaces_traefik: true
+
+# --- Registre d'images du lab ---------------------------------------------
+# Les images applicatives sont construites sur ci-runner par la CI GitHub, et
+# poussees dans le registre qui y tourne (roles/registry, 35-ci-registry.yml).
+# containerd doit donc accepter de le joindre EN CLAIR : voir
+# docker_insecure_registries dans roles/docker.
+#
+# ⚠️ Le PULL ne quitte pas le LAN, mais il quitte bien cette VM : le registre
+# n'est pas ici. Si ci-runner est eteinte, un tag NEUF est intirable -- un tag
+# deja present, lui, ne declenche aucun pull (imagePullPolicy IfNotPresent,
+# les tags etant des `sha-<abbrev>` immuables et jamais `latest`).
+docker_insecure_registries:
+  - "10.0.0.130:5000"   # ci-runner

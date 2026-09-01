@@ -38,7 +38,16 @@
   become: true
 
   roles:
-    - registry
+    # ⚠️ `docker` AVANT `registry`, et pas seulement parce que le registre est
+    # un conteneur : c'est ce role qui declare le registre en clair aupres du
+    # demon Docker local (docker_insecure_registries, group_vars/ci_nodes.yml).
+    # Sans lui, le registre tourne parfaitement et le `docker push` du job
+    # `images` echoue quand meme -- Docker ne considere comme non securise que
+    # 127.0.0.0/8, jamais une adresse RFC1918.
+    - role: docker
+      tags: docker
+    - role: registry
+      tags: registry
 
   post_tasks:
     - name: Recapitulatif
@@ -46,8 +55,11 @@
         msg:
           - "Registre : http://{{ ansible_host }}:{{ registry_port }}/v2/"
           - ""
-          - "Cote urbanlink, pour que containerd accepte ce registre en clair :"
-          - "  renseigner docker_insecure_registries dans host_vars/urbanlink.yml"
-          - "  puis rejouer le role docker sur cet hote."
+          - "Push depuis cette VM : autorise par docker_insecure_registries"
+          - "  (group_vars/ci_nodes.yml), applique par le role docker ci-dessus."
+          - ""
+          - "Pull depuis urbanlink : renseigner docker_insecure_registries dans"
+          - "  host_vars/urbanlink.yml, puis :"
+          - "  ansible-playbook playbooks/20-debian-k8s.yml -l urbanlink --tags docker"
           - ""
           - "Catalogue :  curl http://{{ ansible_host }}:{{ registry_port }}/v2/_catalog"

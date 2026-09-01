@@ -5,6 +5,15 @@
 #
 #   ansible-playbook playbooks/20-debian-k8s.yml
 #   ansible-playbook playbooks/20-debian-k8s.yml -l urbanconnect
+#
+# Chaque role porte son nom en tag, pour rejouer une seule couche sans
+# retraverser les deux autres :
+#
+#   ansible-playbook playbooks/20-debian-k8s.yml -l urbanlink --tags docker
+#
+# ⚠️ Ce n'est pas qu'un gain de temps sur un noeud DEJA en service : le role
+# `kubernetes` retraverse kubeadm, et l'etcd de cette VM est lent (fsync
+# ~3,7 ms). N'y toucher que quand c'est le sujet.
 
 - name: Configurer les noeuds Debian (docker + kubernetes)
   hosts: debian_nodes
@@ -12,17 +21,23 @@
   become: true
 
   pre_tasks:
+    # `always` : la garde de distribution doit tenir quel que soit le tag
+    # demande, sinon `--tags docker` installerait Docker sur une Kali.
     - name: Verifier que la distribution est bien Debian
       ansible.builtin.fail:
         msg: >-
           {{ inventory_hostname }} rapporte "{{ ansible_distribution }}".
           Ce playbook cible Debian ; pour Kali utilise 21-kali.yml.
       when: ansible_distribution != 'Debian'
+      tags: always
 
   roles:
     - role: common
+      tags: common
     - role: docker
+      tags: docker
     - role: kubernetes
+      tags: kubernetes
 
   post_tasks:
     - name: Recapitulatif
