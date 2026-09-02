@@ -164,6 +164,13 @@ VIDES_ATTENDUS = {
         "les certificats internes d'Istio tournent normalement (~21 h "
         "restantes au releve du 2026-09-02).",
     "OTelQueueNearFull": "la file d'export du collecteur est vide.",
+    "TelemetryPipelineSilent":
+        "des spans arrivent a Tempo, donc `== 0` est faux ET `absent()` est "
+        "vide. ⚠️ Un VIDE est ici la BONNE reponse : c'est l'etat sain depuis "
+        "que OTEL_EXPORTER_OTLP_ENDPOINT est pose. Avant, cette meme regle "
+        "rendait une serie via `absent()` -- et c'etait l'alarme.",
+    "LogPipelineSilent":
+        "des journaux arrivent a Loki. Meme lecture que ci-dessus.",
     "TempoFlushFailing": "aucune ecriture de bloc echouee.",
     "LokiChunkFlushFailing": "aucune ecriture de chunk echouee.",
 
@@ -201,14 +208,44 @@ VIDES_ATTENDUS = {
 #  exception permanente, c'est-a-dire exactement le mecanisme que ce script
 #  combat.
 EN_ATTENTE_DE_DEPLOIEMENT = {
-    "tempo_distributor_spans_received_total":
-        "A2 -- apparaitra des que le backend enverra ses traces "
-        "(OTEL_EXPORTER_OTLP_ENDPOINT sur le Deployment). Le SDK "
-        "OpenTelemetry-Go n'instancie un instrument qu'au PREMIER "
-        "enregistrement : la metrique n'existe pas encore parce que rien "
-        "n'est jamais passe.",
-    "loki_distributor_lines_received_total":
-        "A2 -- idem pour les journaux, via le pont otel-log-bridge.ts.",
+    "urbanconnect_outbox_pending":
+        "DEFAUT APPLICATIF CORRIGE, PAS ENCORE DEPLOYE. `drain()` sortait par "
+        "son retour anticipe sans appeler `reportBacklog()` quand `claim()` ne "
+        "reservait rien -- or une ligne EMPOISONNEE a `attempts >= MAX` et "
+        "n'est jamais reservee. La seule situation que la jauge devait rendre "
+        "visible etait donc exactement celle ou elle ne se posait pas, et "
+        "`OutboxPoisoned` / `OutboxBacklogGrowing` etaient muettes. Corrige "
+        "dans backTs/src/common/outbox/outbox-relay.service.ts (depot "
+        "applicatif) ; la metrique reapparaitra des la premiere image "
+        "construite avec ce correctif.",
+}
+
+# ---------------------------------------------------------------------------
+#  Compteurs qui n'existent qu'apres leur premier increment
+# ---------------------------------------------------------------------------
+#  ⚠️ CETTE CATEGORIE EXISTE PARCE QUE CHAQUE DEPLOIEMENT LA DECLENCHE.
+#
+#  `prom-client` — comme le SDK OpenTelemetry-Go — ne cree une serie qu'au
+#  PREMIER `.inc()` avec ce jeu d'etiquettes. Un compteur d'evenements rares
+#  n'existe donc pas du tout tant que l'evenement ne s'est pas produit, et
+#  DISPARAIT a chaque redemarrage de pod jusqu'a ce qu'il se reproduise.
+#
+#  Ce n'est pas un defaut : c'est le comportement correct, et les alertes qui
+#  s'y adossent sont justes -- elles tirent quand la serie apparait. Mais le
+#  distinguer d'une metrique qui n'a JAMAIS existe demande de le declarer ici,
+#  faute de quoi la porte crie a chaque livraison et on apprend a l'ignorer.
+#
+#  ⚠️ N'y inscrire QUE des compteurs dont on a verifie qu'ils existent apres
+#  activite. Un nom mal orthographie y serait indetectable -- c'est la seule
+#  faille possible de ce dispositif, et elle se referme en verifiant AVANT
+#  d'ajouter une entree.
+METRIQUES_A_INSTANCIATION_TARDIVE = {
+    "urbanconnect_kafka_messages_total":
+        "compteur cree au premier message publie. Absent sur un backend "
+        "fraichement redemarre qui n'a encore rien emis. Verifie present le "
+        "2026-09-02 avant le redeploiement (topic notification.delivery).",
+    "urbanconnect_outbox_events_total":
+        "meme mecanisme : cree au premier evenement relaye.",
 }
 
 # Mots du langage PromQL : identifiants valides, mais pas des noms de
@@ -365,7 +402,7 @@ def main() -> int:
 
     print(f"Prometheus : {PROM_URL}  (Host: {PROM_HOST})\n")
 
-    total = ok = vide_justifie = en_attente = 0
+    total = ok = vide_justifie = en_attente = tardif = 0
     erreurs_promql = []
     metriques_fantomes = []
     vides_non_justifies = []
@@ -395,6 +432,14 @@ def main() -> int:
         citees = metriques_citees(substituer(expr_brute))
         absentes = [m for m in citees if not existe(m)]
 
+        tardives = [m for m in absentes if m in METRIQUES_A_INSTANCIATION_TARDIVE]
+        if tardives and len(tardives) == len(absentes):
+            tardif += 1
+            if args.verbose:
+                print(f"◷ TARDIVE {fichier} › {titre}")
+                print(f"           {METRIQUES_A_INSTANCIATION_TARDIVE[tardives[0]]}")
+            continue
+
         attendues = [m for m in absentes if m in EN_ATTENTE_DE_DEPLOIEMENT]
         if attendues and len(attendues) == len(absentes):
             en_attente += 1
@@ -402,7 +447,8 @@ def main() -> int:
             print(f"           {EN_ATTENTE_DE_DEPLOIEMENT[attendues[0]]}")
             continue
 
-        vraiment_absentes = [m for m in absentes if m not in EN_ATTENTE_DE_DEPLOIEMENT]
+        connues = set(EN_ATTENTE_DE_DEPLOIEMENT) | set(METRIQUES_A_INSTANCIATION_TARDIVE)
+        vraiment_absentes = [m for m in absentes if m not in connues]
         if vraiment_absentes:
             metriques_fantomes.append((fichier, titre, vraiment_absentes))
             print(f"✖ FANTOME {fichier} › {titre}")
@@ -446,6 +492,7 @@ def main() -> int:
 
     print("\n" + "─" * 74)
     print(f"{total} expressions · {ok} OK · {vide_justifie} vides justifies "
+          f"· {tardif} compteurs pas encore instancies "
           f"· {en_attente} en attente de deploiement")
     print(f"{len(erreurs_promql)} erreurs PromQL · {len(metriques_fantomes)} metriques "
           f"fantomes · {len(vides_non_justifies)} vides non justifies")

@@ -28,6 +28,23 @@
 
 apiVersion: 1
 
+# ⚠️ RETIRER UNE ENTREE DE `datasources:` NE SUPPRIME RIEN DANS GRAFANA.
+#
+# Le provisionnement par fichier est ADDITIF : Grafana insere ou met a jour ce
+# qu'il lit, et laisse en base ce qui n'y figure plus. Mesure le 2026-09-02 --
+# apres avoir retire « Prometheus (mesh Istio) » de ce fichier et redeploye,
+# `GET /api/datasources` la rendait toujours, pointant sur un ExternalName vers
+# le meme serveur que la source « Prometheus ». Le doublon avait disparu du
+# depot et survivait dans le produit.
+#
+# `deleteDatasources` est le seul mecanisme de suppression. Il s'applique AVANT
+# les insertions, il est idempotent, et il doit RESTER ici : l'enlever une fois
+# le menage fait rendrait la suppression non rejouable sur une instance
+# restauree depuis une sauvegarde anterieure.
+deleteDatasources:
+  - name: Prometheus (mesh Istio)
+    orgId: 1
+
 datasources:
   # --- Metriques : metier ET maillage, un seul serveur ----------------------
   # `prometheus.urbanconnect.svc.cluster.local` est un Service d'ALIAS
