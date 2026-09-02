@@ -212,16 +212,16 @@ VIDES_ATTENDUS = {
 #  exception permanente, c'est-a-dire exactement le mecanisme que ce script
 #  combat.
 EN_ATTENTE_DE_DEPLOIEMENT = {
-    "urbanconnect_outbox_pending":
-        "DEFAUT APPLICATIF CORRIGE, PAS ENCORE DEPLOYE. `drain()` sortait par "
-        "son retour anticipe sans appeler `reportBacklog()` quand `claim()` ne "
-        "reservait rien -- or une ligne EMPOISONNEE a `attempts >= MAX` et "
-        "n'est jamais reservee. La seule situation que la jauge devait rendre "
-        "visible etait donc exactement celle ou elle ne se posait pas, et "
-        "`OutboxPoisoned` / `OutboxBacklogGrowing` etaient muettes. Corrige "
-        "dans backTs/src/common/outbox/outbox-relay.service.ts (depot "
-        "applicatif) ; la metrique reapparaitra des la premiere image "
-        "construite avec ce correctif.",
+    # VIDE, et c'est l'etat normal. La derniere entree --
+    # `urbanconnect_outbox_pending`, absente parce que `drain()` ne posait la
+    # jauge que s'il avait publie quelque chose -- a ete retiree le 2026-09-02
+    # apres verification sur le cluster : le correctif est deploye
+    # (sha-2066558a) et la metrique porte a nouveau ses deux etats sur chaque
+    # replica.
+    #
+    # ⚠️ Toute entree ajoutee ici doit repartir des que le correctif est en
+    # ligne. Une exception qui reste devient permanente, c'est-a-dire
+    # exactement le mecanisme que ce script combat.
 }
 
 # ---------------------------------------------------------------------------
