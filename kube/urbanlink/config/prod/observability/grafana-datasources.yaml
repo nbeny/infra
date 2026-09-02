@@ -1,13 +1,23 @@
 # ============================================================================
 #  Grafana -- sources de donnees provisionnees, PRODUCTION (Kubernetes)
 # ----------------------------------------------------------------------------
-#  QUATRE sources, contre trois en dev. La quatrieme est le Prometheus du MESH
-#  (addon Istio, namespace istio-system) : il ne mesure pas la meme chose que
-#  le Prometheus applicatif, et les confondre mene a des diagnostics faux.
+#  TROIS sources, comme en dev : Prometheus, Tempo, Loki.
 #
-#      « l'API est lente »
-#        -> Prometheus (appli)  dit ou le temps est passé DANS le backend
-#        -> Prometheus (mesh)   dit si le temps est passé AVANT d'y entrer
+#  ⚠️ IL Y EN AVAIT QUATRE. La quatrieme, « Prometheus (mesh Istio) », visait
+#  `prometheus.istio-system.svc.cluster.local:9090` -- le Prometheus de l'addon
+#  Istio, qui portait la telemetrie du maillage pendant que celui d'`urbanconnect`
+#  portait les metriques metier. Deux serveurs, deux roles, deux entrees : c'etait
+#  juste.
+#
+#  Ca ne l'est plus depuis la consolidation (depot infra, commit af9cc10). Il n'y
+#  a PLUS QU'UN Prometheus ; le Service `prometheus` de `istio-system` a survecu
+#  en `ExternalName` pointant sur lui, parce que Kiali le nomme en dur et que sa
+#  configuration amont n'est pas modifiable depuis ces depots.
+#
+#  Les deux entrees interrogeaient donc le MEME serveur sous deux noms. Un
+#  tableau de bord pouvait citer l'une ou l'autre sans difference visible, ce qui
+#  est exactement la situation ou l'on finit par croire qu'on compare deux
+#  mesures. Le mesh et le metier vivent dans un seul Prometheus : une source.
 #
 #  ⚠️ `${__value.raw}` porte UN SEUL dollar ici, contre deux en dev. Le double
 #  est une echappement de docker compose, qui interpole les fichiers qu'il
@@ -19,25 +29,17 @@
 apiVersion: 1
 
 datasources:
-  # --- Metriques metier ----------------------------------------------------
+  # --- Metriques : metier ET maillage, un seul serveur ----------------------
+  # `prometheus.urbanconnect.svc.cluster.local` est un Service d'ALIAS
+  # (infra: kube/urbanlink/observability/prometheus-alias.yaml) vers le
+  # Prometheus du kube-prometheus-stack. Le nom est garde pour ne pas avoir a
+  # reecrire cette URL a chaque changement de nom de release.
   - name: Prometheus
     type: prometheus
     uid: prometheus
     access: proxy
     url: http://prometheus.urbanconnect.svc.cluster.local:9090
     isDefault: true
-    jsonData:
-      httpMethod: POST
-
-  # --- Metriques du mesh ---------------------------------------------------
-  # Installe avec Istio (addon), par le depot infra -- pas par celui-ci. Il
-  # est deja expose sous prometheus.urbanlink.fr ; le brancher ici evite
-  # d'avoir a ouvrir un second onglet pour croiser les deux.
-  - name: Prometheus (mesh Istio)
-    type: prometheus
-    uid: prometheus-mesh
-    access: proxy
-    url: http://prometheus.istio-system.svc.cluster.local:9090
     jsonData:
       httpMethod: POST
 

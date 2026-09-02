@@ -2,28 +2,72 @@
 #  PrometheusRule -- alertes UrbanLink
 # ----------------------------------------------------------------------------
 #  CRD appliquee par kube-prometheus-stack. Le Prometheus du chart la selec-
-#  tionne via le label `release: kube-prometheus-stack` (regle par defaut du
-#  chart). Les alertes resolues partent dans Alertmanager, route email.
+#  tionne via le label `release: kube-prometheus-stack` (ruleSelector des
+#  valeurs Helm). Les alertes partent dans Alertmanager, expose sur
+#  alertmanager.urbanlink.fr.
 #
-#  Metriques sources :
-#    - urbanconnect_*          : backend NestJS (additionalScrapeConfigs)
-#    - kube_*                  : kube-state-metrics
-#    - otelcol_*               : collecteur OTel
+#  ─────────────────────────────────────────────────────────────────────────
+#  UNE ALERTE QUI NE PEUT PAS TIRER EST PIRE QU'UNE ALERTE ABSENTE
+#  ─────────────────────────────────────────────────────────────────────────
+#  Elle donne l'illusion d'une surveillance. Six regles etaient dans ce cas
+#  avant le 2026-09-02, et rien ne le disait :
 #
-#  L'alerte ne vaut que si la metrique existe. Les metriques redis_*/pg_* ne
-#  sont PAS scrapees (aucun exporter) -- pas de regle les concernant. Pour la
-#  meme raison, il n'y a aucune regle sur les certificats : ils sont renouveles
-#  par certbot sur le noeud Proxmox, pas par cert-manager, et
-#  `certmanager_certificate_expiration_timestamp_seconds` n'existe nulle part
-#  dans ce cluster.
+#    OTelCollectorDrops           `otelcol_exporter_send_failed_spans_total`
+#                                 n'existe pas -- le collecteur n'expose que
+#                                 TROIS metriques `otelcol_*`. SUPPRIMEE.
+#    DeploymentReplicasMismatch   `kube_deployment_status_ready_replicas`
+#                                 n'existe pas ; le vrai nom est
+#                                 `..._status_replicas_ready` (deux derniers
+#                                 mots inverses). L'expression rendait
+#                                 0 serie, toujours. CORRIGEE.
+#    PVCNearFull                  `kubelet_volume_stats_*` est absent de ce
+#                                 cluster : les 12 PVC sont en `local-path`,
+#                                 dont les volumes sont des chemins de l'hote
+#                                 -- le kubelet n'en produit aucune
+#                                 statistique. SUPPRIMEE, remplacee par
+#                                 NodeDiskFillingUp sur `/`, qui les porte
+#                                 tous.
+#    GraphQLErrorsSpike           seuil absolu `> 5 erreurs/s` sur un trafic
+#                                 mesure a moins d'UNE requete/s : jamais
+#                                 atteignable. Devenue GraphQLErrorRatio.
+#    IstioCertExpiringSoon        seuil a 7 jours sur des certificats dont la
+#                                 duree de vie est de 24 h : elle aurait tire
+#                                 en PERMANENCE. Devenue IstioCertNotRotating,
+#                                 seuil 1 h.
+#    (et le groupe otel entier)   voir urbanlink.telemetry plus bas.
 #
-#  ⚠️ Une regle FAUSSE ne se voit pas. Deux pieges rencontres ici :
-#    - un nom de metrique inexistant ne leve aucune erreur : l'expression rend
-#      un vecteur vide, et l'alerte ne part simplement jamais ;
-#    - un `on(pod)` entre deux series qui ont plusieurs conteneurs par pod
-#      echoue a CHAQUE evaluation (« multiple matches for labels »), et
-#      l'erreur ne se lit que dans l'onglet Rules de Prometheus.
-#  D'ou l'appariement complet `on(namespace, pod, container)` plus bas.
+#  CHAQUE regle ci-dessous est adossee a une metrique dont la presence a ete
+#  VERIFIEE sur ce cluster, et chaque seuil est pose au regard de la ligne de
+#  base mesuree le 2026-09-02 : 16 coeurs, charge 5 min a 2,16, RAM a 17 %,
+#  disque `/` a 34,6 %, moins d'une requete/s.
+#
+#  La porte qui l'a permis : `scripts/observability/check-queries.py`, qui
+#  execute chaque expression de ce fichier contre le Prometheus reel et refuse
+#  ce qui ne peut pas fonctionner. NE PAS MODIFIER CE FICHIER SANS LA REJOUER.
+#
+#  ⚠️ TROIS pieges PromQL rencontres ici, qui ne se voient PAS a la lecture --
+#  les trois produisent une alerte muette, aucun ne produit d'erreur :
+#
+#    1. un nom de metrique inexistant rend un vecteur vide. C'est le mecanisme
+#       des six lignes ci-dessus ;
+#
+#    2. un APPARIEMENT VECTORIEL qui ne trouve aucune paire rend un vecteur
+#       vide lui aussi -- alors que les deux metriques existent, et que
+#       l'expression se lit parfaitement. Deux regles de ce fichier en sont
+#       mortes, toutes deux trouvees par la porte le 2026-09-02 :
+#         · OTelQueueNearFull -- `queue_size` porte une etiquette `data_type`
+#           que `queue_capacity` n'a pas ;
+#         · NodeHighLoad -- `node_load5` porte sept etiquettes, le denominateur
+#           `count(count by (cpu) (...))` n'en porte aucune.
+#       Remede : `on(...)` / `ignoring(...)`, ou `scalar()` quand le
+#       denominateur est un nombre. Les deux cas sont documentes sur place ;
+#
+#    3. un `on(pod)` entre deux series qui ont plusieurs conteneurs par pod
+#       echoue a CHAQUE evaluation (« multiple matches for labels »). Celui-la
+#       au moins laisse une trace -- dans l'onglet Rules de Prometheus, et
+#       desormais sur le tableau de bord « 04 — Chaine d'observabilite »,
+#       panneau « Regles en echec ». D'ou l'appariement complet
+#       `on(namespace, pod, container)` plus bas.
 # ============================================================================
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -35,9 +79,100 @@ metadata:
     role: alert-rules
 spec:
   groups:
-    # --- Disponibilite --------------------------------------------------------
+    # =======================================================================
+    #  META -- la surveillance se surveille elle-meme
+    # -----------------------------------------------------------------------
+    #  Groupe NEUF. Il n'existait pas, et c'est ce qui a permis aux six regles
+    #  mortes de le rester : rien ne surveillait le surveillant.
+    # =======================================================================
+    - name: urbanlink.meta
+      rules:
+        - alert: PrometheusTargetDown
+          # Une cible muette ne produit pas d'erreur : elle produit un GRAPHE
+          # PLAT, qui se lit exactement comme un systeme calme. C'est la seule
+          # alerte qui distingue « tout va bien » de « je ne sais plus rien ».
+          expr: up == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Cible {{ $labels.job }} ({{ $labels.instance }}) muette depuis
+              10 minutes -- les panneaux qui en dependent affichent un plat,
+              pas une erreur
+
+        - alert: PrometheusRuleFailures
+          # ⚠️ L'ALERTE QUI AURAIT DU EXISTER EN PREMIER. Une regle dont
+          # l'expression est invalide echoue silencieusement a chaque
+          # evaluation : l'alerte ne tire jamais et rien ne le dit ailleurs
+          # que dans l'onglet Rules. Un `on(pod)` ambigu a vecu ainsi.
+          expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              Groupe de regles {{ $labels.rule_group }} : l'evaluation echoue.
+              Les alertes de ce groupe NE TIRERONT PAS -- voir l'onglet Rules
+              de Prometheus pour l'erreur exacte
+
+        - alert: AlertmanagerNotificationsFailing
+          expr: increase(alertmanager_notifications_failed_total[15m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              Alertmanager n'arrive pas a livrer vers {{ $labels.integration }}
+              -- les alertes tirent mais personne ne les recoit
+
+        - alert: PrometheusTSDBGrowth
+          # Seuil pose a 2,5x la ligne de base mesuree (80 632 series). Une
+          # etiquette a cardinalite non bornee -- un identifiant, une URL brute
+          # -- multiplie ce chiffre en quelques heures et finit par faire
+          # tomber Prometheus lui-meme.
+          expr: max(prometheus_tsdb_head_series) > 200000
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Prometheus : {{ $value | humanize }} series actives (base
+              habituelle ~80 000). Chercher une etiquette a cardinalite non
+              bornee
+
+    # =======================================================================
+    #  DISPONIBILITE
+    # =======================================================================
     - name: urbanlink.availability
       rules:
+        - alert: NodeNotReady
+          # Cluster MONO-NOEUD : sa chute emporte tout. Cette alerte inhibe
+          # toutes les autres dans Alertmanager (inhibit_rules des valeurs
+          # Helm) -- sans quoi une seule panne en declencherait trente, qui
+          # disent la meme chose.
+          expr: >-
+            kube_node_status_condition{condition="Ready", status="true"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Noeud {{ $labels.node }} NOT READY -- tout le cluster est dessus"
+
+        - alert: BackendNoReplicas
+          # Le cas ou tout est mort. Distinct de DeploymentReplicasMismatch
+          # (degradation) : ici il n'y a plus personne pour repondre, et 2 min
+          # suffisent -- attendre 10 comme pour une degradation serait absurde.
+          expr: >-
+            kube_deployment_status_replicas_ready{
+              namespace="urbanconnect", deployment="backend"
+            } == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend : PLUS AUCUN replica pret -- l'API ne repond plus"
+
         - alert: PodCrashLooping
           # kube-state-metrics expose `_restarts_total`, pas `_restarting_total` :
           # ce dernier n'existe pas et l'alerte n'aurait jamais tire.
@@ -49,7 +184,7 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Pod {{ $labels.pod }} en CrashLoop ({{ $value | humanize }} restarts/10min)"
+            summary: "Pod {{ $labels.pod }} en CrashLoop ({{ $value | humanize }} redemarrages/10min)"
 
         - alert: PodNotReady
           # ⚠️ `unless` sur les pods TERMINES, sans quoi la regle est fausse en
@@ -69,12 +204,18 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Pod {{ $labels.pod }} not ready depuis 5min"
+            summary: "Pod {{ $labels.pod }} pas pret depuis 5 min"
 
         - alert: DeploymentReplicasMismatch
+          # ⚠️ `kube_deployment_status_replicas_ready` -- PAS
+          # `kube_deployment_status_ready_replicas`, qui n'existe pas chez
+          # kube-state-metrics. Avec l'ancien nom, le membre droit du `!=`
+          # etait un vecteur vide : l'expression rendait 0 serie a chaque
+          # evaluation. Verifie le 2026-09-02, l'alerte etait muette depuis sa
+          # creation.
           expr: >-
             kube_deployment_spec_replicas{namespace="urbanconnect"}
-            != kube_deployment_status_ready_replicas{namespace="urbanconnect"}
+            != kube_deployment_status_replicas_ready{namespace="urbanconnect"}
           for: 10m
           labels:
             severity: warning
@@ -87,7 +228,9 @@ spec:
               Deployment {{ $labels.deployment }} : le nombre de replicas prets
               ne correspond pas au nombre desire depuis 10 minutes
 
-    # --- Ressources -----------------------------------------------------------
+    # =======================================================================
+    #  RESSOURCES
+    # =======================================================================
     - name: urbanlink.resources
       rules:
         - alert: HighCPUUsage
@@ -108,10 +251,15 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "Pod {{ $labels.pod }} CPU > 80% ({{ $value | humanizePercentage }})"
+            summary: >-
+              {{ $labels.pod }}/{{ $labels.container }} : CPU a
+              {{ $value | humanizePercentage }} de sa limite -- il est etrangle
+              par le noyau, pas tue
 
         - alert: HighMemoryUsage
           # Meme appariement complet que HighCPUUsage, pour la meme raison.
+          # Seuil sous la barre fatale : depasser la limite memoire TUE le
+          # conteneur, contrairement au CPU.
           expr: >-
             (container_memory_working_set_bytes{
               namespace="urbanconnect", container!=""
@@ -124,25 +272,17 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Pod {{ $labels.pod }} memoire > 85% ({{ $value | humanizePercentage }})"
-
-        - alert: PVCNearFull
-          expr: >-
-            kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
             summary: >-
-              PVC {{ $labels.persistentvolumeclaim }} plein a
-              {{ $value | humanizePercentage }}
+              {{ $labels.pod }}/{{ $labels.container }} : memoire a
+              {{ $value | humanizePercentage }} de sa limite -- au-dela, le
+              conteneur est tue
 
         - alert: OOMKillDetected
           # `OOMKilled` est une VALEUR DE LABEL, pas la valeur de la serie
           # (qui vaut 1). PromQL n'autorise pas la comparaison a une chaine :
           # `== "OOMKilled"` est une erreur de syntaxe, et le webhook
           # d'admission du prometheus-operator refuse alors TOUT le
-          # PrometheusRule -- donc les vingt autres alertes avec.
+          # PrometheusRule -- donc les trente autres alertes avec.
           expr: >-
             kube_pod_container_status_last_terminated_reason{
               namespace="urbanconnect", reason="OOMKilled"
@@ -150,107 +290,491 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "OOMKill sur {{ $labels.pod }}"
+            summary: "{{ $labels.pod }}/{{ $labels.container }} tue faute de memoire"
 
-    # --- Backend NestJS -------------------------------------------------------
+        - alert: NodeDiskFillingUp
+          # ⚠️ CETTE REGLE REMPLACE PVCNearFull, et couvre davantage.
+          #
+          # Il n'existe AUCUNE mesure d'occupation par PVC sur ce cluster :
+          # `kubelet_volume_stats_*` est absent, les 12 revendications etant en
+          # `local-path` (volumes = chemins de l'hote, dont le kubelet ne
+          # produit pas de statistiques). L'ancienne alerte visait ces
+          # metriques : elle n'a jamais pu tirer.
+          #
+          # Or les 12 PVC vivent sur `/dev/sda1`, le seul systeme de fichiers
+          # du noeud. Le surveiller les couvre tous.
+          #
+          # `predict_linear` plutot qu'un seuil fixe : un seuil dit « c'est
+          # plein », une projection dit « ce sera plein demain » -- la seule
+          # des deux qui laisse le temps d'agir.
+          expr: >-
+            predict_linear(
+              node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}[6h],
+              24 * 3600
+            ) < 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Disque / du noeud : plein dans moins de 24 h au rythme actuel.
+              Les 12 PVC du cluster sont dessus
+
+        - alert: NodeDiskAlmostFull
+          # Le filet de securite du precedent : une saturation brutale (un
+          # journal qui s'emballe) ne laisse pas six heures d'historique a
+          # `predict_linear` pour etablir une pente.
+          expr: >-
+            (1 - node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}
+              / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}) > 0.9
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Disque / plein a {{ $value | humanizePercentage }}"
+
+        - alert: NodeMemoryPressure
+          # `MemAvailable` et non `MemFree` : le cache et les tampons sont
+          # recuperables a la demande. Alerter sur `MemFree` ferait tirer en
+          # permanence sur une machine qui se porte bien.
+          expr: >-
+            node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              Noeud : moins de 10 % de memoire disponible
+              ({{ $value | humanizePercentage }}) -- le tueur OOM va choisir
+              lui-meme qui s'arrete
+
+        - alert: NodeHighLoad
+          # Normalise par le nombre de coeurs, sinon le seuil depend de la
+          # machine. Base mesuree : 16 coeurs, load5 a 2,16, soit 0,14 par
+          # coeur. Le seuil a 2 laisse une marge de plus de dix fois.
+          #
+          # ⚠️ `scalar(...)` EST OBLIGATOIRE AU DENOMINATEUR, et l'oublier
+          # produit une alerte parfaitement muette.
+          #
+          # `node_load5` porte sept etiquettes (instance, job, pod, namespace,
+          # container, endpoint, service) ; `count(count by (cpu) (...))` n'en
+          # porte AUCUNE. L'appariement vectoriel par defaut exige des jeux
+          # d'etiquettes compatibles : il n'y a aucune paire, le resultat est
+          # vide, et PromQL ne s'en plaint pas.
+          #
+          # `scalar()` transforme le denominateur en nombre : la division
+          # vecteur/scalaire conserve alors les etiquettes de gauche. Mesure le
+          # 2026-09-02 -- sans `scalar()` : 0 serie ; avec : 0,085 par coeur.
+          #
+          # ⚠️ Le panneau « Charge / coeur » du tableau de bord Plateforme
+          # n'a PAS besoin de `scalar()`, et ce n'est pas une incoherence : il
+          # ecrit `avg(node_load5)`, dont le resultat n'a lui non plus aucune
+          # etiquette. Les deux cotes s'apparient alors. Meme calcul, deux
+          # ecritures, un seul piege.
+          expr: >-
+            node_load5
+            / scalar(count(count by (cpu) (node_cpu_seconds_total)))
+            > 2
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Charge du noeud a {{ $value | humanize }} par coeur -- des
+              processus attendent le processeur
+
+    # =======================================================================
+    #  BACKEND NESTJS
+    # -----------------------------------------------------------------------
+    #  ⚠️ Ces regles n'etaient PAS FIABLES avant le 2026-09-02, meme
+    #  correctement ecrites. Le job scrapait le ClusterIP `backend:4000` pour
+    #  un Deployment a 2 replicas : une seule serie, alimentee alternativement
+    #  par deux compteurs desynchronises. Chaque descente etait lue comme une
+    #  remise a zero, et `rate()` ajoutait la valeur entiere -- les taux
+    #  etaient gonfles. Corrige par le ServiceMonitor
+    #  (observability/servicemonitors.yaml), qui decouvre les Endpoints.
+    # =======================================================================
     - name: urbanlink.backend
       rules:
-        - alert: BackendHighErrorRate
+        - alert: BackendDown
+          # `absent()` et non `up == 0` : si la CIBLE elle-meme disparait de la
+          # decouverte de service (Service supprime, selecteur casse), il n'y a
+          # plus de serie `up` du tout -- et `up == 0` ne rend rien. Les deux
+          # cas se ressemblent depuis l'exterieur et doivent alerter pareil.
           expr: >-
-            rate(urbanconnect_http_requests_total{status=~"5.."}[5m])
-            / rate(urbanconnect_http_requests_total[5m]) > 0.01
+            absent(up{job="urbanconnect-backend"} == 1)
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "Backend 5xx > 1% ({{ $value | humanizePercentage }})"
+            summary: >-
+              Aucun replica backend ne repond au scrape -- soit ils sont morts,
+              soit la cible a disparu de la decouverte
+
+        - alert: BackendHighErrorRate
+          expr: >-
+            sum(rate(urbanconnect_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(urbanconnect_http_requests_total[5m])) > 0.01
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend : {{ $value | humanizePercentage }} de reponses 5xx"
 
         - alert: BackendHighLatency
+          # `sum by (le)` avant `histogram_quantile` : sans lui, le quantile se
+          # calcule par serie source -- donc par pod depuis le ServiceMonitor
+          # -- et non sur la population totale.
           expr: >-
             histogram_quantile(0.99,
-              rate(urbanconnect_http_request_duration_seconds_bucket[5m])
+              sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m]))
             ) > 2
           for: 10m
           labels:
             severity: warning
           annotations:
-            summary: "Backend p99 latency > 2s ({{ $value }}s)"
+            summary: "Backend : latence p99 a {{ $value | humanize }}s"
 
-        - alert: GraphQLErrorsSpike
+        - alert: GraphQLErrorRatio
+          # ⚠️ RATIO, pas seuil absolu. L'ancienne regle exigeait
+          # « > 5 erreurs/s » sur un trafic mesure a moins d'UNE requete par
+          # seconde : elle ne pouvait pas tirer, quel que soit le taux d'echec.
+          # Un ratio reste vrai a n'importe quel volume.
           expr: >-
-            rate(urbanconnect_graphql_operations_total{
-              outcome="error"
-            }[5m]) > 5
+            sum(rate(urbanconnect_graphql_operations_total{outcome="error"}[10m]))
+            / sum(rate(urbanconnect_graphql_operations_total[10m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              GraphQL : {{ $value | humanizePercentage }} d'operations en
+              erreur -- voir la table « Operations en erreur » du tableau de
+              bord Backend
+
+        - alert: BackendEventLoopBlocked
+          # LE symptome d'un Node sature, et le seul que ni le CPU ni la
+          # memoire ne montrent : la boucle d'evenements attend son tour. Une
+          # requete arrivee pendant ce retard le paie integralement, avant
+          # meme d'etre traitee. Un pod peut etre a 30 % de CPU et pourtant
+          # incapable de repondre.
+          expr: >-
+            urbanconnect_nodejs_eventloop_lag_p99_seconds > 0.5
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "GraphQL errors > 5/s ({{ $value }}/s)"
+            summary: >-
+              Backend {{ $labels.pod }} : boucle d'evenements bloquee
+              {{ $value | humanize }}s au p99
 
-    # --- Kafka / Outbox -------------------------------------------------------
+        - alert: BackendHeapNearLimit
+          expr: >-
+            urbanconnect_nodejs_heap_size_used_bytes
+            / urbanconnect_nodejs_heap_size_total_bytes > 0.9
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Backend {{ $labels.pod }} : tas V8 a
+              {{ $value | humanizePercentage }} -- une fuite finit en OOMKill
+
+        - alert: BackendFileDescriptorsHigh
+          # Une fuite de sockets (client HTTP jamais ferme, connexion Postgres
+          # non rendue) se voit ici bien avant de se voir ailleurs : l'API
+          # continue de repondre jusqu'a l'epuisement, puis refuse tout d'un
+          # coup.
+          expr: >-
+            urbanconnect_process_open_fds / urbanconnect_process_max_fds > 0.8
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Backend {{ $labels.pod }} : {{ $value | humanizePercentage }} des
+              descripteurs de fichiers ouverts
+
+    # =======================================================================
+    #  KAFKA / BOITE D'ENVOI
+    # -----------------------------------------------------------------------
+    #  Kafka n'est PAS bloquant pour la readiness : tous les producteurs
+    #  passent par la boite d'envoi (Postgres). Un broker mort ne casse aucune
+    #  requete -- les evenements s'accumulent. C'est donc `outbox_pending`
+    #  qu'il faut surveiller, pas la sante du broker.
+    # =======================================================================
     - name: urbanlink.kafka
       rules:
         - alert: KafkaDLQMessages
           expr: >-
-            rate(urbanconnect_kafka_messages_total{outcome="dlq"}[5m]) > 0
+            increase(urbanconnect_kafka_messages_total{outcome="dlq"}[15m]) > 0
           labels:
             severity: critical
           annotations:
-            summary: "Messages en DLQ sur topic {{ $labels.topic }}"
+            summary: >-
+              Messages abandonnes en DLQ sur {{ $labels.topic }}. Les lire avec
+              `npm run kafka:dlq -- --peek`, corriger la cause AVANT de rejouer
 
         - alert: OutboxPoisoned
           expr: urbanconnect_outbox_pending{state="poisoned"} > 0
           labels:
             severity: critical
           annotations:
-            summary: "Outbox poisoned (evenements en erreur permanente)"
+            summary: >-
+              Boite d'envoi : {{ $value }} evenements en erreur permanente --
+              ils ne repartiront pas seuls
 
-    # --- OTel Collector -------------------------------------------------------
-    #
-    # Noms releves sur /metrics du collecteur 0.108 reellement deploye, pas
-    # deduits de la documentation. La telemetrie interne passe par le SDK
-    # OpenTelemetry-Go (bloc `readers` de otel-collector-config.yaml), qui
-    # n'expose PAS la meme chose que l'ancien exporteur :
-    #   - `otelcol_process_*` est absent -- l'alerte memoire qui s'y appuyait
-    #     ne pouvait pas tirer. La memoire du pod est de toute facon deja
-    #     couverte par HighMemoryUsage, qui vaut pour tout le namespace ;
-    #   - `otelcol_processor_send_failed_spans_total` n'existe pas. Le compteur
-    #     reel des spans perdus est cote EXPORTEUR.
-    - name: urbanlink.otel
+        - alert: OutboxBacklogGrowing
+          # Le signal que le relais ne suit plus, ou que Kafka est injoignable.
+          # Rien ne casse cote HTTP, et c'est justement pourquoi il faut une
+          # alerte : sans elle, l'accumulation est invisible.
+          expr: urbanconnect_outbox_pending{state="pending"} > 100
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Boite d'envoi : {{ $value }} evenements en attente depuis 15 min
+              -- le relais ne suit plus ou le broker est injoignable
+
+    # =======================================================================
+    #  MAILLAGE ISTIO
+    # -----------------------------------------------------------------------
+    #  Groupe NEUF. ⚠️ Le maillage tourne en mode AMBIENT : ztunnel ne fait que
+    #  du L4. Les metriques HTTP (`istio_requests_total`) ne viennent QUE de
+    #  l'istio-ingressgateway, qui est un proxy L7. Une regle sur le L7 d'un
+    #  workload interne -- `backend` par exemple -- ne rendrait jamais rien :
+    #  verifie, `destination_workload="backend"` ne porte AUCUNE serie L7.
+    # =======================================================================
+    - name: urbanlink.mesh
       rules:
-        - alert: OTelCollectorDrops
+        - alert: IngressHighErrorRate
           expr: >-
-            increase(otelcol_exporter_send_failed_spans_total[5m]) > 0
+            sum(rate(istio_requests_total{
+              source_workload="istio-ingressgateway", reporter="source",
+              response_code=~"5.."
+            }[5m]))
+            / sum(rate(istio_requests_total{
+              source_workload="istio-ingressgateway", reporter="source"
+            }[5m])) > 0.05
+          for: 5m
           labels:
             severity: critical
           annotations:
             summary: >-
-              OTel Collector : {{ $value | humanize }} spans non exportes vers
-              {{ $labels.exporter }} en 5 min
+              Passerelle d'entree : {{ $value | humanizePercentage }} de 5xx.
+              A croiser avec BackendHighErrorRate -- un ecart designe un
+              probleme AVANT l'application
 
-        # La file d'export qui se remplit precede la perte : c'est le signal
-        # qu'on veut voir AVANT que les spans commencent a tomber.
-        - alert: OTelQueueNearFull
+        - alert: IngressUpstreamFailures
+          # ⚠️ La seule regle qui distingue deux 503 qui n'ont rien a voir.
+          # `UF` connexion amont impossible, `UH` aucun hote sain, `UO` circuit
+          # ouvert, `NR` aucune route configuree. Ces quatre-la ne viennent
+          # PAS de l'application : elle n'a jamais ete jointe. Un 503 emis par
+          # le backend lui-meme porte `response_flags="-"` et n'entre pas ici.
+          #
+          # `DC` (connexion coupee par le client) est volontairement exclu :
+          # c'est le comportement normal d'un flux long -- SSE, WebSocket --
+          # et il est present en continu sur ce cluster.
           expr: >-
-            otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.8
+            sum by (destination_workload, response_flags) (
+              rate(istio_requests_total{
+                source_workload="istio-ingressgateway", reporter="source",
+                response_flags=~"UF|UH|UO|NR"
+              }[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              {{ $labels.destination_workload }} injoignable depuis la
+              passerelle ({{ $labels.response_flags }}) -- le service n'a pas
+              repondu, ce n'est pas une erreur applicative
+
+        - alert: MeshTCPConnectionFailures
+          # Le plan L4 est le SEUL ou `backend`, `postgres`, `redis`, `kafka` et
+          # `elasticsearch` sont visibles en mode ambient. Une connexion
+          # refusee y precede toujours l'erreur applicative.
+          expr: >-
+            sum by (destination_workload) (
+              rate(istio_tcp_connections_failed_total{reporter="destination"}[5m])
+            ) > 0
           for: 5m
           labels:
             severity: warning
           annotations:
             summary: >-
-              OTel Collector : file d'export {{ $labels.exporter }} pleine a
+              Connexions TCP refusees vers {{ $labels.destination_workload }}
+              ({{ $value | humanize }}/s)
+
+        - alert: IstioCertNotRotating
+          # ⚠️ SEUIL A UNE HEURE, ET C'EST DELIBERE.
+          #
+          # Ce ne sont PAS les certificats publics `*.urbanlink.fr` (renouveles
+          # par certbot sur le noeud Proxmox, hors de portee de ce Prometheus).
+          # Ce sont les certificats de charge de travail d'Istio : duree de vie
+          # 24 h, renouvelement a mi-parcours. Valeur relevee le 2026-09-02 :
+          # 76 385 s, soit 21 h -- l'etat NORMAL.
+          #
+          # Un seuil a sept jours, le reflexe qu'appelle un certificat public,
+          # aurait tire EN PERMANENCE sur les cinq proxies. Sous une heure
+          # restante, en revanche, la rotation a reellement echoue.
+          expr: istio_agent_cert_expiry_seconds < 3600
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              Certificat Istio de {{ $labels.pod }} expire dans
+              {{ $value | humanizeDuration }} : la rotation a echoue
+
+    # =======================================================================
+    #  CHAINE DE TELEMETRIE
+    # -----------------------------------------------------------------------
+    #  ⚠️ REMPLACE le groupe `urbanlink.otel`, dont la regle principale
+    #  (OTelCollectorDrops) visait `otelcol_exporter_send_failed_spans_total`
+    #  -- une metrique qui N'EXISTE PAS sur ce cluster. Le collecteur n'en
+    #  expose que TROIS : `exporter_queue_size`, `exporter_queue_capacity`,
+    #  `processor_batch_metadata_cardinality`.
+    #
+    #  La cause est instructive : le SDK OpenTelemetry-Go n'instancie un
+    #  instrument qu'au PREMIER enregistrement. Aucun span n'ayant jamais
+    #  transite -- le backend n'avait pas `OTEL_EXPORTER_OTLP_ENDPOINT` --
+    #  aucun compteur n'a jamais ete cree. La regle surveillait l'absence de
+    #  pertes dans un tuyau vide.
+    # =======================================================================
+    - name: urbanlink.telemetry
+      rules:
+        - alert: TelemetryPipelineSilent
+          # ⚠️ LE `or absent(...)` EST LE COEUR DE LA REGLE, pas une precaution.
+          #
+          # Sans lui, `sum(rate(metrique_inexistante[15m])) == 0` rend un
+          # VECTEUR VIDE : la comparaison ne produit aucune serie et l'alerte
+          # ne tire pas. C'est precisement le mecanisme qui a laisse la chaine
+          # OTel morte pendant des semaines sans un mot.
+          #
+          # Cette regle est ecrite pour etre VRAIE AVANT que la metrique
+          # n'existe. C'est le seul moyen de detecter un pipeline qui n'a
+          # jamais demarre, par opposition a un pipeline qui s'est arrete.
+          expr: >-
+            (sum(rate(tempo_distributor_spans_received_total[15m])) == 0)
+            or absent(tempo_distributor_spans_received_total)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Aucune trace n'atteint Tempo depuis 30 min. Verifier
+              OTEL_EXPORTER_OTLP_ENDPOINT sur backend et temporal-worker, et
+              que `import '../tracing'` est bien la PREMIERE ligne de leur
+              point d'entree
+
+        - alert: LogPipelineSilent
+          # Meme construction, meme raison. Les journaux passent par le pont
+          # `otel-log-bridge.ts` : `sdk-node` n'instrumente pas
+          # `process.stdout`, et sans ce pont Loki demarre et ne recoit jamais
+          # rien -- un second silence possible, distinct du precedent.
+          expr: >-
+            (sum(rate(loki_distributor_lines_received_total[15m])) == 0)
+            or absent(loki_distributor_lines_received_total)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Aucun journal n'atteint Loki depuis 30 min. Verifier le pont OTel
+              (otel-log-bridge.ts) et OTEL_LOGS_MIN_LEVEL
+
+        - alert: OTelQueueNearFull
+          # La file d'export qui se remplit PRECEDE la perte : c'est le signal
+          # qu'on veut voir avant que les spans commencent a tomber. Ses deux
+          # metriques, elles, existent -- ce sont des jauges, toujours
+          # rapportees.
+          #
+          # ⚠️ `on(exporter) group_left()` EST OBLIGATOIRE, et son absence est
+          # un piege parfait. Les deux metriques existent, la division est
+          # syntaxiquement valide, PromQL ne se plaint pas -- et le resultat
+          # est vide, donc l'alerte muette.
+          #
+          # La cause : `otelcol_exporter_queue_size` porte une etiquette
+          # `data_type` (`traces`, `logs`) que `otelcol_exporter_queue_capacity`
+          # n'a PAS. L'appariement vectoriel par defaut exige des jeux
+          # d'etiquettes identiques : aucune paire ne correspond.
+          #
+          # Releve le 2026-09-02 : l'expression sans `on(...)` rend 0 serie
+          # alors que chaque metrique en porte 2. Le defaut etait present dans
+          # la version precedente de ce fichier et n'avait jamais ete vu --
+          # c'est la porte `check-queries.py` qui l'a nomme.
+          expr: >-
+            otelcol_exporter_queue_size
+            / on(exporter) group_left()
+            otelcol_exporter_queue_capacity
+            > 0.8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Collecteur OTel : file d'export {{ $labels.exporter }} pleine a
               {{ $value | humanizePercentage }}
 
-    # --- TLS / Certificats ----------------------------------------------------
+        - alert: TempoFlushFailing
+          # Un flush qui echoue, c'est un bloc DEJA ACCEPTE qui n'atteindra
+          # jamais le disque. L'ingestion peut donc etre verte pendant que la
+          # donnee se perd -- d'ou une regle distincte des deux precedentes.
+          expr: increase(tempo_ingester_failed_flushes_total[15m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Tempo : {{ $value | humanize }} ecritures de blocs echouees --
+              des traces acceptees sont perdues
+
+        - alert: LokiChunkFlushFailing
+          expr: increase(loki_ingester_chunks_flush_failures_total[15m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Loki : {{ $value | humanize }} ecritures de chunks echouees --
+              des journaux acceptes sont perdus
+
+    # =======================================================================
+    #  CE QUI N'EST DELIBEREMENT PAS SURVEILLE
+    # -----------------------------------------------------------------------
+    #  Ces absences sont des DECISIONS, pas des oublis. Les ecrire evite qu'on
+    #  ajoute un jour une regle sur une metrique qui n'existe pas -- l'erreur
+    #  que ce fichier corrige.
     #
-    # AUCUNE regle ici, et c'est deliberé. Le groupe portait une alerte sur
-    # `certmanager_certificate_expiration_timestamp_seconds` : cert-manager
-    # n'est pas installe sur ce cluster -- le wildcard *.urbanlink.fr est
-    # obtenu et renouvele par CERTBOT sur le noeud Proxmox (role
-    # tls_certificates), hors de portee de ce Prometheus. La metrique n'existe
-    # donc nulle part, et l'alerte donnait l'illusion d'une surveillance qui
-    # n'aurait jamais tire, meme un certificat expire.
+    #  1. LES BANQUES DE DONNEES. Ni Postgres, ni Redis, ni Kafka, ni
+    #     Elasticsearch n'exposent de metriques a ce Prometheus : aucun
+    #     exporter n'est deploye. Aucune regle ne peut donc parler de
+    #     connexions saturees, de retard de consommateur Kafka ou de sante de
+    #     shard. Trois exporters a deployer : un chantier distinct.
+    #     Ce qu'on a en attendant : leur presence L4 dans le maillage
+    #     (MeshTCPConnectionFailures) et leurs ressources conteneur
+    #     (HighMemoryUsage, OOMKillDetected).
     #
-    # Surveiller reellement cette expiration demande une sonde depuis le noeud
-    # (blackbox exporter sur le vhost, ou un check du systemd timer certbot) :
-    # un chantier distinct, pas une ligne a rajouter ici.
+    #  2. LE PLAN DE CONTROLE. `etcd`, `kube-controller-manager`,
+    #     `kube-scheduler` et `kube-proxy` n'ecoutent que sur la boucle locale
+    #     du noeud (verifie dans /etc/kubernetes/manifests). Leurs
+    #     ServiceMonitors sont desactives dans les valeurs Helm, sans quoi
+    #     quatre cibles seraient DOWN en permanence -- et PrometheusTargetDown
+    #     tirerait en continu, rendant le reste illisible.
+    #
+    #  3. LE CERTIFICAT PUBLIC `*.urbanlink.fr`. Obtenu et renouvele par
+    #     CERTBOT sur le noeud Proxmox (role tls_certificates), hors de portee
+    #     de ce Prometheus. `certmanager_certificate_expiration_timestamp_seconds`
+    #     n'existe nulle part ici -- cert-manager n'est pas installe. Une regle
+    #     dessus donnerait l'illusion d'une surveillance qui n'aurait jamais
+    #     tire, meme un certificat expire. Le surveiller vraiment demande une
+    #     sonde depuis le noeud (blackbox exporter sur le vhost, ou un controle
+    #     du timer systemd de certbot).
+    #     ⚠️ Ne pas confondre avec IstioCertNotRotating, qui porte sur les
+    #     certificats INTERNES du maillage.
+    #
+    #  4. L'OCCUPATION PAR PVC. Impossible a mesurer : voir NodeDiskFillingUp.
+    # =======================================================================

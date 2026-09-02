@@ -1,0 +1,292 @@
+{
+  "title": "02 — Plateforme (nœud + Kubernetes)",
+  "uid": "urbanlink-platform",
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["urbanlink", "plateforme", "kubernetes"],
+  "time": { "from": "now-6h", "to": "now" },
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Tableaux de bord UrbanLink",
+      "tags": ["urbanlink"],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link"
+    }
+  ],
+  "templating": { "list": [] },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Le nœud", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
+
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CPU",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))", "instant": true, "legendFormat": "CPU" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Mémoire",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "100 * (1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))", "instant": true, "legendFormat": "RAM" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 80 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Disque /",
+      "description": "Les **12 PVC** du cluster utilisent la StorageClass `local-path` : leurs volumes sont des chemins de ce système de fichiers. Ce chiffre les couvre tous.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "100 * (1 - avg(node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}))", "instant": true, "legendFormat": "/" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 80 }, { "color": "red", "value": 90 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Charge / cœur",
+      "description": "Charge moyenne sur 5 min divisée par le nombre de cœurs. Au-dessus de 1, des processus attendent le processeur ; le seuil de l'alerte `NodeHighLoad` est à 2.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(node_load5) / count(count by (cpu) (node_cpu_seconds_total))", "instant": true, "legendFormat": "load5 / cœurs" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 2, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 2 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Depuis le démarrage",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(node_time_seconds - node_boot_time_seconds)", "instant": true, "legendFormat": "uptime" }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "orange", "value": null }, { "color": "green", "value": 3600 }] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Nœud prêt",
+      "description": "Cluster **mono-nœud** : sa chute emporte tout. C'est aussi pourquoi `NodeNotReady` inhibe toutes les autres alertes dans Alertmanager — sans quoi une seule panne en déclencherait trente.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(kube_node_status_condition{condition=\"Ready\", status=\"true\"})", "instant": true, "legendFormat": "nœuds prêts" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "mappings": [{ "type": "value", "options": { "0": { "text": "NON", "color": "red", "index": 0 }, "1": { "text": "OUI", "color": "green", "index": 1 } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "CPU par mode",
+      "description": "Fraction de cœur par mode. `iowait` qui monte désigne le disque, `system` un travail noyau (réseau, conteneurs), `user` les processus eux-mêmes.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 5 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg by (mode) (rate(node_cpu_seconds_total{mode!=\"idle\"}[5m]))", "legendFormat": "{{mode}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 3, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 25, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Mémoire du nœud",
+      "description": "`MemAvailable` est la seule valeur qui compte pour décider s'il reste de la place : le cache et les tampons sont récupérables à la demande, les compter comme « occupés » est trompeur.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 5 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(node_memory_MemTotal_bytes)", "legendFormat": "totale" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(node_memory_MemAvailable_bytes)", "legendFormat": "disponible" },
+        { "refId": "C", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(node_memory_Cached_bytes)", "legendFormat": "cache" },
+        { "refId": "D", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(node_memory_MemFree_bytes)", "legendFormat": "libre" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 1, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "min", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Disque / — libre, et projection à 24 h",
+      "description": "La courbe rouge est `predict_linear` sur six heures d'historique, projetée à 24 h. **Quand elle passe sous zéro, le disque sera plein demain** — c'est le déclencheur de l'alerte `NodeDiskFillingUp`, et c'est le seul signal qui laisse le temps d'agir. Un seuil fixe à 85 % ne dit rien de la vitesse.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 5 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(node_filesystem_avail_bytes{mountpoint=\"/\"})", "legendFormat": "libre maintenant" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "avg(predict_linear(node_filesystem_avail_bytes{mountpoint=\"/\"}[6h], 24 * 3600))", "legendFormat": "libre projeté à 24 h" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "decimals": 1, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } },
+        "overrides": [{ "matcher": { "id": "byName", "options": "libre projeté à 24 h" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }, { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 6] } }] }]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["min", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Entrées/sorties disque",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (device) (rate(node_disk_read_bytes_total{device!~\"loop.*|dm-.*\"}[5m]))", "legendFormat": "lecture {{device}}" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (device) (rate(node_disk_written_bytes_total{device!~\"loop.*|dm-.*\"}[5m]))", "legendFormat": "écriture {{device}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps", "decimals": 1, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Réseau du nœud (eth0)",
+      "description": "`eth0` seule : les cinquante interfaces `veth*` et les ponts `cni0`/`flannel.1` comptent le même octet plusieurs fois. Le trafic entre pods se lit sur « 03 — Maillage ».",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(node_network_receive_bytes_total{device=\"eth0\"}[5m]))", "legendFormat": "entrant" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(node_network_transmit_bytes_total{device=\"eth0\"}[5m]))", "legendFormat": "sortant" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps", "decimals": 1, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+
+    { "id": 200, "type": "row", "title": "Kubernetes — namespace urbanconnect", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 }, "panels": [] },
+
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "CPU par pod, en part de sa limite",
+      "description": "Un pod au-dessus de 100 % de sa limite CPU est **étranglé** par le noyau : il n'est pas tué, il ralentit. ⚠️ Les pods **sans limite** n'apparaissent pas ici — la division ne trouve pas de dénominateur. La table « Conteneurs sans limite » plus bas les liste, et c'est précisément pour ça qu'elle existe.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 20 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "topk(12, sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"urbanconnect\", container!=\"\"}[5m])) / sum by (pod) (kube_pod_container_resource_limits{namespace=\"urbanconnect\", resource=\"cpu\"}))", "legendFormat": "{{pod}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "never", "thresholdsStyle": { "mode": "line" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Mémoire par pod, en part de sa limite",
+      "description": "Contrairement au CPU, dépasser la limite mémoire **tue le conteneur** (OOMKill). Le seuil de l'alerte `HighMemoryUsage` est à 85 %, volontairement sous la barre fatale. Mêmes absents que le panneau CPU : les conteneurs sans limite.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 20 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "topk(12, sum by (pod) (container_memory_working_set_bytes{namespace=\"urbanconnect\", container!=\"\"}) / sum by (pod) (kube_pod_container_resource_limits{namespace=\"urbanconnect\", resource=\"memory\"}))", "legendFormat": "{{pod}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "never", "thresholdsStyle": { "mode": "line" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.85 }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+
+    {
+      "id": 22,
+      "type": "table",
+      "title": "Pods non prêts",
+      "description": "⚠️ Le `unless` sur les pods `Succeeded` n'est pas décoratif : un pod de Job terminé avec succès garde `Ready=false` **pour toujours**. Sans lui, quatre pods terminés (geoipupdate ×2, elasticsearch-setup, minio-init) figuraient ici en permanence — et une liste qui n'est jamais vide apprend à ne plus être lue.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 27 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "kube_pod_status_ready{namespace=\"urbanconnect\", condition=\"false\"} == 1\nunless on(namespace, pod)\nkube_pod_status_phase{namespace=\"urbanconnect\", phase=\"Succeeded\"} == 1", "instant": true, "format": "table" }],
+      "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "condition": true, "endpoint": true, "container": true, "instance": true, "job": true, "service": true, "uid": true }, "renameByName": { "pod": "Pod", "namespace": "Namespace" } } }],
+      "fieldConfig": { "defaults": { "custom": { "align": "left" } }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false, "reducer": ["sum"] } }
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "Conteneurs sans limite mémoire",
+      "description": "Un conteneur sans limite peut consommer toute la mémoire du nœud et faire tuer **ses voisins** à sa place. Il échappe aussi aux deux panneaux de ratio ci-dessus et à l'alerte `HighMemoryUsage` — il est donc invisible partout ailleurs. 14 conteneurs étaient dans ce cas au 2026-09-02.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 27 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "kube_pod_container_status_running{namespace=\"urbanconnect\"}\nunless on(namespace, pod, container)\nkube_pod_container_resource_limits{namespace=\"urbanconnect\", resource=\"memory\"}", "instant": true, "format": "table" }],
+      "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "endpoint": true, "instance": true, "job": true, "service": true, "uid": true }, "renameByName": { "pod": "Pod", "container": "Conteneur", "namespace": "Namespace" } } }],
+      "fieldConfig": { "defaults": { "custom": { "align": "left" } }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": true, "reducer": ["count"], "fields": "" } }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Redémarrages de conteneurs (1 h)",
+      "description": "Métrique `kube_pod_container_status_restarts_total` — **et non** `..._status_restarting_total`, qui n'existe pas et laissait le panneau équivalent vide dans l'ancien tableau de bord.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 27 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "topk(10, increase(kube_pod_container_status_restarts_total{namespace=\"urbanconnect\"}[1h]))", "legendFormat": "{{pod}} / {{container}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 3 }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+
+    {
+      "id": 25,
+      "type": "table",
+      "title": "Deployments — prêts contre désirés",
+      "description": "Deux requêtes jointes sur `deployment`. La colonne « prêts » lit `kube_deployment_status_replicas_ready` ; le nom inversé `kube_deployment_status_ready_replicas`, longtemps écrit dans l'alerte, n'existe pas chez kube-state-metrics.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "kube_deployment_spec_replicas{namespace=\"urbanconnect\"}", "instant": true, "format": "table" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "kube_deployment_status_replicas_ready{namespace=\"urbanconnect\"}", "instant": true, "format": "table" }
+      ],
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "deployment", "mode": "outer" } },
+        { "id": "organize", "options": { "excludeByName": { "Time 1": true, "Time 2": true, "__name__ 1": true, "__name__ 2": true, "container 1": true, "container 2": true, "endpoint 1": true, "endpoint 2": true, "instance 1": true, "instance 2": true, "job 1": true, "job 2": true, "namespace 1": true, "namespace 2": true, "pod 1": true, "pod 2": true, "service 1": true, "service 2": true, "uid 1": true, "uid 2": true }, "renameByName": { "deployment": "Deployment", "Value #A": "Désirés", "Value #B": "Prêts" } } },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "Deployment" }] } }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" }, "decimals": 0 },
+        "overrides": [{ "matcher": { "id": "byName", "options": "Prêts" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "color-text" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }] }]
+      },
+      "options": { "showHeader": true, "footer": { "show": false, "reducer": ["sum"] } }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Réseau par pod",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 12, "y": 34 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "topk(8, sum by (pod) (rate(container_network_receive_bytes_total{namespace=\"urbanconnect\"}[5m])))", "legendFormat": "↓ {{pod}}" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "topk(8, sum by (pod) (rate(container_network_transmit_bytes_total{namespace=\"urbanconnect\"}[5m])))", "legendFormat": "↑ {{pod}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps", "decimals": 1, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Conteneurs tués faute de mémoire",
+      "description": "Conteneurs dont la **dernière** terminaison était un OOMKill. ⚠️ `OOMKilled` est une VALEUR d'étiquette, pas la valeur de la série (qui vaut 1) : `== \"OOMKilled\"` est une erreur de syntaxe PromQL, et le webhook d'admission du prometheus-operator refuserait alors le PrometheusRule entier — donc toutes les autres alertes avec.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 34 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(kube_pod_container_status_last_terminated_reason{namespace=\"urbanconnect\", reason=\"OOMKilled\"}) or vector(0)", "instant": true, "legendFormat": "OOMKilled" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Pods en attente",
+      "description": "Un pod `Pending` durablement n'a pas trouvé sa place : ressources insuffisantes, ou volume non provisionné.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 38 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(kube_pod_status_phase{namespace=\"urbanconnect\", phase=\"Pending\"}) or vector(0)", "instant": true, "legendFormat": "Pending" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+
+    {
+      "id": 29,
+      "type": "text",
+      "title": "Pourquoi il n'y a pas de panneau « remplissage des PVC »",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 42 },
+      "options": {
+        "mode": "markdown",
+        "content": "Il n'existe **aucune mesure d'occupation par PVC** sur ce cluster, et il ne peut pas en exister en l'état.\n\n`kubelet_volume_stats_used_bytes` et `kubelet_volume_stats_capacity_bytes` sont **absents** : les 12 PVC utilisent la StorageClass `local-path`, dont les volumes sont des répertoires de l'hôte. Le kubelet ne produit pas de statistiques de remplissage pour ce type de volume.\n\nL'ancien tableau de bord et l'alerte `PVCNearFull` s'appuyaient tous deux sur ces métriques. **Ils n'ont jamais rien affiché ni rien déclenché** — une surveillance qui n'existait que sur le papier.\n\nLe fait utile est ailleurs : **les 12 PVC partagent `/dev/sda1`**, le seul système de fichiers du nœud. Le panneau « Disque / — libre, et projection à 24 h » ci-dessus les couvre donc tous, et l'alerte `NodeDiskFillingUp` prévient avant que le disque ne soit plein — ce qu'un seuil par PVC n'aurait de toute façon pas su faire.\n\n*Mesurer réellement par revendication demanderait un provisionneur qui expose des statistiques de volume : un chantier distinct, pas une ligne à rajouter ici.*"
+      }
+    }
+  ]
+}

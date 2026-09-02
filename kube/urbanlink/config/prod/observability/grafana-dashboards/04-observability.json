@@ -1,0 +1,250 @@
+{
+  "title": "04 — Chaîne d'observabilité",
+  "uid": "urbanlink-observability",
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["urbanlink", "observabilite"],
+  "time": { "from": "now-12h", "to": "now" },
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Tableaux de bord UrbanLink",
+      "tags": ["urbanlink"],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link"
+    },
+    { "type": "link", "title": "Alertmanager", "url": "https://alertmanager.urbanlink.fr", "targetBlank": true, "icon": "external link" },
+    { "type": "link", "title": "Prometheus", "url": "https://prometheus.urbanlink.fr", "targetBlank": true, "icon": "external link" }
+  ],
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 90,
+      "type": "text",
+      "title": "À quoi sert cette page",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**C'est la page qui garde les quatre autres honnêtes.** Un tableau de bord ne dit jamais « je ne sais pas » : une cible muette, une règle qui échoue à chaque évaluation ou un pipeline de traces à l'arrêt produisent un graphe **plat**, qui se lit exactement comme un système calme.\n\nDeux exemples réels de ce cluster, tous deux invisibles jusqu'au 2026-09-02 :\n\n- un appariement `on(pod)` cassé faisait échouer une règle d'alerte à **chaque** évaluation. L'erreur ne se lisait que dans l'onglet *Rules* de Prometheus. Le panneau « Règles en échec » ci-dessous la montre ;\n- la chaîne OTel n'a **jamais** transporté un span : le backend n'avait pas `OTEL_EXPORTER_OTLP_ENDPOINT`. Tempo et Loki tournaient, sains et vides. Le panneau « Ingestion réelle » le dit en un chiffre."
+      }
+    },
+
+    { "id": 100, "type": "row", "title": "Prometheus — la collecte", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 4 }, "panels": [] },
+
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Séries en tête",
+      "description": "Cardinalité active. Sa croissance, plus que sa valeur, est le signal : une étiquette à cardinalité non bornée (identifiant, URL brute) la fait exploser en quelques heures.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 5 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max(prometheus_tsdb_head_series)", "instant": true, "legendFormat": "séries" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 200000 }, { "color": "red", "value": 500000 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Échantillons ingérés /s",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 5 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(prometheus_tsdb_head_samples_appended_total[5m]))", "instant": true, "legendFormat": "éch./s" }],
+      "fieldConfig": { "defaults": { "unit": "cps", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Cibles muettes",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 5 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "count(up == 0) or vector(0)", "instant": true, "legendFormat": "down" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Règles en échec (1 h)",
+      "description": "⚠️ **Le panneau le plus important de cette page.** Une règle dont l'expression est invalide — un `on(pod)` ambigu, une métrique mal nommée — échoue silencieusement à chaque évaluation : l'alerte ne tire jamais, et rien ne le dit ailleurs qu'ici et dans l'onglet *Rules* de Prometheus. **Non nul = une alerte que vous croyez avoir n'existe pas.**",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 5 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(prometheus_rule_evaluation_failures_total[1h])) or vector(0)", "instant": true, "legendFormat": "échecs" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Échantillons rejetés (1 h)",
+      "description": "Hors séquence ou horodatage dupliqué. Non nul = des points sont **perdus** : deux cibles écrivent la même série, ou une horloge dérive.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 5 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(prometheus_target_scrapes_sample_out_of_order_total[1h])) + sum(increase(prometheus_target_scrapes_sample_duplicate_timestamp_total[1h])) or vector(0)", "instant": true, "legendFormat": "rejetés" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Notifications échouées (1 h)",
+      "description": "Alertmanager n'a pas réussi à livrer. Aujourd'hui tout est routé vers `null` (aucun SMTP configuré) : ce chiffre reste donc à zéro par construction, et deviendra parlant le jour où un récepteur réel sera branché.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 5 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(alertmanager_notifications_failed_total[1h])) or vector(0)", "instant": true, "legendFormat": "échecs" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Durée de scrape par job",
+      "description": "Une durée qui approche l'intervalle de collecte (15 s) signifie que la cible met plus de temps à répondre qu'on ne l'interroge : les points commencent à manquer. Un `/metrics` qui grossit sans fin se voit ici en premier.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 9 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (job) (scrape_duration_seconds)", "legendFormat": "{{job}}" }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "never", "thresholdsStyle": { "mode": "line" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 5 }, { "color": "red", "value": 15 }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Groupes de règles — durée et santé",
+      "description": "Un groupe dont la durée d'évaluation dépasse son intervalle prend du retard : les alertes se déclenchent en différé. La colonne « échecs » compte les évaluations impossibles sur une heure.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 9 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "prometheus_rule_group_last_duration_seconds", "instant": true, "format": "table" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "increase(prometheus_rule_evaluation_failures_total[1h])", "instant": true, "format": "table" }
+      ],
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "rule_group", "mode": "outer" } },
+        { "id": "organize", "options": { "excludeByName": { "Time 1": true, "Time 2": true, "__name__ 1": true, "__name__ 2": true, "container 1": true, "container 2": true, "endpoint 1": true, "endpoint 2": true, "instance 1": true, "instance 2": true, "job 1": true, "job 2": true, "namespace 1": true, "namespace 2": true, "pod 1": true, "pod 2": true, "service 1": true, "service 2": true }, "renameByName": { "rule_group": "Groupe de règles", "Value #A": "Durée", "Value #B": "Échecs / h" } } },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "Échecs / h", "desc": true }] } }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Durée" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "decimals", "value": 4 }] },
+          { "matcher": { "id": "byName", "options": "Échecs / h" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }] }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false, "reducer": ["sum"] } }
+    },
+
+    { "id": 200, "type": "row", "title": "Alertmanager", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 }, "panels": [] },
+
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Alertes reçues par Alertmanager",
+      "description": "`active` inclut le `Watchdog`, qui tire en permanence par conception : cette courbe ne descend donc jamais à zéro, et c'est justement ce qui prouve que la chaîne Prometheus → Alertmanager fonctionne. Si elle tombait à zéro, l'acheminement serait rompu.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 17 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (state) (alertmanager_alerts)", "legendFormat": "{{state}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Silences",
+      "description": "Un silence **éteint la surveillance** pour la durée qu'on lui donne. Un silence actif oublié est la façon la plus courante de rater un incident : cette courbe est là pour qu'il ne le soit pas.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 17 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (state) (alertmanager_silences)", "legendFormat": "{{state}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [{ "matcher": { "id": "byName", "options": "active" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Notifications tentées et échouées",
+      "description": "Par intégration. Tout est aujourd'hui routé vers le récepteur `null` : les deux courbes restent à zéro tant qu'aucun SMTP n'est renseigné dans `secrets.env`.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 17 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (integration) (rate(alertmanager_notifications_total[5m]))", "legendFormat": "tentées — {{integration}}" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (integration) (rate(alertmanager_notifications_failed_total[5m]))", "legendFormat": "échouées — {{integration}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps", "decimals": 3, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } },
+        "overrides": [{ "matcher": { "id": "byRegexp", "options": "échouées.*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+
+    { "id": 300, "type": "row", "title": "OTel → Tempo → Loki", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 }, "panels": [] },
+
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Ingestion réelle",
+      "description": "⚠️ **À zéro, il n'y a ni trace ni journal — pas « peu », aucun.** Le `or vector(0)` est indispensable : une métrique jamais instanciée rend un vecteur vide, et un panneau vide se lit comme un panneau calme. C'est exactement ce qui a masqué l'absence de `OTEL_EXPORTER_OTLP_ENDPOINT` sur le backend, des semaines durant. Alertes `TelemetryPipelineSilent` et `LogPipelineSilent`.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 25 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(tempo_distributor_spans_received_total[15m])) or vector(0)", "instant": true, "legendFormat": "spans/s → Tempo" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(rate(loki_distributor_lines_received_total[15m])) or vector(0)", "instant": true, "legendFormat": "lignes/s → Loki" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "cps", "decimals": 2, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 0.001 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "textMode": "value_and_name", "justifyMode": "center", "orientation": "vertical", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "File d'export du collecteur OTel",
+      "description": "La file qui se remplit **précède** la perte : c'est le signal qu'on veut voir avant que les spans ne commencent à tomber. Alerte `OTelQueueNearFull` à 80 %.\n\n⚠️ Le collecteur n'expose que **trois** métriques `otelcol_*`, et non la dizaine attendue : le SDK OpenTelemetry-Go n'instancie un instrument qu'au **premier enregistrement**. Les compteurs de spans reçus et exportés apparaîtront d'eux-mêmes dès que la chaîne transportera quelque chose — ils n'existaient pas parce que rien n'était jamais passé.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 25 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (exporter) (otelcol_exporter_queue_size / on(exporter) group_left() otelcol_exporter_queue_capacity)", "legendFormat": "{{exporter}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never", "thresholdsStyle": { "mode": "line" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.8 }, { "color": "red", "value": 0.95 }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Écritures perdues côté stockage",
+      "description": "Un flush qui échoue, c'est un bloc de traces ou de journaux **déjà accepté** qui n'atteindra jamais le disque. L'ingestion peut donc être verte pendant que la donnée se perd ici. Alertes `TempoFlushFailing` et `LokiChunkFlushFailing`.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 25 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(tempo_ingester_failed_flushes_total[1h])) or vector(0)", "legendFormat": "Tempo — flush échoués / h" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(loki_ingester_chunks_flush_failures_total[1h])) or vector(0)", "legendFormat": "Loki — chunks échoués / h" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "min": 0, "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Mémoire de la pile d'observabilité",
+      "description": "Prometheus, Tempo, Loki, Grafana, Alertmanager et le collecteur. Elle coûte ce qu'elle coûte — mais elle ne doit pas coûter plus que ce qu'elle observe.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 30 },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"urbanconnect\", container!=\"\", pod=~\"(prometheus|alertmanager|tempo|loki|otel-collector|kube-prometheus-stack).*\"})", "legendFormat": "{{pod}}" }],
+      "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 1, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Requêtes servies par Tempo et Loki",
+      "description": "Le trafic de **lecture** : ce que Grafana leur demande quand on ouvre *Explore*. À distinguer de l'ingestion, qui est le trafic d'écriture, mesuré plus haut.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 30 },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (status_code) (rate(tempo_request_duration_seconds_count[5m]))", "legendFormat": "Tempo — {{status_code}}" },
+        { "refId": "B", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (status_code) (rate(loki_request_duration_seconds_count[5m]))", "legendFormat": "Loki — {{status_code}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 3, "min": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [{ "matcher": { "id": "byRegexp", "options": ".*5[0-9][0-9].*" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    }
+  ]
+}

@@ -1,0 +1,522 @@
+{
+  "title": "00 — Vue d'ensemble UrbanLink",
+  "uid": "urbanlink-overview",
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["urbanlink", "vue-d-ensemble"],
+  "time": { "from": "now-6h", "to": "now" },
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Tableaux de bord UrbanLink",
+      "tags": ["urbanlink"],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link"
+    }
+  ],
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Alertes actives",
+      "description": "Alertes en cours, `Watchdog` exclu. Cette alerte-là tire EN PERMANENCE, par conception : elle prouve que la chaîne d'alerte fonctionne. La compter empêchait ce chiffre de valoir zéro, donc de signaler quoi que ce soit.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "count(ALERTS{alertstate=\"firing\", alertname!=\"Watchdog\"}) or vector(0)",
+          "instant": true,
+          "legendFormat": "alertes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [{ "type": "value", "options": { "0": { "text": "Aucune", "index": 0 } } }],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 4 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Cibles saines",
+      "description": "Part des cibles de collecte qui répondent. Une seule cible muette, et le tableau de bord qui en dépend affiche un plat rassurant plutôt qu'un trou.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * sum(up) / count(up)",
+          "instant": true,
+          "legendFormat": "cibles up"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 90 },
+              { "color": "green", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Requêtes API /s",
+      "description": "Débit HTTP du backend, tous replicas confondus. Chiffre fiable depuis que la collecte se fait par pod (ServiceMonitor) : avec le scrape par ClusterIP, les compteurs des deux replicas se mélangeaient dans une seule série et chaque descente était lue comme une remise à zéro.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(urbanconnect_http_requests_total[5m]))",
+          "instant": true,
+          "legendFormat": "req/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Taux d'erreur 5xx",
+      "description": "Part des réponses 5xx sur l'ensemble du trafic HTTP du backend. Seuils alignés sur l'alerte `BackendHighErrorRate` (1 %).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "(sum(rate(urbanconnect_http_requests_total{status=~\"5..\"}[5m])) or vector(0)) / sum(rate(urbanconnect_http_requests_total[5m]))",
+          "instant": true,
+          "legendFormat": "5xx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Latence API p99",
+      "description": "99e centile du temps de réponse HTTP du backend. Seuil aligné sur l'alerte `BackendHighLatency` (2 s).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
+          "instant": true,
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Saturation du nœud",
+      "description": "La plus contrainte des trois ressources du nœud : CPU, mémoire, disque `/`. Un `label_replace` distingue les trois avant le `max` — sans étiquette distincte, l'union `or` en aurait écarté deux.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(\n  label_replace(1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])), \"res\", \"cpu\", \"\", \"\")\n  or label_replace(1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes), \"res\", \"ram\", \"\", \"\")\n  or label_replace(1 - avg(node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}), \"res\", \"disque\", \"\", \"\")\n)",
+          "instant": true,
+          "legendFormat": "max(cpu, ram, disque)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.75 },
+              { "color": "red", "value": 0.9 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Débit HTTP du backend, par code de statut",
+      "description": "Une courbe par famille de code. Un 4xx qui grimpe désigne un client ou une intégration ; un 5xx qui grimpe désigne le backend.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (status) (rate(urbanconnect_http_requests_total[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": { "mode": "normal", "group": "A" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "5.*" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "4.*" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "2.*" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Latence HTTP du backend",
+      "description": "Trois centiles sur le même axe. Un p50 stable avec un p99 qui décolle désigne une minorité de requêtes lentes — souvent une route précise, à chercher sur « 01 — Backend ».",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Nœud — CPU, mémoire, disque",
+      "description": "Les trois ressources du nœud unique, en pourcentage, sur un axe commun. Les 12 PVC du cluster vivent tous sur `/` : cette courbe couvre donc aussi leur remplissage.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+          "legendFormat": "CPU"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * (1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))",
+          "legendFormat": "Mémoire"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * (1 - avg(node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}))",
+          "legendFormat": "Disque /"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 75 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Chaîne de télémétrie — ce qui arrive vraiment",
+      "description": "Spans acceptés par Tempo et lignes acceptées par Loki. **À zéro, le pipeline est muet** : les traces et les journaux ne sont pas « vides », ils n'existent pas. C'est l'état dans lequel ce cluster a vécu jusqu'au 2026-09-02, faute de `OTEL_EXPORTER_OTLP_ENDPOINT` sur le backend. Le `or vector(0)` est indispensable : une métrique jamais instanciée rend un vecteur vide, et un panneau vide se lit comme un panneau calme.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(tempo_distributor_spans_received_total[5m])) or vector(0)",
+          "legendFormat": "spans/s → Tempo"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(loki_distributor_lines_received_total[5m])) or vector(0)",
+          "legendFormat": "lignes/s → Loki"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "decimals": 2,
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.001 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 22,
+      "type": "table",
+      "title": "Cibles de collecte muettes",
+      "description": "Vide = tout répond. Chaque ligne est une source de données absente : les panneaux qui en dépendent afficheront un plat, pas une erreur.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up == 0",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "endpoint": true, "container": true }, "renameByName": { "job": "Job", "instance": "Instance", "namespace": "Namespace", "pod": "Pod", "service": "Service" } } }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "align": "left" } }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false, "reducer": ["sum"] } }
+    },
+
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Alertes en cours",
+      "description": "`Watchdog` exclu, pour la raison écrite sur la première tuile. Poser un silence se fait dans Alertmanager (lien à droite) — Prometheus montre l'état des règles, il ne sait pas taire une alerte.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 16, "x": 0, "y": 19 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "ALERTS{alertstate=\"firing\", alertname!=\"Watchdog\"}",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "alertstate": true, "endpoint": true, "container": true, "prometheus": true }, "renameByName": { "alertname": "Alerte", "severity": "Sévérité", "namespace": "Namespace", "pod": "Pod", "deployment": "Deployment", "job": "Job" } } },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "Sévérité" }] } }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "left" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Sévérité" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "critical": { "color": "red", "index": 0, "text": "critical" }, "warning": { "color": "orange", "index": 1, "text": "warning" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false, "reducer": ["sum"] } }
+    },
+    {
+      "id": 31,
+      "type": "text",
+      "title": "Consoles",
+      "description": "Toutes en tier `internal` (AuthorizationPolicy Istio) et derrière l'authentification du bord pour celles qui n'en ont pas.",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 19 },
+      "options": {
+        "mode": "markdown",
+        "content": "| Console | À quoi elle sert |\n|---|---|\n| [Alertmanager](https://alertmanager.urbanlink.fr) | voir les alertes **actives**, poser un **silence** |\n| [Prometheus](https://prometheus.urbanlink.fr) | l'état des **règles**, les cibles, un PromQL à la main |\n| [Kiali](https://kiali.urbanlink.fr) | le **graphe** du maillage, service par service |\n| [Argo CD](https://argo.urbanlink.fr) | ce qui est **déployé**, et la dérive avec le dépôt |\n| [Temporal](https://temporal.urbanlink.fr) | les **workflows** et les balayages programmés |\n| [Kibana](https://kibana.urbanlink.fr) | l'index **Elasticsearch** de la recherche |\n\n---\n\n**Traces et journaux** se lisent dans *Explore* (Tempo, Loki) — Grafana a déjà l'outil, ce tableau de bord ne le duplique pas."
+      }
+    }
+  ]
+}

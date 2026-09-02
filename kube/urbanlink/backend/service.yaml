@@ -9,5 +9,11 @@ spec:
   selector:
     app: backend
   ports:
-    - port: 4000
+    # Le port est NOMME depuis le 2026-09-02 : le ServiceMonitor
+    # `urbanconnect-backend` (observability/servicemonitors.yaml) le designe par
+    # son nom. Le champ `targetPort` du ServiceMonitor ferait le meme travail
+    # mais il est deprecie dans la CRD, et un nom survit a un changement de
+    # numero de port. Nommer `http` renseigne en outre Istio sur le protocole.
+    - name: http
+      port: 4000
       targetPort: 4000

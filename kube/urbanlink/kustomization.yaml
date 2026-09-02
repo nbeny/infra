@@ -185,6 +185,7 @@ resources:
 - observability/ingress/grafana-virtualservice.yaml
 - observability/ingress/alertmanager-virtualservice.yaml
 - observability/prometheus-alerts.yaml
+- observability/servicemonitors.yaml
 
   # Observability — OTel Collector + Tempo + Loki + Prometheus (kube-stack)
   #   Le kube-prometheus-stack (Prometheus, Alertmanager, Grafana) est deploie
@@ -266,14 +267,11 @@ configMapGenerator:
   - config/common/observability/loki.yaml
   name: observability-config
 - files:
-  - config/prod/observability/grafana-dashboards/01-k8s-cluster.json
-  - config/prod/observability/grafana-dashboards/02-backend-nestjs.json
-  - config/prod/observability/grafana-dashboards/03-istio-mesh.json
-  - config/prod/observability/grafana-dashboards/04-traces-tempo.json
-  - config/prod/observability/grafana-dashboards/05-logs-loki.json
-  - config/prod/observability/grafana-dashboards/06-otel-collector.json
-  - config/prod/observability/grafana-dashboards/07-k8s-pods.json
-  - config/prod/observability/grafana-dashboards/08-overview.json
+  - config/prod/observability/grafana-dashboards/00-overview.json
+  - config/prod/observability/grafana-dashboards/01-backend.json
+  - config/prod/observability/grafana-dashboards/02-platform.json
+  - config/prod/observability/grafana-dashboards/03-mesh.json
+  - config/prod/observability/grafana-dashboards/04-observability.json
   name: grafana-dashboards
   options:
     labels:

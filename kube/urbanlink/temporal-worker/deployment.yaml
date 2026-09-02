@@ -75,6 +75,22 @@ spec:
               value: temporal:7233
             - name: TEMPORAL_NAMESPACE
               value: default
+            # --- Traces et journaux OTLP ---------------------------------
+            # Meme raison que sur le backend (voir le commentaire la-bas), avec
+            # un argument de plus : TOUS les mouvements d'argent pilotes par un
+            # balayage tournent ICI -- rapprochement nocturne, versements,
+            # execution d'un accord de litige. Un cron qui echoue a mi-parcours
+            # ne laisse aujourd'hui qu'une ligne de journal ; une trace dit
+            # laquelle des activites a rompu.
+            #
+            # ⚠️ Cote code, `worker-nest.main.ts` importe `../tracing` en TOUTE
+            # PREMIERE ligne. Sans cet import la variable ne servirait a rien --
+            # et place apres `AppModule`, les instrumentations arriveraient trop
+            # tard pour `pg`, `ioredis` et `kafkajs`.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.urbanconnect.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: urbanconnect-temporal-worker
             - name: TEMPORAL_TASK_QUEUE
               value: urbanconnect
             # Kratos (AppModule bootstrap complet)

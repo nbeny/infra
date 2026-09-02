@@ -134,6 +134,27 @@ spec:
                   name: urbanconnect-secrets
                   key: METRICS_TOKEN
                   optional: true
+            # --- Traces et journaux OTLP ---------------------------------
+            # ⚠️ SANS CETTE VARIABLE, RIEN NE PART. `tracing.ts` sort
+            # immediatement si elle est absente ; le SDK ne demarre pas, aucune
+            # instrumentation n'est posee, et c'est silencieux par conception
+            # (on ne veut pas d'un backend qui retente un export vers un
+            # collecteur absent en CI ou en dev).
+            #
+            # Elle manquait ici depuis le premier jour. Mesure le 2026-09-02 :
+            # `tempo_distributor_spans_received_total` et
+            # `loki_distributor_lines_received_total` n'existaient meme pas comme
+            # series -- Tempo et Loki tournaient, etaient scrapes, sains, et
+            # n'avaient jamais rien recu. Les tableaux de bord « Traces » et
+            # « Journaux » etaient decoratifs.
+            #
+            # L'echantillonnage a 20 % et l'effacement des en-tetes
+            # `authorization` / `cookie` / `set-cookie` sont deja configures dans
+            # otel-collector-config.yaml : ils s'appliquent des le premier span.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.urbanconnect.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: urbanconnect-backend
             # CORS
             - name: CORS_ORIGIN
               value: "https://urbanlink.fr"
