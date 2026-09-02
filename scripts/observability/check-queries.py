@@ -165,12 +165,16 @@ VIDES_ATTENDUS = {
         "restantes au releve du 2026-09-02).",
     "OTelQueueNearFull": "la file d'export du collecteur est vide.",
     "TelemetryPipelineSilent":
-        "des spans arrivent a Tempo, donc `== 0` est faux ET `absent()` est "
-        "vide. ⚠️ Un VIDE est ici la BONNE reponse : c'est l'etat sain depuis "
-        "que OTEL_EXPORTER_OTLP_ENDPOINT est pose. Avant, cette meme regle "
-        "rendait une serie via `absent()` -- et c'etait l'alarme.",
+        "des spans arrivent a Tempo. ⚠️ Un VIDE est ici la BONNE reponse : "
+        "c'est l'etat sain depuis que OTEL_EXPORTER_OTLP_ENDPOINT est pose. "
+        "Avant, la meme regle rendait une serie via `absent()` -- et c'etait "
+        "l'alarme.",
     "LogPipelineSilent":
-        "des journaux arrivent a Loki. Meme lecture que ci-dessus.",
+        "la metrique existe, donc `absent()` ne rend rien : Loki a bien recu "
+        "des lignes. ⚠️ Cette regle ne surveille QUE le cas « jamais rien "
+        "recu » -- les journaux sont filtres par niveau, un backend sain reste "
+        "muet apres son demarrage (mesure : 394 lignes au boot puis zero "
+        "pendant 30 min, avec Tempo actif en parallele).",
     "TempoFlushFailing": "aucune ecriture de bloc echouee.",
     "LokiChunkFlushFailing": "aucune ecriture de chunk echouee.",
 
@@ -272,12 +276,23 @@ MOTS_PROMQL = {
 MOTIF_METRIQUE = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_:]*)\b(?!\s*\()")
 
 
+def sans_litteraux(expr: str) -> str:
+    """L'expression privee de ses selecteurs d'etiquettes et de ses chaines.
+
+    ⚠️ INDISPENSABLE AVANT TOUTE ANALYSE SYNTAXIQUE, et l'oublier produit des
+    faux positifs difficiles a lire. Un selecteur comme
+    `route!~"/health.*|/metrics"` contient des `/` qui ne sont PAS des
+    divisions : la detection d'operateur arithmetique s'y trompait et accusait
+    `TelemetryPipelineSilent` d'un defaut d'appariement inexistant.
+    """
+    return re.sub(r'"[^"]*"', "", re.sub(r"\{[^{}]*\}", "", expr))
+
+
 def metriques_citees(expr: str):
     """Noms de metriques reellement interroges par l'expression."""
     # Retirer les selecteurs d'etiquettes et les chaines : `status`, `le`,
     # `mutual_tls`... sont des etiquettes ou des valeurs, pas des metriques.
-    sans_selecteurs = re.sub(r"\{[^{}]*\}", "", expr)
-    sans_chaines = re.sub(r'"[^"]*"', "", sans_selecteurs)
+    sans_chaines = sans_litteraux(expr)
     # Retirer le contenu des clauses d'appariement : `by (pod)`, `on(exporter)`.
     sans_appariement = re.sub(
         r"\b(by|without|on|ignoring|group_left|group_right)\s*\([^()]*\)",
@@ -463,9 +478,18 @@ def main() -> int:
         # produit rien, aucune justification ne tient -- l'expression est
         # cassee, quel que soit l'etat du systeme.
         expr_norm = substituer(expr_brute)
-        if len(citees) >= 2 and OPERATEUR_ARITHMETIQUE.search(expr_norm):
+        aplati = " ".join(expr_norm.split())
+        # ⚠️ `sans_litteraux` AVANT la detection d'operateur : sinon le `/` de
+        # `route!~"/health.*|/metrics"` passe pour une division.
+        if len(citees) >= 2 and OPERATEUR_ARITHMETIQUE.search(sans_litteraux(aplati)):
             noyau = noyau_sans_seuil(expr_norm)
-            if noyau != expr_norm.strip() and demander(noyau)[0] == "VIDE":
+            # ⚠️ Comparer a `aplati`, pas a `expr_norm.strip()`.
+            # `noyau_sans_seuil` normalise les espaces : face a une expression
+            # ecrite sur plusieurs lignes, la comparaison etait TOUJOURS vraie,
+            # le controle se declenchait sans qu'aucun seuil n'ait ete retire,
+            # et reevaluait la meme expression -- donc criait au defaut
+            # d'appariement sur tout vide legitime.
+            if noyau != aplati and demander(noyau)[0] == "VIDE":
                 vides_non_justifies.append((fichier, titre, expr_brute))
                 print(f"✖ APPARIEMENT {fichier} › {titre}")
                 print(f"           Les {len(citees)} metriques existent, mais le calcul")

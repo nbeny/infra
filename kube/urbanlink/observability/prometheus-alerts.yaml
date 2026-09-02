@@ -439,18 +439,46 @@ spec:
           # ⚠️ RATIO, pas seuil absolu. L'ancienne regle exigeait
           # « > 5 erreurs/s » sur un trafic mesure a moins d'UNE requete par
           # seconde : elle ne pouvait pas tirer, quel que soit le taux d'echec.
-          # Un ratio reste vrai a n'importe quel volume.
+          #
+          # ⚠️ MAIS UN RATIO SEUL EST FAUX AUSSI, DE L'AUTRE COTE. Premiere
+          # version de cette regle, deployee le 2026-09-02 : elle a tire dans
+          # l'heure, et le diagnostic a montre DEUX defauts de conception, tous
+          # deux corriges ici.
+          #
+          # 1. LE SEUIL ETAIT SOUS LE SOCLE DE L'APPLICATION. Mesure sur 6 h :
+          #    `error` oscille entre 3 et 6 op/s pour 15 a 34 op/s au total,
+          #    soit un socle STABLE de 15 a 20 %. Un seuil a 5 % aurait tire en
+          #    permanence -- le defaut exact reproche a IstioCertExpiringSoon.
+          #    Le seuil est porte a 35 %, nettement au-dessus du socle mesure,
+          #    pour signaler une DEVIATION et non l'etat normal.
+          #
+          #    ⚠️ Ce socle est lui-meme un probleme produit, pas une fatalite :
+          #    il vient de trois requetes de sondage du frontend
+          #    (`pendingQuoteRequestsCount`, `pendingOffersCount`,
+          #    `pendingContactRequests`, ~9 900 echecs/h a elles trois). Le
+          #    jour ou elles cesseront d'echouer, ce seuil devra redescendre.
+          #
+          # 2. UN RATIO N'A PAS DE SENS A VOLUME NUL. Quand le trafic s'est
+          #    eteint, `ok` est tombe a 0 et les 0,08 erreur/s residuelles ont
+          #    fait un ratio de 100 %. Une alerte qui se declenche parce que
+          #    PLUS PERSONNE n'utilise le produit dit l'inverse de ce qu'on lui
+          #    demande. D'ou le plancher de volume : sous 1 operation/s, la
+          #    question n'est pas posee.
           expr: >-
-            sum(rate(urbanconnect_graphql_operations_total{outcome="error"}[10m]))
-            / sum(rate(urbanconnect_graphql_operations_total[10m])) > 0.05
-          for: 10m
+            (
+              sum(rate(urbanconnect_graphql_operations_total{outcome="error"}[15m]))
+              / sum(rate(urbanconnect_graphql_operations_total[15m])) > 0.35
+            )
+            and
+            sum(rate(urbanconnect_graphql_operations_total[15m])) > 1
+          for: 15m
           labels:
             severity: warning
           annotations:
             summary: >-
-              GraphQL : {{ $value | humanizePercentage }} d'operations en
-              erreur -- voir la table « Operations en erreur » du tableau de
-              bord Backend
+              GraphQL : {{ $value | humanizePercentage }} d'operations en erreur
+              (socle habituel 15-20 %) -- voir la table « Operations en erreur »
+              du tableau de bord Backend
 
         - alert: BackendEventLoopBlocked
           # LE symptome d'un Node sature, et le seul que ni le CPU ni la
@@ -657,34 +685,60 @@ spec:
           # Cette regle est ecrite pour etre VRAIE AVANT que la metrique
           # n'existe. C'est le seul moyen de detecter un pipeline qui n'a
           # jamais demarre, par opposition a un pipeline qui s'est arrete.
+          #
+          # ⚠️ LE SILENCE SEUL NE PROUVE RIEN : sans trafic, il n'y a rien a
+          # tracer, et `/health` comme `/metrics` sont volontairement exclus de
+          # l'instrumentation. Une nuit calme aurait donc declenche cette
+          # alerte. Le second membre exige qu'il y ait REELLEMENT des requetes a
+          # tracer -- hors sondes -- avant de conclure que le tuyau est casse.
           expr: >-
-            (sum(rate(tempo_distributor_spans_received_total[15m])) == 0)
+            (
+              sum(rate(tempo_distributor_spans_received_total[30m])) == 0
+              and
+              sum(rate(urbanconnect_http_requests_total{
+                route!~"/health.*|/metrics"
+              }[30m])) > 0.05
+            )
             or absent(tempo_distributor_spans_received_total)
           for: 30m
           labels:
             severity: warning
           annotations:
             summary: >-
-              Aucune trace n'atteint Tempo depuis 30 min. Verifier
-              OTEL_EXPORTER_OTLP_ENDPOINT sur backend et temporal-worker, et
-              que `import '../tracing'` est bien la PREMIERE ligne de leur
-              point d'entree
+              Des requetes arrivent mais aucune trace n'atteint Tempo depuis
+              30 min. Verifier OTEL_EXPORTER_OTLP_ENDPOINT sur backend et
+              temporal-worker, et que `import '../tracing'` est bien la
+              PREMIERE ligne de leur point d'entree
 
         - alert: LogPipelineSilent
-          # Meme construction, meme raison. Les journaux passent par le pont
-          # `otel-log-bridge.ts` : `sdk-node` n'instrumente pas
-          # `process.stdout`, et sans ce pont Loki demarre et ne recoit jamais
-          # rien -- un second silence possible, distinct du precedent.
-          expr: >-
-            (sum(rate(loki_distributor_lines_received_total[15m])) == 0)
-            or absent(loki_distributor_lines_received_total)
+          # Les journaux passent par le pont `otel-log-bridge.ts` : `sdk-node`
+          # n'instrumente pas `process.stdout`, et sans ce pont Loki demarre et
+          # ne recoit JAMAIS rien -- un second silence possible, distinct du
+          # precedent.
+          #
+          # ⚠️ ICI, `absent()` SEUL -- PAS DE DETECTION D'ARRET, et c'est
+          # delibere. Contrairement aux traces, les journaux sont filtres par
+          # NIVEAU (`OTEL_LOGS_MIN_LEVEL`, defaut `log`) : un backend qui se
+          # porte bien n'ecrit rien apres son demarrage. Mesure le 2026-09-02,
+          # une heure et demie apres le deploiement : 394 lignes ingerees au
+          # boot, puis ZERO pendant plus de 30 minutes -- pendant que Tempo
+          # recevait 0,42 span/s en continu. Le tuyau etait sain ; une regle
+          # « zero ligne pendant 30 min » aurait crie tous les jours.
+          #
+          # Il n'existe pas de correlat fiable cote journaux (aucune metrique
+          # ne dit « il aurait DU y avoir une ligne ici »). On surveille donc
+          # ce qu'on sait affirmer : la metrique n'a jamais ete instanciee,
+          # c'est-a-dire que Loki n'a JAMAIS rien recu -- exactement la panne
+          # qui a dure des semaines sans un mot.
+          expr: absent(loki_distributor_lines_received_total)
           for: 30m
           labels:
             severity: warning
           annotations:
             summary: >-
-              Aucun journal n'atteint Loki depuis 30 min. Verifier le pont OTel
-              (otel-log-bridge.ts) et OTEL_LOGS_MIN_LEVEL
+              Loki n'a jamais recu la moindre ligne : le pont OTel des journaux
+              n'a pas demarre. Verifier otel-log-bridge.ts,
+              OTEL_EXPORTER_OTLP_ENDPOINT et OTEL_LOGS_MIN_LEVEL
 
         - alert: OTelQueueNearFull
           # La file d'export qui se remplit PRECEDE la perte : c'est le signal
