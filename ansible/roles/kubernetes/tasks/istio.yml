@@ -226,11 +226,80 @@
       failed_when: false
       loop: [prometheus, kiali]
 
-    - name: Deployer Prometheus (source de metriques de Kiali)
+    # -----------------------------------------------------------------------
+    #  Prometheus du mesh -- SUPPRIME, consolide dans kube-prometheus-stack
+    # -----------------------------------------------------------------------
+    # Il y avait deux Prometheus sur ce cluster : celui-ci (addon Istio, dans
+    # istio-system) et celui du kube-prometheus-stack (urbanconnect). Deux
+    # collectes, deux retentions, deux fois la memoire -- pour des donnees qui
+    # ont vocation a se croiser : « l'API est lente » se repond en regardant le
+    # temps passe DANS le backend et le temps passe AVANT d'y entrer.
+    #
+    # Ce qui rendait la fusion possible : la telemetrie du mesh n'a rien de
+    # special, elle vient d'un simple job `kubernetes-pods` par annotation
+    # `prometheus.io/scrape`. Ce job est desormais dans
+    # `kube-prometheus-stack-values.yaml.j2` (voir son bloc « Maillage Istio »),
+    # et le Prometheus applicatif collecte les cinq memes cibles -- verifie :
+    # 90 series `istio_requests_total` apres bascule.
+    #
+    # ⚠️ NE PAS supprimer le SERVICE `prometheus` de istio-system pour autant.
+    # Deux consommateurs le nomment en dur, et ni l'un ni l'autre n'est
+    # modifiable d'ici :
+    #   - Kiali, dont la configuration amont n'a AUCUNE url et retombe donc sur
+    #     le defaut `http://prometheus.istio-system:9090` ;
+    #   - la source de donnees « Prometheus (mesh Istio) » de Grafana, qui vit
+    #     dans config/ du depot APPLICATIF.
+    # Le Service est donc conserve, en `ExternalName` vers le Prometheus
+    # consolide : les deux continuent d'interroger le meme nom, qui rend
+    # desormais les memes donnees depuis un seul processus.
+    - name: Retirer l'addon Prometheus du mesh
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf delete -f
+        https://raw.githubusercontent.com/istio/istio/release-{{ k8s_istio_version.split('.')[0] }}.{{ k8s_istio_version.split('.')[1] }}/samples/addons/prometheus.yaml
+        --ignore-not-found
+      when:
+        - not (k8s_istio_prometheus | bool)
+        - k8s_istio_obs_present.results[0].rc == 0
+      changed_when: true
+
+    - name: Deposer l'alias Prometheus du mesh vers le Prometheus consolide
+      ansible.builtin.copy:
+        dest: /root/istio-prometheus-alias.yaml
+        mode: "0644"
+        content: |
+          # Fichier gere par Ansible (role kubernetes, istio.yml) -- ne pas editer.
+          # Remplace le Service de l'addon Prometheus d'Istio, supprime.
+          # Kiali (url par defaut) et la source Grafana « Prometheus (mesh
+          # Istio) » nomment ce Service en dur : il rend maintenant le
+          # Prometheus unique, dans urbanconnect.
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: prometheus
+            namespace: {{ k8s_istio_namespace }}
+            labels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/managed-by: ansible
+          spec:
+            type: ExternalName
+            externalName: prometheus.{{ k8s_observability_namespace }}.svc.cluster.local
+      when: not (k8s_istio_prometheus | bool)
+      register: k8s_istio_prom_alias
+
+    - name: Appliquer l'alias Prometheus du mesh
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f
+        /root/istio-prometheus-alias.yaml
+      when: not (k8s_istio_prometheus | bool)
+      changed_when: k8s_istio_prom_alias is changed
+
+    - name: Deployer Prometheus (addon du mesh)
       ansible.builtin.command: >-
         kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f
         https://raw.githubusercontent.com/istio/istio/release-{{ k8s_istio_version.split('.')[0] }}.{{ k8s_istio_version.split('.')[1] }}/samples/addons/prometheus.yaml
-      when: k8s_istio_obs_present.results[0].rc != 0
+      when:
+        - k8s_istio_prometheus | bool
+        - k8s_istio_obs_present.results[0].rc != 0
       changed_when: true
 
     - name: Deployer Kiali

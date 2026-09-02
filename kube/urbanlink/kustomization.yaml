@@ -43,13 +43,13 @@
 #
 # Ordre de déploiement recommandé :
 #   1. namespace → secrets
-#   2. postgres (instance unique app+kratos+temporal+directus), postgres-nominatim,
+#   2. postgres (instance unique app+kratos+temporal), postgres-nominatim,
 #      redis, minio, kafka, elasticsearch
 #   3. pgbouncer (après postgres)
 #   4. kratos-migrate (après postgres), minio-init (après minio),
 #      elasticsearch-setup (après elasticsearch — fixe le mdp kibana_system)
 #   5. kratos (après kratos-migrate), temporal (auto-setup après postgres)
-#   6. oathkeeper (après kratos), directus, nominatim, kafka-ui, temporal-ui,
+#   6. oathkeeper (après kratos), nominatim, kafka-ui, temporal-ui,
 #      kibana (après elasticsearch-setup), puis kibana-setup (après kibana —
 #      il attend lui-même que le statut passe à `available`)
 #   7. backend (après pgbouncer, redis, kratos, minio, kafka, temporal, elasticsearch)
@@ -88,8 +88,6 @@ namespace: urbanconnect
   # Access proxy — Oathkeeper (forward-auth Kratos à l'edge)
   # oathkeeper/middleware.yaml retiré : c'était un Middleware Traefik.
   # Son équivalent est l'AuthorizationPolicy de ingress/authorization.yaml.
-
-  # CMS
 
   # Geocoding
 
@@ -160,8 +158,6 @@ resources:
 - oathkeeper/configmap.yaml
 - oathkeeper/deployment.yaml
 - oathkeeper/service.yaml
-- directus/deployment.yaml
-- directus/service.yaml
 - nominatim/statefulset.yaml
 - nominatim/service.yaml
 - geoipupdate/pvc.yaml
@@ -187,6 +183,7 @@ resources:
 - observability/loki/service.yaml
 - observability/prometheus-alias.yaml
 - observability/ingress/grafana-virtualservice.yaml
+- observability/ingress/alertmanager-virtualservice.yaml
 - observability/prometheus-alerts.yaml
 
   # Observability — OTel Collector + Tempo + Loki + Prometheus (kube-stack)

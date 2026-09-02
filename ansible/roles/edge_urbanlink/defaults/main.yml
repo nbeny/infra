@@ -131,8 +131,10 @@ edge_urbanlink_services:
   # exposee sur Internet, meme derriere un mot de passe, est la surface
   # d'attaque garantie d'un lab. Elles restent couvertes par le wildcard
   # *.urbanlink.fr -> 192.168.100.50 et par le bloc allow/deny du vhost.
-  - name: directus
-    hosts: ["directus.urbanlink.fr"]
+  # Directus a ete RETIRE le 2026-09-02 : aucun code du depot applicatif ne
+  # l'appelait (ni le backend, ni le frontend), il ne servait qu'a lui-meme.
+  # Sa base `directus` est CONSERVEE dans Postgres -- supprimer des donnees ne
+  # se fait pas en passant.
   - name: minio
     hosts: ["minio.urbanlink.fr"]
     max_body: 0
@@ -160,6 +162,13 @@ edge_urbanlink_services:
   # l'invite du bord ferait s'identifier deux fois pour rien.
   - name: grafana
     hosts: ["grafana.urbanlink.fr"]
+  # Alertmanager : la seule interface ou l'on voit les alertes ACTIVES et ou
+  # l'on pose un silence. `basic_auth` parce qu'il n'a AUCUNE authentification
+  # native -- quatrieme console dans ce cas, avec kiali, temporal et prometheus.
+  # Poser un silence eteint la surveillance : ce n'est pas une lecture seule.
+  - name: alertmanager
+    hosts: ["alertmanager.urbanlink.fr"]
+    basic_auth: true
   # Argo CD -- meme palier que Kiali et Prometheus, et pour la meme raison :
   # une console qui a les pleins pouvoirs sur le cluster n'a rien a faire sur
   # Internet. Elle etait jusqu'ici accessible par `kubectl port-forward`.

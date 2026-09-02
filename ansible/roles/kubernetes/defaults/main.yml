@@ -84,6 +84,17 @@ k8s_istio_namespaces:
 # Prometheus + Kiali : le graphe de service et les metriques du mesh.
 k8s_istio_observability: true
 
+# ⚠️ `false` depuis le 2026-09-02 : l'addon Prometheus d'Istio est SUPPRIME, sa
+# collecte ayant ete reprise par le kube-prometheus-stack (job `kubernetes-pods`
+# de kube-prometheus-stack-values.yaml.j2). Un seul Prometheus sur le cluster.
+#
+# Le Service `prometheus` de istio-system survit en `ExternalName` vers lui :
+# Kiali et la source Grafana « mesh » le nomment en dur. Voir istio.yml.
+#
+# Le repasser a `true` reinstallerait l'addon PAR-DESSUS cet alias -- donc deux
+# collectes a nouveau, et le Service redevenu ordinaire.
+k8s_istio_prometheus: false
+
 # --- Observabilite applicative ---------------------------------------------
 # kube-prometheus-stack (Prometheus + Grafana + Alertmanager). Helm, comme
 # istiod/metrics-server -- PAS par Argo (chart non-Kustomizable). A cote de

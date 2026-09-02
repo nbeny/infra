@@ -33,8 +33,8 @@ Compose actif (`docker-compose.yml`) vers Kubernetes, avec durcissement edge
                                   │
       ┌───────────────────────────┼───────────────────────────┐
       ▼                           ▼                           ▼
-   frontend                    backend (API)                kratos / directus /
-   (Next.js)                   (NestJS + GraphQL)           minio / nominatim / pgadmin
+   frontend                    backend (API)                kratos / minio /
+   (Next.js)                   (NestJS + GraphQL)           nominatim / pgadmin
                                   │
              ┌────────────────────┼────────────────────┐
              ▼                    ▼                    ▼
@@ -52,10 +52,10 @@ Compose actif (`docker-compose.yml`) vers Kubernetes, avec durcissement edge
 | **Edge / sécurité** | Traefik (ingress), CrowdSec (bouncer + AppSec/WAF), Oathkeeper (forward-auth Kratos) |
 | **Application** | frontend (Next.js), backend (NestJS), temporal-worker |
 | **Auth** | Kratos (+ migrate-job) |
-| **Data** | postgres unique (app + kratos + temporal + directus, image `postgis/postgis:16-3.5`) + pgbouncer, redis |
+| **Data** | postgres unique (app + kratos + temporal, image `postgis/postgis:16-3.5`) + pgbouncer, redis |
 | **Async** | Kafka, Temporal (+ temporal-worker), UIs kafka-ui / temporal-ui |
 | **Recherche** | Elasticsearch (index de lecture recherche + feeds, fallback Postgres auto), Kibana |
-| **Services** | MinIO (S3), Nominatim (+ postgres-nominatim, Postgres dédié), Directus |
+| **Services** | MinIO (S3), Nominatim (+ postgres-nominatim, Postgres dédié) |
 | **WebRTC** | coturn (STUN/TURN) |
 | **Ops** | geoipupdate (CronJob MaxMind), pgadmin |
 
@@ -221,13 +221,13 @@ utilisent des `volumeClaimTemplates`). Adapter `storageClassName` selon le provi
 ### Ordre (géré par les `depends`/probes, mais recommandé)
 
 1. `namespace` → `secrets`
-2. bases : postgres (unique : app+kratos+temporal+directus), postgres-nominatim,
+2. bases : postgres (unique : app+kratos+temporal), postgres-nominatim,
    redis, minio, kafka, elasticsearch
 3. pgbouncer (après postgres)
 4. jobs : kratos-migrate (après postgres), minio-init (après minio),
    elasticsearch-setup (après elasticsearch — fixe le mdp `kibana_system`)
 5. kratos (après migrate), temporal (auto-setup après postgres)
-6. oathkeeper, directus, nominatim, kafka-ui, temporal-ui, kibana
+6. oathkeeper, nominatim, kafka-ui, temporal-ui, kibana
 7. backend (après pgbouncer, redis, kratos, minio, kafka, temporal, elasticsearch)
 8. temporal-worker (image glibc, `SCHEDULER_BACKEND` cohérent avec backend)
 9. frontend
@@ -372,8 +372,8 @@ Tests fonctionnels :
   mots de passe dans `urbanconnect-secrets`. Le Job `elasticsearch-setup` fixe le
   mdp `kibana_system` une fois ES prêt (Kibana refuse le superuser `elastic`).
   Pas d'Ingress pour Kibana → `port-forward` (cf. §4).
-- **Consoles d'administration** (directus, minio, pgadmin, kafka, temporal,
-  kibana, kiali, prometheus, grafana, argo) : restreintes au LAN par le bloc `allow`/`deny`
+- **Consoles d'administration** (minio, pgadmin, kafka, temporal, kibana,
+  kiali, prometheus, grafana, alertmanager, argo) : restreintes au LAN par le bloc `allow`/`deny`
   des vhosts nginx, et par des enregistrements A publics qui pointent sur une
   IP privée. Deux barrières indépendantes.
 - **JWT à l'edge** (optionnel) : Oathkeeper peut minter un JWT signé (mutator

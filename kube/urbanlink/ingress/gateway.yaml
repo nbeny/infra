@@ -54,7 +54,6 @@ spec:
         - "auth.urbanlink.fr"
         - "nominatim.urbanlink.fr"
         - "s3.urbanlink.fr"
-        - "directus.urbanlink.fr"
         - "minio.urbanlink.fr"
         - "pgadmin.urbanlink.fr"
         - "kafka.urbanlink.fr"
@@ -63,6 +62,7 @@ spec:
         - "kiali.urbanlink.fr"
         - "prometheus.urbanlink.fr"
         - "grafana.urbanlink.fr"
+        - "alertmanager.urbanlink.fr"
         - "argo.urbanlink.fr"
       # Reste a `false` : la redirection vers HTTPS est faite par nginx, en
       # amont. L'activer ici renverrait les requetes deja dechiffrees vers un
@@ -83,7 +83,6 @@ spec:
         - "auth.urbanlink.fr"
         - "nominatim.urbanlink.fr"
         - "s3.urbanlink.fr"
-        - "directus.urbanlink.fr"
         - "minio.urbanlink.fr"
         - "pgadmin.urbanlink.fr"
         - "kafka.urbanlink.fr"
@@ -92,6 +91,7 @@ spec:
         - "kiali.urbanlink.fr"
         - "prometheus.urbanlink.fr"
         - "grafana.urbanlink.fr"
+        - "alertmanager.urbanlink.fr"
         - "argo.urbanlink.fr"
       tls:
         mode: SIMPLE

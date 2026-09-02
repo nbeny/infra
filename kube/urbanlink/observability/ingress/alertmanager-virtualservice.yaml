@@ -1,0 +1,36 @@
+# ============================================================================
+#  Alertmanager -- expose l'UI (kube-prometheus-stack)
+# ----------------------------------------------------------------------------
+#  C'est la seule interface ou l'on voit les alertes ACTIVES et ou l'on pose un
+#  silence. Prometheus montre les regles et leur etat ; il ne sait pas taire une
+#  alerte le temps d'une maintenance.
+#
+#  Tier `internal` comme Grafana et Prometheus : poser un silence, c'est
+#  eteindre la surveillance. Cela n'a rien a faire sur Internet.
+#
+#  ⚠️ Trois ecritures pour un nom, comme toujours ici (cf. README §2) : ce
+#  fichier, le host dans les DEUX servers du Gateway, et l'entree dans
+#  `edge_urbanlink_services` du role Ansible. Le DNS est deja couvert par le
+#  wildcard *.urbanlink.fr.
+#
+#  Pas d'authentification propre : Alertmanager n'en a aucune. Il est donc
+#  protege au BORD (`basic_auth: true`), comme Kiali, Temporal et Prometheus.
+# ============================================================================
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: uc-alertmanager
+  namespace: urbanconnect
+  labels:
+    uc.ingress/tier: internal
+spec:
+  hosts:
+    - "alertmanager.urbanlink.fr"
+  gateways:
+    - uc-gateway
+  http:
+    - route:
+        - destination:
+            host: kube-prometheus-stack-alertmanager.urbanconnect.svc.cluster.local
+            port:
+              number: 9093

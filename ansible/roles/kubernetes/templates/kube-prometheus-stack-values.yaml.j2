@@ -120,6 +120,78 @@ prometheus:
               - loki.urbanconnect.svc.cluster.local:3100
             labels:
               job: loki
+
+      # --- Maillage Istio -----------------------------------------------------
+      # Repris TEL QUEL du job `kubernetes-pods` de l'addon Prometheus d'Istio
+      # (samples/addons/prometheus.yaml), qui a ete supprime : c'etait le SEUL
+      # job produisant la telemetrie du mesh, et sans lui on perdait d'un coup
+      # le graphe de Kiali et le tableau de bord « Istio Mesh ».
+      #
+      # La decouverte se fait par ANNOTATION, pas par ServiceMonitor -- c'est
+      # ainsi qu'Istio expose ses composants. Cinq pods portent aujourd'hui
+      # `prometheus.io/scrape: "true"` (releve le 2026-09-02) :
+      #
+      #   istio-ingress/istio-ingressgateway  :15020 /stats/prometheus
+      #                                       -> istio_requests_total, latences
+      #   istio-system/istiod                 :15014 /metrics
+      #   istio-system/ztunnel                :15020 /metrics
+      #   istio-system/istio-cni-node         :15014 /metrics
+      #   istio-system/kiali                  :9090  /metrics
+      #
+      # `honor_labels: true` est indispensable : Envoy pose lui-meme `job` et
+      # `instance`, et les ecraser casserait les requetes des tableaux de bord
+      # Istio, qui s'appuient dessus.
+      - job_name: kubernetes-pods
+        honor_labels: true
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - action: keep
+            regex: true
+            source_labels:
+              - __meta_kubernetes_pod_annotation_prometheus_io_scrape
+          - action: replace
+            regex: (https?)
+            source_labels:
+              - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+            target_label: __scheme__
+          - action: replace
+            regex: (.+)
+            source_labels:
+              - __meta_kubernetes_pod_annotation_prometheus_io_path
+            target_label: __metrics_path__
+          - action: replace
+            regex: (\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})
+            replacement: '[$2]:$1'
+            source_labels:
+              - __meta_kubernetes_pod_annotation_prometheus_io_port
+              - __meta_kubernetes_pod_ip
+            target_label: __address__
+          - action: replace
+            regex: (\d+);((([0-9]+?)(\.|$)){4})
+            replacement: $2:$1
+            source_labels:
+              - __meta_kubernetes_pod_annotation_prometheus_io_port
+              - __meta_kubernetes_pod_ip
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - action: replace
+            source_labels:
+              - __meta_kubernetes_namespace
+            target_label: namespace
+          - action: replace
+            source_labels:
+              - __meta_kubernetes_pod_name
+            target_label: pod
+          - action: drop
+            regex: Pending|Succeeded|Failed|Completed
+            source_labels:
+              - __meta_kubernetes_pod_phase
+          - action: replace
+            source_labels:
+              - __meta_kubernetes_pod_node_name
+            target_label: node
     # Regles dans kube/urbanlink/observability/prometheus-alerts.yaml, etiquete
     # `release: kube-prometheus-stack` pour etre selectionne ici -- comme les
     # regles par defaut du chart, qui portent le meme label.

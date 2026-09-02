@@ -5,8 +5,8 @@
 #   - six noms APPLICATIFS joignables depuis Internet, via Cloudflare
 #     (urbanlink.fr, www, api, auth, nominatim, s3) ;
 #   - douze noms INTERNES qui restent sur le LAN : dix consoles du cluster
-#     (directus, minio, pgadmin, kafka, temporal, kibana, kiali, prometheus,
-#     grafana, argo) plus proxmox et router, servis hors cluster.
+#     (minio, pgadmin, kafka, temporal, kibana, kiali, prometheus, grafana,
+#     alertmanager, argo) plus proxmox et router, servis hors cluster.
 # Voir roles/edge_urbanlink/README.md.
 #
 # Prerequis :

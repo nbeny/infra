@@ -123,26 +123,6 @@ spec:
             port:
               number: 9000
 ---
-# ------------------------------------------------------ interne : Directus
-apiVersion: networking.istio.io/v1
-kind: VirtualService
-metadata:
-  name: uc-directus
-  namespace: urbanconnect
-  labels:
-    uc.ingress/tier: internal
-spec:
-  hosts:
-    - "directus.urbanlink.fr"
-  gateways:
-    - uc-gateway
-  http:
-    - route:
-        - destination:
-            host: directus.urbanconnect.svc.cluster.local
-            port:
-              number: 8055
----
 # ------------------------------------------- interne : console MinIO (9001)
 apiVersion: networking.istio.io/v1
 kind: VirtualService
@@ -269,7 +249,21 @@ spec:
             port:
               number: 20001
 ---
-# ----------------------------------- interne : Prometheus (metriques du mesh)
+# -------------------------------------------------- interne : Prometheus
+#  ⚠️ IL N'Y A PLUS QU'UN SEUL PROMETHEUS, depuis le 2026-09-02. Ce nom
+#  desservait l'addon d'Istio (istio-system), qui ne portait que la telemetrie
+#  du mesh -- et jamais les metriques metier `urbanconnect_*` ni les alertes.
+#  Chercher une metrique applicative ici etait une perte de temps garantie.
+#
+#  L'addon a ete supprime, sa collecte reprise par le kube-prometheus-stack
+#  (job `kubernetes-pods`, cf. kube-prometheus-stack-values.yaml.j2). Ce nom
+#  pointe donc maintenant sur le Prometheus consolide, qui porte les DEUX
+#  familles de metriques.
+#
+#  Le Service `prometheus` de istio-system existe toujours, mais en
+#  `ExternalName` vers celui-ci : Kiali et la source de donnees Grafana
+#  « mesh » le nomment en dur. On ne passe PAS par lui ici -- router un
+#  VirtualService vers un ExternalName ajoute une indirection pour rien.
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
@@ -285,7 +279,8 @@ spec:
   http:
     - route:
         - destination:
-            host: prometheus.istio-system.svc.cluster.local
+            # Service d'alias, cf. observability/prometheus-alias.yaml.
+            host: prometheus.urbanconnect.svc.cluster.local
             port:
               number: 9090
 ---

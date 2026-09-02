@@ -6,8 +6,8 @@
 #
 #  La zone ne contient PAS un enregistrement par outil : elle contient un
 #  WILDCARD `*.urbanlink.fr -> 192.168.100.50` en DNS-only, qui couvre les dix
-#  consoles internes (pgadmin, kibana, kiali, prometheus, grafana, argo, minio,
-#  directus, kafka, temporal) plus proxmox et router.
+#  consoles internes (pgadmin, kibana, kiali, prometheus, grafana, alertmanager,
+#  argo, minio, kafka, temporal) plus proxmox et router.
 #
 #  C'est ce qui fait qu'exposer une console de plus ne demande AUCUNE action
 #  DNS : `grafana.urbanlink.fr` a resolu correctement avant meme d'exister.
