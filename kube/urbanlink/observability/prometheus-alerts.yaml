@@ -52,11 +52,19 @@ spec:
             summary: "Pod {{ $labels.pod }} en CrashLoop ({{ $value | humanize }} restarts/10min)"
 
         - alert: PodNotReady
+          # ⚠️ `unless` sur les pods TERMINES, sans quoi la regle est fausse en
+          # permanence : un pod de Job qui a fini avec succes garde
+          # `Ready=false` pour toujours. Mesure le 2026-09-02, quatre alertes
+          # actives et definitives -- geoipupdate (deux executions),
+          # elasticsearch-setup et minio-init, tous `Completed`. Une alerte qui
+          # ne s'eteint jamais apprend a ignorer la page des alertes.
           expr: >-
             kube_pod_status_ready{
               namespace="urbanconnect",
               condition="false"
             } == 1
+            unless on(namespace, pod)
+            kube_pod_status_phase{namespace="urbanconnect", phase="Succeeded"} == 1
           for: 5m
           labels:
             severity: warning
