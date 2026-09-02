@@ -131,3 +131,13 @@ est en `no_log` pour qu'elle ne finisse pas dans les journaux Ansible.
   `sleep 10`). Un téléchargement de deux heures sans personne devant la
   console meurt en silence — retour au menu Recovery, aucune erreur.
   `pmset -a sleep 0 displaysleep 0 disksleep 0` avant de lancer l'installation.
+- **Le `Timeout` d'OpenCore ne suffit pas : c'est l'entrée *par défaut* qui
+  décide.** Passer le délai à 5 s évite bien de rester bloqué au sélecteur,
+  mais l'entrée choisie reste `macOS Base System`. L'installation ne dépasse
+  donc jamais son premier redémarrage : elle recommence. Détacher `ide0` avant
+  cette étape, `macOS Installer` devient le défaut. Voir
+  [`docs/macos-ci.md`](../../../docs/macos-ci.md) § 4.
+- **La VM ne sait pas se redémarrer elle-même.** `reboot` depuis l'invité ne
+  fait rien, et l'installeur qui demande un redémarrage abandonne en silence.
+  `qm reset 9200` depuis le nœud -- pas `qm stop`, qui tuerait QEMU alors que
+  le disque est en `cache=unsafe`.

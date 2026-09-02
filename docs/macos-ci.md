@@ -211,10 +211,50 @@ puis :
    après chaque redémarrage tant que l'installation n'est pas finie.
 
 4. Quitter, **Réinstaller macOS Monterey**, cibler `Macintosh HD`.
-   Le téléchargement fait ~12 Go et annonce 2 à 3 h.
-   La VM redémarre plusieurs fois : **toujours reprendre l'entrée `macOS
-   Installer`** dans OpenCore jusqu'à la fin.
-5. Assistant de configuration : créer le compte administrateur en le nommant
+   Le téléchargement fait ~12 Go et annonce 2 à 3 h. À la fin de cette phase,
+   l'installeur écrit `macOS Install Data` sur le disque cible, bénit le
+   volume, puis **veut redémarrer**. C'est là que ça coince, deux fois.
+
+5. **Redémarrer depuis l'hôte, pas depuis l'invité.** Cette VM ne sait pas se
+   redémarrer elle-même : `reboot` depuis le Terminal de Recovery ferme les
+   fenêtres et ne redémarre rien. L'installeur, lui, demande un redémarrage
+   qui n'arrive jamais, abandonne, et **retombe au menu Recovery sans erreur**.
+   Depuis le nœud :
+
+   ```bash
+   qm reset 9200      # reset materiel ; qm stop tuerait QEMU, or le disque
+                      # est en cache=unsafe -- garder le processus en vie
+   ```
+
+   Vérifier avant de redémarrer que la phase 1 est bien finie :
+
+   ```bash
+   bless --info "/Volumes/Macintosh HD"     # "Blessed System File is {Preboot}/..."
+   ls "/Volumes/Macintosh HD/macOS Install Data"
+   ```
+
+6. **Détacher `ide0` avant ce redémarrage.** Le sélecteur OpenCore démarre son
+   entrée **par défaut** après 5 secondes, et cette entrée par défaut est
+   `macOS Base System` — pas `macOS Installer`. Sans personne devant la console
+   pour appuyer sur une touche dans la fenêtre de 5 s, la VM repart donc
+   indéfiniment sur le programme d'installation au lieu de continuer.
+   Les frappes envoyées par QMP ne sont pas fiables dans ce sélecteur.
+
+   La façon déterministe de trancher est d'enlever l'entrée concurrente :
+
+   ```bash
+   qm stop 9200
+   qm set 9200 --delete ide0     # conserve le disque en `unused`, reattachable
+   qm start 9200
+   ```
+
+   `macOS Installer` devient alors la première entrée et le défaut d'OpenCore.
+   La VM enchaîne seule le reste de l'installation (~30 min, logo Apple puis
+   scellement du volume APFS).
+
+   > **`ide2` doit rester attaché** : c'est OpenCore, le bootloader.
+
+7. Assistant de configuration : créer le compte administrateur en le nommant
    **`nbeny`** (la valeur de `lab_admin_user`) — sinon l'inventaire Ansible ne
    tombera pas en face.
 
@@ -263,14 +303,18 @@ ssh -J root@192.168.100.50 nbeny@10.0.0.140 'sw_vers'
 
 ### Convertir en template
 
-Une fois macOS installé, retirer l'installeur et figer la VM :
+Une fois macOS installé, figer la VM :
 
 ```bash
 ssh root@192.168.100.50
 qm stop 9200
-qm set 9200 --delete ide0      # l'installeur BaseSystem ne sert plus
+qm set 9200 --delete ide0      # deja fait a l'etape 6 si l'on a suivi le § 4
 qm template 9200
 ```
+
+Le disque détaché reste visible en `unused` dans `qm config 9200`. Le
+supprimer définitivement (`qm disk unlink`) n'est pas nécessaire et coûte une
+reconstruction si l'on doit réinstaller.
 
 > **OpenCore (`ide2`) doit rester attaché.** C'est le bootloader : sans lui la
 > VM ne démarre plus du tout.
@@ -384,6 +428,9 @@ non-attendue.
 | **L'installeur ne propose que `macOS Base System`, grisé** | **Le disque de 200 Go est brut. Un disque non partitionné n'est pas une cible : l'effacer en APFS/GUID d'abord (§ 4)** |
 | L'installeur ne télécharge rien, reste sur « Loading installation information » | Pas de bail DHCP. `ipconfig getifaddr en0` dans le Terminal de Recovery ; côté nœud, `journalctl -u dnsmasq` doit montrer un `DHCPACK` |
 | **Retour au menu Recovery en pleine installation, sans erreur** | **Veille du mode Recovery (`sleep 10`). `pmset -a sleep 0 displaysleep 0 disksleep 0` avant de relancer (§ 4). Signature dans `/var/log/install.log` : `Assertion TimedOut. Type:InternalPreventSleep`** |
+| **La VM repart toujours sur l'installeur, l'installation ne progresse jamais** | **OpenCore démarre son entrée par défaut, `macOS Base System`, après 5 s. Détacher `ide0` pour que `macOS Installer` devienne le défaut (§ 4, étape 6)** |
+| `reboot` depuis l'invité ne redémarre rien | Cette VM ne sait pas se redémarrer seule. Utiliser `qm reset 9200` depuis le nœud |
+| `bless --info` répond « Blessed System File is {Preboot}/… » mais rien ne se passe | La phase de téléchargement est finie, il ne manque que le redémarrage vers la bonne entrée OpenCore |
 | Le nœud ne répond pas au DHCP alors que dnsmasq tourne | La requête arrive **sur** le nœud, pas en transit : c'est la politique d'entrée d'ufw qui la jette, pas la politique de forward |
 | Aucun paquet CLT proposé par `softwareupdate` | La VM n'a pas d'accès sortant — l'IP statique n'a pas été saisie |
 | Ansible : « Don't run this as root! » | Une tâche Homebrew a perdu son `become: false` (`ansible.cfg` active `become` globalement) |
