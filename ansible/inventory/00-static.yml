@@ -59,6 +59,31 @@ all:
           ansible_host: 10.0.0.130
           vm_id: 130
 
+    # VPS public Hostinger -- routeur de la messagerie urbanlink.fr.
+    #
+    # Son role est etroit et volontairement pauvre : WireGuard, un DNAT tcp/25
+    # vers la VM 140 et un SNAT en sortie. Il ne stocke aucune donnee mail.
+    # C'est lui qui donne son IP d'emission a la messagerie -- 147.79.102.17,
+    # propre sur les listes noires, alors que l'IP de la maison est en
+    # Spamhaus PBL et ne peut pas emettre.
+    #
+    # ⚠️ Il porte AUSSI trois sites en production (nbeny.fr, www.nbeny.fr,
+    # francois.nbeny.fr) derriere Traefik, plus CrowdSec et un runner GitHub
+    # Actions. Aucun role joue ici ne doit toucher aux ports 80/443 ni aux
+    # chaines iptables de Docker : les regles de la messagerie vivent dans le
+    # PostUp de wg0, et les regles de FORWARD passent par DOCKER-USER.
+    #
+    # ⚠️ ABSENT du groupe `guests`, a dessein : ce n'est pas une VM du lab, et
+    # 90-update.yml comme 95-hardening.yml n'ont rien a y faire. Un
+    # redemarrage decide par un playbook de mise a jour couperait a la fois la
+    # messagerie et trois sites.
+    edge_nodes:
+      hosts:
+        vps-mail:
+          ansible_host: 147.79.102.17
+          ansible_user: root
+          ansible_connection: ssh
+
     # Groupe parapluie : tout ce qui est une VM invitee (pas le noeud PVE)
     #
     # macos_nodes en est volontairement ABSENT : ces hotes n'ont ni apt, ni

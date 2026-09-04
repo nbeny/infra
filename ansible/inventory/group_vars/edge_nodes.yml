@@ -1,0 +1,14 @@
+---
+# ============================================================================
+#  Noeuds de bord : machines publiques hors du lab
+# ============================================================================
+#  Le noeud de controle les joint par Internet, pas par le reseau 10.0.0.0/24.
+#  Pas de ProxyJump, pas de rebond : la connexion est directe, par la cle de
+#  root du noeud Proxmox (posee dans authorized_keys du VPS).
+# ============================================================================
+
+ansible_python_interpreter: /usr/bin/python3
+
+# On est deja root : `become` n'a pas lieu d'etre, et sudo n'est pas garanti
+# present sur une image VPS minimale.
+ansible_become: false
