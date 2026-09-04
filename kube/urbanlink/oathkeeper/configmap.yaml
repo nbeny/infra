@@ -100,17 +100,41 @@ data:
       #     claims: '{"sub":"{{ print .Subject }}","email":"{{ print .Extra.identity.traits.email }}"}'
 
   access-rules.yaml: |
-    # L'URL matchée est l'URL PUBLIQUE d'origine, reconstruite par Oathkeeper depuis
-    # les en-têtes X-Forwarded-* envoyés par Traefik (trustForwardHeader: true).
+    # L'URL matchée est celle qu'Oathkeeper RECONSTRUIT depuis les en-têtes que
+    # le filtre ext_authz d'Envoy lui recopie (`includeRequestHeadersInCheck`,
+    # cf. istiod-values.yaml.j2) : X-Forwarded-Proto pour le schéma,
+    # X-Forwarded-Host pour l'hôte, et le chemin restant après `/decisions`.
     #
-    # Seuls les routers Traefik portant le Middleware `oathkeeper-auth` arrivent ici.
-    # Les autres (front, kratos, nominatim, s3) ne passent pas par Oathkeeper.
+    # Oathkeeper ne voit QUE le trafic de `api.urbanlink.fr` : c'est
+    # l'AuthorizationPolicy `uc-edge-auth` (ingress/authorization.yaml) qui
+    # choisit les requêtes envoyées ici. La sélection d'hôte est faite là-bas,
+    # pas dans les règles ci-dessous.
+    #
+    # ⚠️ **LE SCHÉMA N'EST PAS `https` À CE POINT DE LA CHAÎNE.** Le TLS est
+    # terminé par le nginx du nœud Proxmox, qui relaie EN CLAIR vers le
+    # NodePort 30080 de la passerelle (voir l'en-tête de ingress/gateway.yaml).
+    # Envoy tourne donc sur un listener HTTP avec `use_remote_address`, et il
+    # **réécrit** X-Forwarded-Proto en `http` — écrasant le `https` que nginx
+    # avait posé. Une règle ancrée sur `https://` ne correspond à RIEN, et
+    # Oathkeeper répond alors 404 « The requested resource could not be
+    # found » — au format d'erreur Ory, sur TOUTES les méthodes et TOUS les
+    # chemins. C'est ce qui rendait `api.urbanlink.fr` entièrement mort :
+    # `wss://api.urbanlink.fr/graphql` (abonnements GraphQL : messagerie temps
+    # réel, notifications, appels) et les envois de fichiers du navigateur, qui
+    # visent `NEXT_PUBLIC_API_URL` en direct. Le site restait debout parce que
+    # ses requêtes GraphQL ordinaires passent par le relais same-origin
+    # `/api/graphql` du frontend, qui joint `backend:4000` sans sortir du
+    # cluster — donc sans traverser cette règle.
+    #
+    # ⇒ Le schéma est un groupe, pas un littéral. `failOpen: false` fait qu'une
+    # panne d'Oathkeeper refuse (403) ; ce 404-ci, lui, ne ressemblait pas à
+    # une panne.
 
     # API GraphQL/REST : pass-through. Si connecté → session validée + headers
     # d'identité injectés. Sinon → guest (le backend gère l'authZ via ses guards).
     - id: "api:passthrough"
       match:
-        url: "https://api.urbanlink.fr/<.*>"
+        url: "<http|https>://api.urbanlink.fr/<.*>"
         methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
       authenticators:
         - handler: cookie_session
@@ -125,7 +149,7 @@ data:
     # → 401/403 + redirection login pour les navigateurs). Adapter le préfixe.
     # - id: "api:protected"
     #   match:
-    #     url: "https://api.urbanlink.fr/admin<.*>"
+    #     url: "<http|https>://api.urbanlink.fr/admin<.*>"
     #     methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
     #   authenticators:
     #     - handler: cookie_session
