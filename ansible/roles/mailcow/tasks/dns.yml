@@ -1,0 +1,130 @@
+---
+# ============================================================================
+#  Publication DNS des enregistrements d'authentification
+# ----------------------------------------------------------------------------
+#  Ce fichier ne pose QUE des enregistrements d'authentification (DKIM, SPF,
+#  DMARC). Il ne touche NI au MX, NI au wildcard *.urbanlink.fr :
+#
+#    * le MX est la bascule elle-meme, une decision qui se prend en connaissance
+#      de cause et qui se verifie avant (phase 3 du plan) ;
+#    * le wildcard fait tenir tout le palier « interne » du lab -- le modifier
+#      exposerait douze consoles a Internet.
+#
+#  Publier DKIM et SPF AVANT la bascule est deliberе : cela rend l'emission
+#  verifiable depuis la nouvelle machine alors qu'Infomaniak recoit encore tout
+#  le courrier. Le SPF porte donc les deux origines pendant la transition.
+# ============================================================================
+
+- name: Lire le token Cloudflare du noeud
+  ansible.builtin.slurp:
+    src: "{{ mailcow_cloudflare_credentials }}"
+  register: mailcow_cf_ini
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  no_log: true
+
+- name: Extraire le token
+  ansible.builtin.set_fact:
+    mailcow_cf_token: >-
+      {{ (mailcow_cf_ini.content | b64decode
+          | regex_search('dns_cloudflare_api_token\s*=\s*(\S+)', '\1'))[0] }}
+  no_log: true
+
+- name: Resoudre l'identifiant de la zone
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones?name={{ mailcow_dns_zone }}"
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+  register: mailcow_cf_zone
+  changed_when: false
+  no_log: true
+
+- name: Exiger une zone unique
+  ansible.builtin.assert:
+    that:
+      - mailcow_cf_zone.json.success
+      - mailcow_cf_zone.json.result | length == 1
+    fail_msg: >-
+      La zone {{ mailcow_dns_zone }} n'a pas ete resolue. Verifier que le token
+      de {{ mailcow_cloudflare_credentials }} porte bien sur cette zone.
+
+- name: Relever la cle DKIM publique
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/dkim/{{ mailcow_dns_zone }}"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  register: mailcow_dkim_pub
+  changed_when: false
+
+- name: Exiger une cle DKIM utilisable
+  ansible.builtin.assert:
+    that:
+      - mailcow_dkim_pub.json.dkim_txt is defined
+      - mailcow_dkim_pub.json.dkim_txt | length > 100
+    fail_msg: >-
+      Aucune cle DKIM pour {{ mailcow_dns_zone }}. Rejouer accounts.yml avant
+      de publier : un enregistrement DKIM vide vaut mieux que pas
+      d'enregistrement, mais un enregistrement FAUX fait echouer toutes les
+      verifications DKIM du domaine.
+
+- name: Constituer les enregistrements a publier
+  ansible.builtin.set_fact:
+    mailcow_dns_records:
+      - name: "{{ mailcow_dkim_selector }}._domainkey.{{ mailcow_dns_zone }}"
+        content: "{{ mailcow_dkim_pub.json.dkim_txt }}"
+        why: "cle publique DKIM"
+
+- name: Relever les enregistrements TXT existants
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records?type=TXT&name={{ item.name }}
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+  loop: "{{ mailcow_dns_records }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: mailcow_cf_existing
+  changed_when: false
+  no_log: true
+
+- name: Creer les enregistrements absents
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id }}/dns_records
+    method: POST
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      type: TXT
+      name: "{{ item.item.name }}"
+      content: "{{ item.item.content }}"
+      ttl: 300
+      comment: "{{ item.item.why }} -- ansible role mailcow"
+  loop: "{{ mailcow_cf_existing.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.json.result | length == 0
+  no_log: true
+
+- name: Corriger les enregistrements dont la valeur a change
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records/{{ item.json.result[0].id }}
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      content: "{{ item.item.content }}"
+  loop: "{{ mailcow_cf_existing.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  # Sans ce `when`, chaque rejeu remonterait `changed` et l'idempotence du
+  # playbook ne voudrait plus rien dire.
+  when:
+    - item.json.result | length > 0
+    - item.json.result[0].content != item.item.content
+  no_log: true

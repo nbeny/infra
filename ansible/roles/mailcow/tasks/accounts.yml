@@ -1,0 +1,300 @@
+---
+# ============================================================================
+#  Domaine, boites, alias et cle DKIM
+# ----------------------------------------------------------------------------
+#  Tout passe par l'API REST de Mailcow plutot que par des clics : c'est ce qui
+#  rend l'operation rejouable et verifiable. La cle d'API, elle, ne peut PAS
+#  etre creee par l'API -- elle est donc posee une fois en base, exactement
+#  comme le fait le script mailcow-reset-admin.sh du projet.
+# ============================================================================
+
+- name: Lire les identifiants de console du lab
+  ansible.builtin.slurp:
+    src: "{{ mailcow_secrets_env }}"
+  register: mailcow_secrets_raw
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  no_log: true
+
+- name: Extraire le mot de passe des consoles
+  ansible.builtin.set_fact:
+    mailcow_admin_password: >-
+      {{ (mailcow_secrets_raw.content | b64decode
+          | regex_search('^CONSOLE_ADMIN_PASSWORD=(.*)$', '\1', multiline=True))[0] | trim }}
+  no_log: true
+
+- name: Exiger un mot de passe utilisable
+  ansible.builtin.assert:
+    that:
+      - mailcow_admin_password | length >= 8
+    fail_msg: >-
+      CONSOLE_ADMIN_PASSWORD est absent ou trop court dans
+      {{ mailcow_secrets_env }}. Ce fichier n'est pas versionne : il doit
+      exister sur le noeud de controle.
+
+# ---------------------------------------------------------------------------
+#  Compte d'administration
+# ---------------------------------------------------------------------------
+# Mailcow demarre sur admin/moohoo. Laisser ce couple en place serait une porte
+# ouverte sur TOUT le courrier et sur la creation de comptes capables
+# d'emettre au nom du domaine -- donc sur la reputation de l'IP.
+- name: Relever l'empreinte actuellement en base
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      cd {{ mailcow_dir }}
+      source mailcow.conf
+      docker compose exec -T mysql-mailcow mysql -N -B -umailcow -p"$DBPASS" mailcow         -e "SELECT password FROM admin WHERE username='admin';" 2>/dev/null
+    executable: /bin/bash
+  register: mailcow_admin_current
+  changed_when: false
+  no_log: true
+
+# Une empreinte bcrypt est salee : deux calculs du MEME mot de passe donnent
+# deux chaines differentes. Comparer les empreintes ne dit donc rien, et poser
+# le mot de passe a chaque passage rendait la tache eternellement `changed`.
+# `password_verify` est le seul test qui ait un sens.
+- name: Verifier si le mot de passe est deja le bon
+  ansible.builtin.command:
+    # Scalaire replie obligatoire : la valeur contient « ? 0 : 1 », et un
+    # deux-points suivi d'une espace ferait lire la ligne comme une cle YAML.
+    cmd: >-
+      docker compose exec -T -e MCPASS -e MCHASH php-fpm-mailcow
+      php -r 'exit(password_verify(getenv("MCPASS"), getenv("MCHASH")) ? 0 : 1);'
+    chdir: "{{ mailcow_dir }}"
+  environment:
+    MCPASS: "{{ mailcow_admin_password }}"
+    MCHASH: "{{ mailcow_admin_current.stdout | trim }}"
+  register: mailcow_admin_matches
+  failed_when: false
+  changed_when: false
+  no_log: true
+
+- name: Calculer l'empreinte du nouveau mot de passe
+  ansible.builtin.command:
+    cmd: >-
+      docker compose exec -T -e MCPASS php-fpm-mailcow
+      php -r 'echo "{BLF-CRYPT}" . password_hash(getenv("MCPASS"), PASSWORD_BCRYPT);'
+    chdir: "{{ mailcow_dir }}"
+  environment:
+    MCPASS: "{{ mailcow_admin_password }}"
+  register: mailcow_admin_hash
+  changed_when: false
+  when: mailcow_admin_matches.rc != 0
+  no_log: true
+
+# ---------------------------------------------------------------------------
+#  Cle d'API
+# ---------------------------------------------------------------------------
+- name: Verifier si une cle d'API existe deja
+  ansible.builtin.stat:
+    path: "{{ mailcow_dir }}/.api-key"
+  register: mailcow_api_stat
+
+- name: Generer et enregistrer une cle d'API
+  when: not mailcow_api_stat.stat.exists
+  block:
+    - name: Tirer une cle aleatoire
+      ansible.builtin.set_fact:
+        mailcow_api_key: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+      no_log: true
+
+    - name: Inserer la cle en base
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          cd {{ mailcow_dir }}
+          source mailcow.conf
+          docker compose exec -T mysql-mailcow mysql -umailcow -p"$DBPASS" mailcow \
+            -e "REPLACE INTO api (api_key, allow_from, skip_ip_check, access, active)
+                VALUES ('$MCKEY', '', 1, 'rw', 1);" 2>&1 \
+            | grep -v "Using a password" || true
+        executable: /bin/bash
+      environment:
+        # skip_ip_check=1 plutot qu'une liste allow_from : l'appelant est
+        # Ansible, vu par le nginx de Mailcow avec l'adresse du pont Docker,
+        # qui n'est pas stable. Le risque est nul ici -- l'API n'ecoute que sur
+        # 8080, un port qui n'est publie nulle part sur Internet.
+        MCKEY: "{{ mailcow_api_key }}"
+      no_log: true
+
+    - name: Conserver la cle sur la VM
+      ansible.builtin.copy:
+        content: "{{ mailcow_api_key }}"
+        dest: "{{ mailcow_dir }}/.api-key"
+        mode: "0600"
+      no_log: true
+
+- name: Relire la cle d'API
+  ansible.builtin.slurp:
+    src: "{{ mailcow_dir }}/.api-key"
+  register: mailcow_api_raw
+  no_log: true
+
+- name: Memoriser la cle
+  ansible.builtin.set_fact:
+    mailcow_api_key: "{{ mailcow_api_raw.content | b64decode | trim }}"
+  no_log: true
+
+# ---------------------------------------------------------------------------
+#  Domaine
+# ---------------------------------------------------------------------------
+- name: Relever les domaines existants
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/domain/all"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  register: mailcow_domains
+  changed_when: false
+  no_log: true
+
+- name: Creer les domaines absents
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/add/domain"
+    method: POST
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      domain: "{{ item.name }}"
+      description: "{{ item.description }}"
+      aliases: 100
+      mailboxes: 20
+      maxquota: "{{ item.maxquota }}"
+      quota: "{{ item.quota }}"
+      active: 1
+      # `relay_all_recipients` a 0 : le serveur ne doit accepter que les
+      # adresses qu'il connait. A 1, il accepterait tout et genererait des
+      # rebonds differes -- du backscatter, qui abime la reputation.
+      relay_all_recipients: 0
+      backupmx: 0
+  loop: "{{ mailcow_domains_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name not in (mailcow_domains.json | default([]) | map(attribute='domain_name') | list)
+
+# ---------------------------------------------------------------------------
+#  Boites et alias
+# ---------------------------------------------------------------------------
+- name: Relever les boites existantes
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/mailbox/all"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  register: mailcow_boxes
+  changed_when: false
+  no_log: true
+
+- name: Creer les boites absentes
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/add/mailbox"
+    method: POST
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      local_part: "{{ item.local_part }}"
+      domain: "{{ item.domain }}"
+      name: "{{ item.name }}"
+      quota: "{{ item.quota }}"
+      password: "{{ mailcow_admin_password }}"
+      password2: "{{ mailcow_admin_password }}"
+      active: 1
+      force_pw_update: 0
+      tls_enforce_in: 0
+      tls_enforce_out: 0
+  loop: "{{ mailcow_mailboxes }}"
+  loop_control:
+    label: "{{ item.local_part }}@{{ item.domain }}"
+  when: >-
+    (item.local_part ~ '@' ~ item.domain)
+    not in (mailcow_boxes.json | default([]) | map(attribute='username') | list)
+  no_log: true
+
+- name: Relever les alias existants
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/alias/all"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  register: mailcow_aliases
+  changed_when: false
+  no_log: true
+
+- name: Creer les alias absents
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/add/alias"
+    method: POST
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      address: "{{ item.address }}"
+      goto: "{{ item.goto }}"
+      active: 1
+  loop: "{{ mailcow_aliases_wanted }}"
+  loop_control:
+    label: "{{ item.address }}"
+  when: >-
+    item.address
+    not in (mailcow_aliases.json | default([]) | map(attribute='address') | list)
+
+# ---------------------------------------------------------------------------
+#  DKIM
+# ---------------------------------------------------------------------------
+- name: Relever les cles DKIM existantes
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/dkim/{{ item.name }}"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  loop: "{{ mailcow_domains_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: mailcow_dkim_state
+  changed_when: false
+
+- name: Generer les cles DKIM absentes
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/add/dkim"
+    method: POST
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      domains: "{{ item.item.name }}"
+      # 2048 bits : 1024 est encore accepte mais consideré faible, et 4096 ne
+      # tient pas dans un enregistrement TXT sans decoupage, ce que certains
+      # resolveurs anciens gerent mal.
+      dkim_selector: "{{ mailcow_dkim_selector }}"
+      key_size: 2048
+  loop: "{{ mailcow_dkim_state.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: not (item.json | default({}))
+
+- name: Relire les cles DKIM a publier
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/dkim/{{ item.name }}"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  loop: "{{ mailcow_domains_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: mailcow_dkim_final
+  changed_when: false
+
+- name: Afficher les enregistrements DKIM a poser dans le DNS
+  ansible.builtin.debug:
+    msg: >-
+      {{ mailcow_dkim_selector }}._domainkey.{{ item.item.name }}
+      TXT  {{ item.json.dkim_txt | default('ABSENT') }}
+  loop: "{{ mailcow_dkim_final.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"

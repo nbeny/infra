@@ -84,7 +84,11 @@
     cmd: docker compose pull
     chdir: "{{ mailcow_dir }}"
   register: mailcow_pull
-  changed_when: "'Pulled' in mailcow_pull.stderr or 'Downloaded' in mailcow_pull.stderr"
+  # `docker compose pull` annonce « Pulled » pour chaque service meme lorsque
+  # rien n'a ete telecharge : le detecter dans sa sortie rendait la tache
+  # eternellement `changed`. Telecharger une image ne modifie de toute facon
+  # rien de ce qui TOURNE -- c'est `up -d`, juste apres, qui applique.
+  changed_when: false
 
 - name: Demarrer la pile
   ansible.builtin.command:
@@ -104,3 +108,10 @@
 
 - name: Poser le certificat du noeud
   ansible.builtin.include_tasks: certificates.yml
+
+- name: Creer le domaine, les boites, les alias et la cle DKIM
+  ansible.builtin.include_tasks: accounts.yml
+
+- name: Publier les enregistrements d'authentification
+  ansible.builtin.include_tasks: dns.yml
+  tags: [dns]

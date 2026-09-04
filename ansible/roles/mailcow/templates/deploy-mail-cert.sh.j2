@@ -25,6 +25,19 @@ if [ ! -s "${SRC}/fullchain.pem" ]; then
   exit 1
 fi
 
+# Comparer AVANT de copier. Sans cela, le script redemarre Postfix, Dovecot et
+# nginx a chaque execution du role -- il coupe donc la reception pendant
+# quelques secondes pour ne rien changer, et rend le playbook eternellement
+# `changed`.
+LOCAL_FP=$(openssl x509 -noout -fingerprint -sha256 -in "${SRC}/fullchain.pem" 2>/dev/null | cut -d= -f2)
+REMOTE_FP=$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${USER}@${VM}" \
+  "sudo openssl x509 -noout -fingerprint -sha256 -in ${DEST}/cert.pem 2>/dev/null | cut -d= -f2" 2>/dev/null || true)
+
+if [ -n "${REMOTE_FP}" ] && [ "${LOCAL_FP}" = "${REMOTE_FP}" ]; then
+  echo "certificat deja a jour sur ${VM}"
+  exit 0
+fi
+
 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${USER}@${VM}" "sudo mkdir -p ${DEST}"
 scp -o BatchMode=yes "${SRC}/fullchain.pem" "${USER}@${VM}:/tmp/mail-cert.pem"
 scp -o BatchMode=yes "${SRC}/privkey.pem"   "${USER}@${VM}:/tmp/mail-key.pem"

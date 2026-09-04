@@ -56,3 +56,45 @@ mailcow_cert_source: /etc/letsencrypt/live/urbanlink.fr
 
 # Adresse de la VM, vue depuis le noeud. Le script de distribution tourne la-bas.
 mailcow_vm_ip: 10.0.0.140
+
+# --- Comptes ---------------------------------------------------------------
+# Fichier de secrets du lab, non versionne, lu sur le NOEUD de controle. Meme
+# fichier que celui dont le role edge_urbanlink tire l'authentification des
+# consoles : le mot de passe de la messagerie est celui des autres consoles,
+# comme Grafana et pgAdmin.
+mailcow_secrets_env: "{{ playbook_dir }}/../../kube/urbanlink/secrets.env"
+
+mailcow_dkim_selector: dkim
+
+mailcow_domains_wanted:
+  - name: urbanlink.fr
+    description: "Courrier humain -- boites perso et adresses de service"
+    quota: 10240        # Mo par boite
+    maxquota: 10240
+
+mailcow_mailboxes:
+  # La boite principale. C'est deja l'identite de l'utilisateur dans le lab
+  # (CONSOLE_ADMIN_EMAIL).
+  - { local_part: alesio,  domain: urbanlink.fr, name: "Nicolas",                quota: 5120 }
+  # Adresse publique, celle que Kratos utilise deja chez Infomaniak : la
+  # recreer ici evite de perdre l'adresse que les utilisateurs connaissent.
+  - { local_part: contact, domain: urbanlink.fr, name: "Contact UrbanConnect",   quota: 2048 }
+  # Boites techniques. Sans elles, les rapports agreges DMARC et les rapports
+  # d'echec TLS n'ont nulle part ou arriver -- et on passerait en p=reject sans
+  # savoir qui usurpe le domaine.
+  - { local_part: dmarc,   domain: urbanlink.fr, name: "Rapports DMARC",         quota: 1024 }
+  - { local_part: tlsrpt,  domain: urbanlink.fr, name: "Rapports TLS",           quota: 1024 }
+
+# postmaster@ et abuse@ ne sont pas decoratifs : leur absence est un signal
+# negatif pour les grands fournisseurs, et abuse@ est l'adresse qu'un operateur
+# utilise pour signaler un probleme AVANT de blacklister l'IP.
+mailcow_aliases_wanted:
+  - { address: "postmaster@urbanlink.fr", goto: "alesio@urbanlink.fr" }
+  - { address: "abuse@urbanlink.fr",      goto: "alesio@urbanlink.fr" }
+
+# --- DNS -------------------------------------------------------------------
+# Zone Cloudflare de la messagerie. Le token depose par le role
+# tls_certificates y est limite a Zone:DNS:Edit -- il ne peut donc ni lire ni
+# changer les reglages de la zone, seulement ses enregistrements.
+mailcow_dns_zone: urbanlink.fr
+mailcow_cloudflare_credentials: /root/.secrets/cloudflare.ini
