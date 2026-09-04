@@ -1,0 +1,43 @@
+#!/bin/bash
+# Genere par Ansible (role mailcow). Toute edition manuelle sera ecrasee.
+#
+# Recopie le certificat wildcard *.urbanlink.fr du noeud vers la VM Mailcow,
+# puis recharge les services qui le presentent.
+#
+# POURQUOI LE NOEUD ET PAS UN ACME LOCAL : le wildcard existe deja ici, obtenu
+# en DNS-01 Cloudflare par le role tls_certificates, et il couvre a la fois
+# {{ mailcow_hostname }} (l'identite SMTP) et {{ mailcow_ui_hostname }} (les
+# interfaces). Un ACME sur la VM exigerait d'y recopier le token Cloudflare
+# pour rien -- et un challenge HTTP-01 serait de toute facon impossible : le
+# port 80 de {{ mailcow_hostname }} appartient au VPS.
+#
+# Appele par le --deploy-hook de certbot : il ne tourne donc QUE si le
+# certificat a reellement ete renouvele.
+set -euo pipefail
+
+SRC={{ mailcow_cert_source }}
+VM={{ mailcow_vm_ip }}
+USER={{ lab_admin_user }}
+DEST={{ mailcow_dir }}/data/assets/ssl
+
+if [ ! -s "${SRC}/fullchain.pem" ]; then
+  echo "certificat introuvable dans ${SRC} -- rien a deployer" >&2
+  exit 1
+fi
+
+ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${USER}@${VM}" "sudo mkdir -p ${DEST}"
+scp -o BatchMode=yes "${SRC}/fullchain.pem" "${USER}@${VM}:/tmp/mail-cert.pem"
+scp -o BatchMode=yes "${SRC}/privkey.pem"   "${USER}@${VM}:/tmp/mail-key.pem"
+
+ssh -o BatchMode=yes "${USER}@${VM}" "
+  set -e
+  sudo install -m 644 /tmp/mail-cert.pem ${DEST}/cert.pem
+  sudo install -m 600 /tmp/mail-key.pem  ${DEST}/key.pem
+  rm -f /tmp/mail-cert.pem /tmp/mail-key.pem
+  cd {{ mailcow_dir }}
+  # Les trois seuls services qui presentent le certificat. Un redemarrage
+  # complet de la pile couperait la reception pour rien.
+  sudo docker compose restart postfix-mailcow dovecot-mailcow nginx-mailcow
+"
+
+echo "certificat deploye sur ${VM}"

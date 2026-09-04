@@ -1,0 +1,21 @@
+---
+# Installe Mailcow sur la VM de messagerie.
+#
+# Prerequis, dans cet ordre :
+#   1. playbooks/40-mail-vm.yml     -> Docker present
+#   2. playbooks/41-mail-tunnel.yml -> le tunnel porte deja le trafic
+#   3. playbooks/32-tls-certificates.yml -> le wildcard *.urbanlink.fr existe
+#      sur le noeud (c'est LUI qui sera pose ici, pas un certificat local)
+#
+#   ansible-playbook playbooks/42-mailcow.yml
+#
+# Ce playbook ne modifie AUCUN enregistrement DNS public : a l'issue, la
+# messagerie fonctionne en local sans que le MX d'urbanlink.fr ait bouge.
+# Infomaniak continue de recevoir tout le courrier.
+
+- name: Installer Mailcow
+  hosts: base_nodes
+  gather_facts: true
+  become: true
+  roles:
+    - mailcow

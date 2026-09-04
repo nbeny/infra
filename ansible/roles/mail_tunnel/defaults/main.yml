@@ -37,7 +37,7 @@ mail_tunnel_public_ip: 147.79.102.17
 #     la reponse porte encore l'adresse du conteneur. Une regle
 #     `from 10.88.0.2` ne matcherait jamais.
 # Router tout le reseau Docker regle les deux sens d'un coup.
-mail_tunnel_docker_net: 172.22.1.0/24
+mail_tunnel_docker_net: "{{ mail_docker_net_prefix }}.0/24"
 
 # Interface WAN du VPS, cible du DNAT et du SNAT. Relevee : eth0.
 mail_tunnel_vps_wan: eth0

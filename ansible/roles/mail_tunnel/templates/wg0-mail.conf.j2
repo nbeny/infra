@@ -49,6 +49,26 @@ PostDown = ip rule del from {{ mail_tunnel_mail_ip }} lookup 100 pref 101
 PostUp = ip route add default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
 PostDown = ip route del default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
 
+# --- Les destinations PRIVEES retombent sur la table principale --------------
+# Une route `throw` fait echouer la recherche dans la table 100 et rend la main
+# aux regles suivantes, donc a la table principale.
+#
+# Sans ces trois lignes, la regle ci-dessus capture aussi le trafic LOCAL :
+#   * l'adresse du pont Docker de l'hote (172.22.1.1) appartient au reseau
+#     source, donc les reponses de l'hote vers un conteneur partaient dans le
+#     tunnel -- l'interface Mailcow ne repondait plus, meme en 127.0.0.1 ;
+#   * les reponses aux requetes du LAN (l'openresty du noeud, en 192.168.100.50,
+#     qui proxifie la console de la messagerie) partaient de meme par le VPS,
+#     qui les masquait derriere son IP publique : la console devenait
+#     injoignable.
+# Mesure le 2026-09-05.
+PostUp = ip route add throw 10.0.0.0/8 table 100
+PostDown = ip route del throw 10.0.0.0/8 table 100
+PostUp = ip route add throw 172.16.0.0/12 table 100
+PostDown = ip route del throw 172.16.0.0/12 table 100
+PostUp = ip route add throw 192.168.0.0/16 table 100
+PostDown = ip route del throw 192.168.0.0/16 table 100
+
 # Le pair n'accepte que {{ mail_tunnel_mail_ip }} dans ses AllowedIPs : sans ce
 # SNAT, les paquets partiraient en 172.22.1.x et WireGuard les refuserait.
 PostUp = iptables -t nat -A POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }}

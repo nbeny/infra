@@ -1,0 +1,58 @@
+---
+# ============================================================================
+#  Mailcow -- les boites de urbanlink.fr
+# ----------------------------------------------------------------------------
+#  Pourquoi Mailcow et pas Stalwart : l'etat de l'art 2026 donne les deux comme
+#  serieux, mais Stalwart est encore en 0.x avec une refonte cassante en v0.16
+#  (les noms de comptes deviennent des adresses completes, l'API REST change).
+#  Pour une messagerie qui doit tenir des annees sans intervention, la maturite
+#  de Postfix + Dovecot + Rspamd l'emporte.
+#
+#  Le MTA ne decide de rien en delivrabilite -- il decide du confort
+#  d'exploitation. La delivrabilite se joue sur l'IP, le PTR, l'authentification
+#  et la reputation, c'est-a-dire ailleurs que dans ce role.
+# ============================================================================
+
+mailcow_dir: /opt/mailcow-dockerized
+mailcow_repo: https://github.com/mailcow/mailcow-dockerized.git
+mailcow_branch: master
+
+# Identite SMTP : ce nom est annonce en HELO et doit correspondre au PTR de
+# 147.79.102.17. Il resout PUBLIQUEMENT vers le VPS.
+mailcow_hostname: mail.urbanlink.fr
+
+# Nom des INTERFACES, distinct du precedent et pas interchangeable avec lui.
+# Couvert par le wildcard *.urbanlink.fr -> 192.168.100.50, donc LAN
+# uniquement. Sans cette entree dans ADDITIONAL_SERVER_NAMES, le nginx de
+# Mailcow rejetterait l'en-tete Host que lui envoie l'openresty du noeud.
+mailcow_ui_hostname: webmail.urbanlink.fr
+
+mailcow_timezone: Europe/Paris
+
+# L'UI ne prend pas 80/443 : le TLS est termine par l'openresty du noeud, qui
+# detient deja le certificat wildcard.
+mailcow_http_port: 8080
+mailcow_https_port: 8443
+
+# Reseau Docker, derive de la SOURCE UNIQUE posee dans group_vars/all.yml.
+# Le role mail_tunnel route exactement ce prefixe : les deux ne peuvent donc
+# plus diverger, ce qui couperait l'emission sans autre symptome qu'une file
+# d'attente qui gonfle.
+mailcow_ipv4_network: "{{ mail_docker_net_prefix }}"
+
+# ClamAV couterait ~1,5 Go de RAM pour un volume de courrier personnel, alors
+# que Rspamd fait deja le gros du filtrage.
+mailcow_skip_clamd: "y"
+
+# Certificats fournis par le noeud (wildcard *.urbanlink.fr, DNS-01
+# Cloudflare). Un ACME local echouerait de toute facon : le port 80 du nom
+# public appartient au VPS, pas a cette VM.
+mailcow_skip_letsencrypt: "y"
+
+# Certificat wildcard du noeud, pose par le role tls_certificates. Le nom du
+# repertoire est le `--cert-name` de certbot : le changer creerait un doublon
+# et laisserait les vhosts pointer sur un chemin mort.
+mailcow_cert_source: /etc/letsencrypt/live/urbanlink.fr
+
+# Adresse de la VM, vue depuis le noeud. Le script de distribution tourne la-bas.
+mailcow_vm_ip: 10.0.0.140

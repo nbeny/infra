@@ -181,6 +181,25 @@ edge_urbanlink_services:
   # indefiniment sur la meme URL.
   - name: argo
     hosts: ["argo.urbanlink.fr"]
+  # Interfaces de la messagerie : la console Mailcow (comptes, alias, DKIM,
+  # quarantaine), SOGo (webmail) et Rspamd, toutes servies par le nginx de
+  # Mailcow sur la VM 140.
+  #
+  # ATTENTION -- le nom est `webmail`, PAS `mail`. `mail.urbanlink.fr` est
+  # l'identite SMTP publique : elle a un enregistrement A explicite vers le VPS
+  # (147.79.102.17) et ne resout donc PAS vers le noeud. Publier l'UI dessus la
+  # rendrait injoignable depuis le LAN.
+  #
+  # Aucun `public: true`, et c'est le palier le plus important de la liste :
+  # cette console donne acces a TOUT le courrier, et a la creation de comptes
+  # capables d'emettre au nom du domaine. L'exposer reviendrait a offrir a
+  # Internet de quoi bruler la reputation de l'IP d'emission.
+  - name: webmail
+    hosts: ["webmail.urbanlink.fr"]
+    upstream: "http://10.0.0.140:8080"
+    max_body: 0                 # pieces jointes
+    read_timeout: 300s          # imports de boites, recherche plein texte
+
   # --- hors cluster : amont explicite --------------------------------------
   - name: proxmox
     hosts: ["proxmox.urbanlink.fr"]

@@ -50,7 +50,21 @@ tls_certificates_binary: /usr/local/openresty/nginx/sbin/nginx
 
 # En `certonly` il n'y a pas d'installateur : sans ce hook, le serveur
 # continuerait de presenter l'ancien certificat jusqu'au prochain demarrage.
-tls_certificates_deploy_hook: "systemctl reload openresty"
+#
+# Le second membre distribue le wildcard a la VM Mailcow (10.0.0.140), qui
+# presente le MEME certificat pour mail.urbanlink.fr en SMTP et pour
+# webmail.urbanlink.fr en HTTP. Sans lui, Postfix continuerait de servir un
+# certificat expire au bout de 90 jours -- une panne silencieuse, tardive, et
+# qui se manifeste par des remises refusees plutot que par une erreur claire.
+#
+# `|| true` : la VM peut etre eteinte ou en cours de reconstruction, et cela ne
+# doit pas faire echouer le renouvellement des quatre autres certificats du
+# noeud. Le script est de toute facon rejoue a chaque passage du role mailcow.
+# ⚠️ UNE SEULE LIGNE, sans scalaire replie. Un `>-` dont les lignes suivantes
+# sont plus indentees conserve les sauts de ligne, et certbot n'ecrit alors que
+# la premiere ligne dans renew_hook : le hook est tronque, donc casse, et rien
+# ne le signale.
+tls_certificates_deploy_hook: "systemctl reload openresty; test -x /usr/local/sbin/deploy-mail-cert.sh && /usr/local/sbin/deploy-mail-cert.sh || true"
 
 # `name` devient --cert-name : c'est le repertoire sous /etc/letsencrypt/live.
 # Conserver les noms existants, sinon certbot cree des doublons et les vhosts

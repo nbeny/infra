@@ -1,0 +1,41 @@
+---
+# Le script vit sur le NOEUD, pas sur la VM : c'est le noeud qui detient le
+# wildcard et qui sait quand il a ete renouvele (deploy-hook de certbot).
+- name: Deposer le script de distribution sur le noeud
+  ansible.builtin.template:
+    src: deploy-mail-cert.sh.j2
+    dest: /usr/local/sbin/deploy-mail-cert.sh
+    mode: "0750"
+  delegate_to: "{{ groups['proxmox'] | first }}"
+
+- name: Distribuer le certificat maintenant
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/deploy-mail-cert.sh
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  register: mailcow_cert_deploy
+  changed_when: "'certificat deploye' in mailcow_cert_deploy.stdout"
+
+- name: Verifier le certificat reellement presente par Postfix
+  ansible.builtin.shell:
+    cmd: >-
+      echo QUIT | openssl s_client -starttls smtp
+      -connect 127.0.0.1:25 -servername {{ mailcow_hostname }} 2>/dev/null
+      | openssl x509 -noout -checkend 604800 -subject
+  register: mailcow_cert_check
+  changed_when: false
+  # `-checkend 604800` echoue si le certificat expire dans moins de sept jours.
+  # Verifier qu'un certificat EXISTE ne dit rien : le mode de panne reel est
+  # celui d'un certificat qui expire sans que le hook de renouvellement ait
+  # jamais fonctionne, et il ne se voit qu'au bout de 90 jours.
+  #
+  # Les tentatives ne sont pas de la superstition : la tache precedente vient
+  # de redemarrer Postfix pour lui faire relire le certificat, et il met une
+  # dizaine de secondes a reaccepter des connexions.
+  failed_when: false
+  retries: 12
+  delay: 10
+  until: mailcow_cert_check.rc == 0
+
+- name: Afficher le certificat en place
+  ansible.builtin.debug:
+    msg: "{{ mailcow_cert_check.stdout_lines }}"

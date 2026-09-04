@@ -1,0 +1,106 @@
+---
+- name: Installer git
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Cloner Mailcow
+  ansible.builtin.git:
+    repo: "{{ mailcow_repo }}"
+    dest: "{{ mailcow_dir }}"
+    version: "{{ mailcow_branch }}"
+    depth: 1
+    # `update: false` est deliberе : une montee de version de Mailcow se fait
+    # par ./update.sh, qui gere les migrations de schema et les changements de
+    # compose. Un `git pull` silencieux a chaque execution du role remplacerait
+    # le docker-compose.yml sous les pieds d'une pile en fonctionnement.
+    update: false
+
+# ---------------------------------------------------------------------------
+#  Configuration
+# ---------------------------------------------------------------------------
+# generate_config.sh est interactif, mais chacune de ses questions est court-
+# circuitee par une variable d'environnement. On le laisse produire le fichier
+# -- il pose une trentaine de cles et six secrets aleatoires -- plutot que
+# d'ecrire un gabarit qui derivera a la premiere version de Mailcow.
+#
+# `creates` garantit qu'il ne tourne qu'une fois : le rejouer regenererait les
+# mots de passe de la base, rendrait MySQL inaccessible et perdrait toutes les
+# boites.
+- name: Generer la configuration initiale
+  ansible.builtin.command:
+    cmd: ./generate_config.sh
+    chdir: "{{ mailcow_dir }}"
+    creates: "{{ mailcow_dir }}/mailcow.conf"
+  environment:
+    MAILCOW_HOSTNAME: "{{ mailcow_hostname }}"
+    MAILCOW_TZ: "{{ mailcow_timezone }}"
+    SKIP_CLAMD: "{{ mailcow_skip_clamd }}"
+    SKIP_BRANCH: "y"
+    MAILCOW_BRANCH: "{{ mailcow_branch }}"
+
+# Les reglages qui different du defaut, et eux seuls. Chacun a une raison
+# precise, rappelee en commentaire du fichier de variables.
+- name: Ajuster les reglages qui comptent
+  ansible.builtin.lineinfile:
+    path: "{{ mailcow_dir }}/mailcow.conf"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    mode: "0600"
+  loop:
+    - { key: HTTP_PORT, value: "{{ mailcow_http_port }}" }
+    - { key: HTTPS_PORT, value: "{{ mailcow_https_port }}" }
+    - { key: HTTP_BIND, value: "0.0.0.0" }
+    - { key: HTTPS_BIND, value: "0.0.0.0" }
+    - { key: SKIP_LETS_ENCRYPT, value: "{{ mailcow_skip_letsencrypt }}" }
+    - { key: SKIP_CLAMD, value: "{{ mailcow_skip_clamd }}" }
+    - { key: ADDITIONAL_SERVER_NAMES, value: "{{ mailcow_ui_hostname }}" }
+    # Pas de redirection HTTP -> HTTPS, et c'est indispensable ici : le TLS est
+    # termine par l'openresty du noeud, donc le chemin openresty -> Mailcow est
+    # en CLAIR par construction. Avec `y`, Mailcow repondrait 301 vers
+    # https://{{ mailcow_ui_hostname }} a chaque requete et le navigateur
+    # boucherait sur la meme URL -- exactement la panne deja rencontree avec
+    # Argo CD dans ce depot, qui a du etre passe en `--insecure`.
+    - { key: HTTP_REDIRECT, value: "n" }
+    - { key: IPV4_NETWORK, value: "{{ mailcow_ipv4_network }}" }
+    # IPv6 DESACTIVE, et c'est le point le moins evident de tout le role.
+    # Le VPS a une adresse v6 globale et la prefere : une sonde SMTP vers Gmail
+    # est ressortie en IPv6 lors de l'audit. Or Gmail exige des expediteurs
+    # IPv6 un PTR valide ET un SPF/DKIM aligne sur l'adresse v6, sinon rejet
+    # sec. Le tunnel etant en v4 seul, on ferme la porte plutot que de la
+    # surveiller.
+    - { key: ENABLE_IPV6, value: "false" }
+  loop_control:
+    label: "{{ item.key }}"
+  notify: Redemarrer mailcow
+
+# ---------------------------------------------------------------------------
+#  Demarrage
+# ---------------------------------------------------------------------------
+- name: Telecharger les images (long au premier passage)
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: "{{ mailcow_dir }}"
+  register: mailcow_pull
+  changed_when: "'Pulled' in mailcow_pull.stderr or 'Downloaded' in mailcow_pull.stderr"
+
+- name: Demarrer la pile
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ mailcow_dir }}"
+  register: mailcow_up
+  changed_when: "'Started' in mailcow_up.stderr or 'Created' in mailcow_up.stderr"
+
+- name: Attendre que l'interface reponde
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/"
+    status_code: [200, 301, 302]
+  register: mailcow_ui
+  retries: 40
+  delay: 15
+  until: mailcow_ui is succeeded
+
+- name: Poser le certificat du noeud
+  ansible.builtin.include_tasks: certificates.yml

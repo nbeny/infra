@@ -1,0 +1,10 @@
+---
+# `up -d` et non `restart` : c'est ce qui applique un changement de
+# mailcow.conf, dont docker compose lit les variables au demarrage des
+# conteneurs. Un `restart` relancerait les conteneurs avec leur ancien
+# environnement, et le changement passerait inapercu.
+- name: Redemarrer mailcow
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ mailcow_dir }}"
+  changed_when: true

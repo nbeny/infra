@@ -22,6 +22,17 @@ lab_dns_servers:
   - 9.9.9.9
 lab_search_domain: lab.nbeny.fr
 
+# --- Messagerie -----------------------------------------------------------
+# Prefixe du reseau Docker de Mailcow. SOURCE UNIQUE, volontairement ici et pas
+# dans l'un des deux roles : `mailcow` le pose dans mailcow.conf, et
+# `mail_tunnel` route exactement ce prefixe par le tunnel vers le VPS.
+#
+# Les laisser diverger couperait l'emission SANS message d'erreur : les
+# conteneurs sortiraient par la passerelle du lab, donc depuis l'IP de la
+# maison, qui est en Spamhaus PBL. Le seul symptome serait une file d'attente
+# qui gonfle et des rejets chez les destinataires.
+mail_docker_net_prefix: "172.22.1"
+
 # --- Stockage -------------------------------------------------------------
 # pool1 : 861 Go libres, heberge les VMs historiques 100-103
 # pool2 : 2,5 To libres -> cible pour les templates et les nouvelles VMs

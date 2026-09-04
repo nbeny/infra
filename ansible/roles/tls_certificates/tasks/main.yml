@@ -126,6 +126,27 @@
   changed_when: "'Successfully received certificate' in tls_issue.stdout"
   notify: reload nginx
 
+# Le `--deploy-hook` ci-dessus n'est ecrit dans la configuration de
+# renouvellement QUE lorsque certbot traite reellement le certificat. La tache
+# precedente etant conditionnee (`when`), un certificat deja valide et deja en
+# DNS-01 n'est pas retraite : changer la valeur du hook dans ce role ne se
+# propagerait alors JAMAIS, et on ne s'en apercevrait qu'au renouvellement
+# suivant -- trois mois plus tard, sur un certificat qui ne se deploie pas.
+#
+# Mesure le 2026-09-05 en ajoutant la distribution vers la VM Mailcow : le
+# playbook passait au vert, et /etc/letsencrypt/renewal/urbanlink.fr.conf
+# portait toujours l'ancien hook.
+- name: Aligner le hook de deploiement dans chaque configuration de renouvellement
+  ansible.builtin.lineinfile:
+    path: "/etc/letsencrypt/renewal/{{ item.name }}.conf"
+    regexp: '^renew_hook\s*='
+    line: "renew_hook = {{ tls_certificates_deploy_hook | trim }}"
+    insertafter: '^\[renewalparams\]'
+    mode: "0644"
+  loop: "{{ tls_certificates }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 # ---------------------------------------------------------------------------
 #  Verification -- on ne se fie pas au code de retour de certbot
 # ---------------------------------------------------------------------------
