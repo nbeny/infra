@@ -129,17 +129,26 @@ tunnel, tout le reste continue de passer par la passerelle du lab. La VM reste d
 joignable et à jour même tunnel coupé.
 
 ```
-# sur la VM
-ip rule add from 10.88.0.2 lookup 100
-ip route add default via 10.88.0.1 table 100 src 10.88.0.2
-# le seul trafic SMTP sortant emprunte la même table
-iptables -t mangle -A OUTPUT -p tcp --dport 25 -j MARK --set-mark 100
-ip rule add fwmark 100 lookup 100
+# sur la VM — le critère est le RÉSEAU DOCKER de Mailcow, pas le port
+ip rule  add from 172.22.1.0/24 lookup 100 pref 100
+ip route add default via 10.88.0.1 dev wg0 table 100
+iptables -t nat -A POSTROUTING -s 172.22.1.0/24 -o wg0 -j SNAT --to-source 10.88.0.2
 ```
 
-Le `src 10.88.0.2` n'est pas décoratif : sans lui, les paquets SMTP sortants partiraient
-avec l'adresse `10.0.0.140` de la VM, que le pair WireGuard du VPS refuserait (elle
-n'est pas dans ses `AllowedIPs`). Le tunnel n'accepte que l'adresse `10.88.0.2`.
+**Le critère de sélection est le réseau, pas le port** — et ce n'est pas un détail de
+mise en œuvre. Postfix tourne dans un conteneur : son trafic traverse `FORWARD`, jamais
+`OUTPUT`. Un marquage `-t mangle -A OUTPUT --dport 25` n'attraperait donc rien.
+
+Un marquage en `PREROUTING` ne suffirait pas non plus. Pour une connexion entrante
+DNATée, la traduction inverse du paquet de réponse n'a lieu qu'en `POSTROUTING` : au
+moment où la décision de routage est prise, la réponse porte encore l'adresse du
+conteneur `172.22.1.x`. Une règle `from 10.88.0.2` ne matcherait jamais, et les réponses
+partiraient par la passerelle du lab — donc dans le vide.
+
+Router **tout le réseau Docker de Mailcow** par le tunnel règle les deux sens d'un coup.
+La VM elle-même garde sa route par défaut vers le lab : elle reste joignable, mise à
+jour et administrable même tunnel coupé. Le `SNAT` vers `10.88.0.2` est nécessaire parce
+que le pair WireGuard du VPS n'accepte que cette adresse dans ses `AllowedIPs`.
 
 À la sortie, Postfix parle **directement** à Gmail et Outlook ; le VPS ne fait que
 traduire l'adresse source. Pas de file d'attente en double, pas de réécriture, les
@@ -183,6 +192,15 @@ fois Infomaniak hors service.
 enregistrement explicite, il l'emporte pour le SMTP ; toutes les autres interfaces
 restent sur l'IP privée. Le garde-fou du rôle `edge_urbanlink` (assertion que le
 wildcard n'a pas bougé) continue de s'appliquer.
+
+**Deux noms, deux rôles — à ne pas confondre.** `mail.urbanlink.fr` est l'identité SMTP :
+elle pointe sur le VPS, c'est elle que les MX du monde résolvent et elle que le HELO et
+le PTR annoncent. Les interfaces (Mailcow, SOGo, Rspamd) sont servies sous
+**`webmail.urbanlink.fr`**, couvert par le wildcard, donc sur l'IP privée. Publier l'UI
+sous `mail.urbanlink.fr` était impossible : ce nom résout publiquement vers le VPS.
+Mailcow doit donc porter `ADDITIONAL_SERVER_NAMES=webmail.urbanlink.fr`, faute de quoi
+son nginx rejette l'en-tête `Host` du vhost interne. Le certificat wildcard couvre les
+deux noms.
 
 **Deux actions manuelles restent à l'utilisateur** — elles ne peuvent pas être
 automatisées depuis ce dépôt :
