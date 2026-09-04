@@ -1,0 +1,35 @@
+---
+- name: Activer le routage IPv4
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_set: true
+    state: present
+    reload: true
+
+# Meme raison que cote VPS : en mode strict, rp_filter jetterait sans un mot
+# les paquets entrants arrivant par wg0 avec une source Internet.
+- name: Assouplir rp_filter
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "2"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - net.ipv4.conf.all.rp_filter
+    - net.ipv4.conf.default.rp_filter
+
+- name: Deposer la configuration du tunnel
+  ansible.builtin.template:
+    src: wg0-mail.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    mode: "0600"
+  notify: Redemarrer wireguard
+
+- name: Activer le tunnel
+  ansible.builtin.systemd_service:
+    name: wg-quick@wg0
+    enabled: true
+    state: started
+    daemon_reload: true

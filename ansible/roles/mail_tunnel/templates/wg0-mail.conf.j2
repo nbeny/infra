@@ -1,0 +1,43 @@
+# Genere par Ansible (role mail_tunnel). Toute edition manuelle sera ecrasee.
+#
+# Cote VM de messagerie -- a la maison, derriere le NAT du lab.
+
+[Interface]
+Address = {{ mail_tunnel_mail_ip }}/30
+PrivateKey = {{ wg_private_key }}
+
+# --- Routage du SEUL reseau Docker de Mailcow par le tunnel ------------------
+# Le critere est le RESEAU, pas le port, et ce n'est pas un raccourci :
+#
+#   * Postfix tourne dans un CONTENEUR : son trafic traverse FORWARD, jamais
+#     OUTPUT. Un marquage `-t mangle -A OUTPUT --dport 25` n'attraperait rien.
+#
+#   * Pour une connexion ENTRANTE DNATee, la traduction inverse du paquet de
+#     reponse n'a lieu qu'en POSTROUTING, donc APRES la decision de routage :
+#     a cet instant la reponse porte encore l'adresse du conteneur. Une regle
+#     `ip rule from 10.88.0.2` ne matcherait jamais et les reponses partiraient
+#     par la passerelle du lab -- c'est-a-dire dans le vide.
+#
+# Router tout le reseau Docker regle les deux sens d'un coup.
+#
+# La VM elle-meme GARDE sa route par defaut vers le lab : elle reste joignable,
+# a jour et administrable meme tunnel coupe.
+PostUp = ip rule add from {{ mail_tunnel_docker_net }} lookup 100 pref 100
+PostDown = ip rule del from {{ mail_tunnel_docker_net }} lookup 100 pref 100
+PostUp = ip route add default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
+PostDown = ip route del default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
+
+# Le pair n'accepte que {{ mail_tunnel_mail_ip }} dans ses AllowedIPs : sans ce
+# SNAT, les paquets partiraient en 172.22.1.x et WireGuard les refuserait.
+PostUp = iptables -t nat -A POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }}
+PostDown = iptables -t nat -D POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }}
+
+[Peer]
+# VPS Hostinger
+PublicKey = {{ hostvars[mail_tunnel_vps_host].wg_public_key }}
+Endpoint = {{ mail_tunnel_public_ip }}:{{ mail_tunnel_port }}
+AllowedIPs = {{ mail_tunnel_vps_ip }}/32
+# La VM est derriere le NAT du lab : c'est elle qui doit entretenir la session,
+# sinon la table de traduction expire et le VPS ne peut plus la joindre --
+# donc plus aucun courrier entrant.
+PersistentKeepalive = 25

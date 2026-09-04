@@ -1,0 +1,65 @@
+---
+# Les cles sont generees puis relues sur CHAQUE hote avant qu'aucune
+# configuration ne soit ecrite : le gabarit de chacun a besoin de la cle
+# publique de l'autre, via hostvars. Jouer ce role sur un seul hote (-l)
+# echouerait donc sur une cle absente.
+
+- name: Installer WireGuard
+  ansible.builtin.apt:
+    name:
+      - wireguard
+      - wireguard-tools
+      - iptables
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Creer le repertoire des cles
+  ansible.builtin.file:
+    path: "{{ mail_tunnel_keys_dir }}"
+    state: directory
+    mode: "0700"
+
+# La cle privee ne quitte jamais la machine qui la genere. `creates` garantit
+# qu'un rejeu ne la regenere pas -- ce qui couperait le tunnel jusqu'a ce que
+# le pair soit reconfigure.
+- name: Generer la cle privee si absente
+  ansible.builtin.shell:
+    cmd: "umask 077 && wg genkey > {{ mail_tunnel_keys_dir }}/privatekey"
+    creates: "{{ mail_tunnel_keys_dir }}/privatekey"
+
+- name: Lire la cle privee
+  ansible.builtin.slurp:
+    src: "{{ mail_tunnel_keys_dir }}/privatekey"
+  register: mail_tunnel_priv
+  no_log: true
+
+- name: Deriver la cle publique
+  ansible.builtin.shell:
+    cmd: "wg pubkey < {{ mail_tunnel_keys_dir }}/privatekey"
+  register: mail_tunnel_pub
+  changed_when: false
+
+- name: Memoriser les cles pour le pair
+  ansible.builtin.set_fact:
+    wg_private_key: "{{ mail_tunnel_priv.content | b64decode | trim }}"
+    wg_public_key: "{{ mail_tunnel_pub.stdout | trim }}"
+  no_log: true
+
+- name: Exiger que les deux pairs aient ete traites
+  ansible.builtin.assert:
+    that:
+      - hostvars[mail_tunnel_vps_host].wg_public_key is defined
+      - hostvars[mail_tunnel_mail_host].wg_public_key is defined
+    fail_msg: >-
+      La cle publique d'un des deux pairs est absente. Ce role doit etre joue
+      sur les DEUX hotes dans la meme execution : jouer avec -l sur un seul
+      d'entre eux ne peut pas fonctionner.
+
+- name: Configurer le cote VPS
+  ansible.builtin.include_tasks: vps.yml
+  when: inventory_hostname in groups['edge_nodes'] | default([])
+
+- name: Configurer le cote VM de messagerie
+  ansible.builtin.include_tasks: mailvm.yml
+  when: inventory_hostname in groups['base_nodes'] | default([])

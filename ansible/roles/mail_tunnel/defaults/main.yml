@@ -1,0 +1,49 @@
+---
+# ============================================================================
+#  Tunnel WireGuard : VPS Hostinger <-> VM de messagerie
+# ----------------------------------------------------------------------------
+#  LE VPS EST UN ROUTEUR, PAS UN RELAIS SMTP. C'est la decision centrale du
+#  design, et elle n'est pas cosmetique.
+#
+#  Avec un relais SMTP sur le VPS, Rspamd -- a la maison -- ne verrait plus que
+#  10.88.0.1 comme client de toutes les connexions entrantes. SPF, DMARC et les
+#  listes noires porteraient alors sur le VPS au lieu de l'expediteur reel :
+#  tous ces controles s'effondreraient, et il faudrait activer le module
+#  `external_relay` pour reconstituer l'IP a partir d'en-tetes falsifiables.
+#
+#  En DNAT SANS masquerade, l'IP source traverse le tunnel intacte. Rspamd voit
+#  le vrai client et ses controles fonctionnent nativement.
+# ============================================================================
+
+mail_tunnel_port: 51820
+mail_tunnel_vps_ip: 10.88.0.1
+mail_tunnel_mail_ip: 10.88.0.2
+mail_tunnel_subnet: 10.88.0.0/30
+
+# IP publique du VPS -- c'est l'adresse d'emission de toute la messagerie.
+# Propre sur les neuf listes noires interrogees le 2026-09-04, et acceptee
+# jusqu'au RCPT TO par Outlook, Gmail et Yahoo. L'IP de la maison, elle, est en
+# Spamhaus PBL : elle ne peut pas emettre, quelle que soit la configuration.
+mail_tunnel_public_ip: 147.79.102.17
+
+# Reseau Docker de Mailcow (IPV4_NETWORK de mailcow.conf, suffixe .0/24).
+#
+# C'est le critere de routage cote VM, et c'est le RESEAU, pas le port :
+#   * Postfix tourne dans un conteneur, donc son trafic passe par FORWARD et
+#     jamais par OUTPUT -- un marquage `-t mangle -A OUTPUT --dport 25`
+#     n'attraperait rien.
+#   * Pour une connexion entrante DNATee, la traduction inverse du paquet de
+#     reponse n'a lieu qu'en POSTROUTING : au moment de la decision de routage,
+#     la reponse porte encore l'adresse du conteneur. Une regle
+#     `from 10.88.0.2` ne matcherait jamais.
+# Router tout le reseau Docker regle les deux sens d'un coup.
+mail_tunnel_docker_net: 172.22.1.0/24
+
+# Interface WAN du VPS, cible du DNAT et du SNAT. Relevee : eth0.
+mail_tunnel_vps_wan: eth0
+
+# Nom d'hote du pair, tel qu'il apparait dans l'inventaire.
+mail_tunnel_vps_host: vps-mail
+mail_tunnel_mail_host: mail
+
+mail_tunnel_keys_dir: /etc/wireguard

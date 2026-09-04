@@ -1,0 +1,21 @@
+---
+# Tunnel WireGuard entre le VPS Hostinger et la VM de messagerie.
+#
+# Les deux hotes sont dans le MEME play, et ce n'est pas un detail : chacun a
+# besoin de la cle publique de l'autre, que `hostvars` ne porte que si les deux
+# ont ete traites dans la meme execution. Un `-l vps-mail` echouerait sur une
+# assertion explicite plutot que d'ecrire une configuration incomplete.
+#
+#   ansible-playbook playbooks/41-mail-tunnel.yml
+#
+# Ce que le tunnel transporte :
+#   entrant  : Internet -> VPS:25 -> DNAT sans masquerade -> VM 10.88.0.2:25
+#              (l'IP de l'expediteur arrive INTACTE, c'est tout l'interet)
+#   sortant  : reseau Docker de Mailcow -> tunnel -> SNAT -> 147.79.102.17
+
+- name: Monter le tunnel de la messagerie
+  hosts: edge_nodes:base_nodes
+  gather_facts: true
+  become: true
+  roles:
+    - mail_tunnel

@@ -1,0 +1,57 @@
+---
+- name: Activer le routage IPv4
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_set: true
+    state: present
+    reload: true
+
+# rp_filter en mode strict jetterait SILENCIEUSEMENT les paquets entrants
+# arrivant par wg0 dont l'adresse source est une IP Internet : la route vers
+# cette source passe par eth0, pas par le tunnel. Aucune trace dans les
+# journaux, aucun message d'erreur -- le courrier entrant disparaitrait sans
+# explication. Mode 2 (souple) accepte le chemin asymetrique.
+- name: Assouplir rp_filter
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "2"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - net.ipv4.conf.all.rp_filter
+    - net.ipv4.conf.default.rp_filter
+
+- name: Deposer la configuration du tunnel
+  ansible.builtin.template:
+    src: wg0-vps.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    mode: "0600"
+  notify: Redemarrer wireguard
+
+- name: Activer le tunnel
+  ansible.builtin.systemd_service:
+    name: wg-quick@wg0
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Filet : si Traefik ne repondait plus, ce role aurait casse trois sites en
+# production. Le verifier coute une requete et ferme la question.
+#
+# ⚠️ DELEGUE AU NOEUD, et c'est indispensable : sur le VPS lui-meme,
+# `nbeny.fr` resout en 127.0.1.1 -- Debian pose cette entree dans /etc/hosts
+# pour le nom de la machine, qui s'appelle justement `nbeny`. La verification
+# lancee en local echouait donc systematiquement alors que les sites
+# repondaient parfaitement depuis Internet. Le noeud, lui, resout publiquement.
+- name: Verifier que les sites du VPS repondent toujours depuis l'exterieur
+  ansible.builtin.uri:
+    url: "https://{{ item }}"
+    status_code: [200, 301, 302]
+    validate_certs: true
+  loop:
+    - nbeny.fr
+    - francois.nbeny.fr
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  changed_when: false

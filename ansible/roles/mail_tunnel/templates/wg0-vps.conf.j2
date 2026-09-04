@@ -1,0 +1,37 @@
+# Genere par Ansible (role mail_tunnel). Toute edition manuelle sera ecrasee.
+#
+# Cote VPS Hostinger -- le routeur de la messagerie.
+
+[Interface]
+Address = {{ mail_tunnel_vps_ip }}/30
+ListenPort = {{ mail_tunnel_port }}
+PrivateKey = {{ wg_private_key }}
+
+# --- Entree : publication du port 25 vers la VM, SANS masquerade -------------
+# L'ABSENCE de MASQUERADE ici est le point du design. Elle preserve l'IP source
+# de l'expediteur jusqu'a Rspamd, sans quoi SPF, DMARC et les listes noires
+# porteraient sur le VPS et ne diraient plus rien.
+PostUp = iptables -t nat -A PREROUTING -i {{ mail_tunnel_vps_wan }} -p tcp --dport 25 -j DNAT --to-destination {{ mail_tunnel_mail_ip }}:25
+PostDown = iptables -t nat -D PREROUTING -i {{ mail_tunnel_vps_wan }} -p tcp --dport 25 -j DNAT --to-destination {{ mail_tunnel_mail_ip }}:25
+
+# Docker impose FORWARD en politique DROP. DOCKER-USER est le point d'accroche
+# officiel pour les regles maison : il est evalue avant les chaines de Docker
+# et survit aux redemarrages du demon, contrairement a un simple -A FORWARD que
+# Docker peut reordonner.
+PostUp = iptables -I DOCKER-USER -i {{ mail_tunnel_vps_wan }} -o wg0 -j ACCEPT
+PostDown = iptables -D DOCKER-USER -i {{ mail_tunnel_vps_wan }} -o wg0 -j ACCEPT
+PostUp = iptables -I DOCKER-USER -i wg0 -o {{ mail_tunnel_vps_wan }} -j ACCEPT
+PostDown = iptables -D DOCKER-USER -i wg0 -o {{ mail_tunnel_vps_wan }} -j ACCEPT
+
+# --- Sortie : c'est ici que la messagerie prend l'IP propre du VPS -----------
+# Postfix, a la maison, parle DIRECTEMENT a Gmail et Outlook ; le VPS ne fait
+# que traduire l'adresse source. Pas de file d'attente en double, pas de
+# reecriture d'en-tetes, les codes de rejet reviennent bruts jusqu'a la VM.
+PostUp = iptables -t nat -A POSTROUTING -s {{ mail_tunnel_subnet }} -o {{ mail_tunnel_vps_wan }} -j MASQUERADE
+PostDown = iptables -t nat -D POSTROUTING -s {{ mail_tunnel_subnet }} -o {{ mail_tunnel_vps_wan }} -j MASQUERADE
+
+[Peer]
+# VM de messagerie, a la maison
+PublicKey = {{ hostvars[mail_tunnel_mail_host].wg_public_key }}
+AllowedIPs = {{ mail_tunnel_mail_ip }}/32
+PersistentKeepalive = 25
