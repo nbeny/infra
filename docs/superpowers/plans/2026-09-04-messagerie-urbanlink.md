@@ -731,6 +731,26 @@ maison `82.65.87.60`**, pas `10.88.0.1`. C'est la preuve que le DNAT préserve l
 **Si l'IP affichée est `10.88.0.1`**, une règle de masquerade s'est glissée sur le VPS :
 relire `iptables -t nat -L POSTROUTING -n` et corriger avant d'aller plus loin.
 
+**Si RIEN n'arrive**, deux causes possibles, toutes deux rencontrées le 2026-09-05 et
+corrigées dans le rôle — les vérifier dans cet ordre :
+
+1. **Le compteur DNAT du VPS monte, la VM ne voit rien.** WireGuard filtre les paquets
+   *entrants* sur leur adresse **source** (cryptokey routing) : avec
+   `AllowedIPs = 10.88.0.1/32`, un paquet venant d'une IP Internet est jeté en silence.
+   Il faut `AllowedIPs = 0.0.0.0/0` **et** `Table = off` côté VM — sans `Table = off`,
+   wg-quick installerait une route par défaut vers le tunnel et la VM deviendrait
+   inadministrable.
+
+   ```bash
+   ssh root@147.79.102.17 'iptables -t nat -L PREROUTING -n -v | grep dpt:25'
+   ssh -J root@192.168.100.50 nbeny@10.0.0.140 'sudo timeout 20 tcpdump -ni wg0 tcp port 25'
+   ```
+
+2. **Les SYN arrivent sur `wg0`, aucune réponse ne repart.** La réponse est sourcée en
+   `10.88.0.2` et repart par la passerelle du lab. Il manque
+   `ip rule add from 10.88.0.2 lookup 100`. Symptôme caractéristique : l'émetteur ne
+   reçoit **rien du tout**, pas même un RST.
+
 - [ ] **Étape 3 : Consigner le résultat**
 
 Noter dans le journal de la tâche l'IP source observée. Aucun commit.

@@ -6,6 +6,17 @@
 Address = {{ mail_tunnel_mail_ip }}/30
 PrivateKey = {{ wg_private_key }}
 
+# `Table = off` est OBLIGATOIRE ici, et c'est la consequence directe de
+# l'AllowedIPs = 0.0.0.0/0 du pair, plus bas. Sans lui, wg-quick installerait
+# une route par defaut vers le tunnel dans la table principale : toute la VM
+# sortirait par le VPS, elle deviendrait injoignable depuis le lab et
+# inadministrable des que le tunnel tomberait.
+#
+# Les seules routes voulues sont posees a la main : la route connectee de
+# {{ mail_tunnel_subnet }} vient de l'adresse ci-dessus, et la table 100 est
+# construite dans les PostUp.
+Table = off
+
 # --- Routage du SEUL reseau Docker de Mailcow par le tunnel ------------------
 # Le critere est le RESEAU, pas le port, et ce n'est pas un raccourci :
 #
@@ -24,6 +35,17 @@ PrivateKey = {{ wg_private_key }}
 # a jour et administrable meme tunnel coupe.
 PostUp = ip rule add from {{ mail_tunnel_docker_net }} lookup 100 pref 100
 PostDown = ip rule del from {{ mail_tunnel_docker_net }} lookup 100 pref 100
+
+# Seconde regle, pour le trafic de l'HOTE et non des conteneurs : tout paquet
+# dont la source est l'adresse du tunnel doit repartir par le tunnel.
+#
+# Sans elle, une reponse sourcee en {{ mail_tunnel_mail_ip }} -- celle d'un
+# service publie sur l'hote, ou d'un simple test -- repartirait par la
+# passerelle du lab, serait NATee par le Proxmox et n'atteindrait jamais son
+# destinataire. Symptome mesure le 2026-09-05 : les SYN arrivaient bien sur
+# wg0, et l'emetteur ne recevait rien, pas meme un RST.
+PostUp = ip rule add from {{ mail_tunnel_mail_ip }} lookup 100 pref 101
+PostDown = ip rule del from {{ mail_tunnel_mail_ip }} lookup 100 pref 101
 PostUp = ip route add default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
 PostDown = ip route del default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
 
@@ -36,7 +58,18 @@ PostDown = iptables -t nat -D POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0
 # VPS Hostinger
 PublicKey = {{ hostvars[mail_tunnel_vps_host].wg_public_key }}
 Endpoint = {{ mail_tunnel_public_ip }}:{{ mail_tunnel_port }}
-AllowedIPs = {{ mail_tunnel_vps_ip }}/32
+
+# 0.0.0.0/0 ne veut PAS dire « route tout par le tunnel » -- c'est `Table = off`
+# qui l'empeche. AllowedIPs est d'abord un FILTRE : WireGuard jette tout paquet
+# entrant dont l'adresse SOURCE n'y figure pas (cryptokey routing).
+#
+# Or le courrier entrant arrive DNATe, avec l'IP source de l'expediteur -- une
+# adresse Internet quelconque, par construction. Avec `AllowedIPs =
+# 10.88.0.1/32`, le tunnel jetait ces paquets EN SILENCE : la regle DNAT du VPS
+# comptait bien le paquet, et la VM ne voyait jamais la connexion. Mesure le
+# 2026-09-05, et c'est exactement le mode de panne que preserver l'IP source
+# rend possible.
+AllowedIPs = 0.0.0.0/0
 # La VM est derriere le NAT du lab : c'est elle qui doit entretenir la session,
 # sinon la table de traduction expire et le VPS ne peut plus la joindre --
 # donc plus aucun courrier entrant.
