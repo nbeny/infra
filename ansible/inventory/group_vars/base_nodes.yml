@@ -1,0 +1,22 @@
+---
+# ============================================================================
+#  VMs Debian nues : Docker, sans Kubernetes
+# ============================================================================
+#  Groupe volontairement DISTINCT de debian_nodes, et ce n'est pas une
+#  coquetterie : site.yml applique le role `kubernetes` a debian_nodes. Y
+#  ranger la VM de messagerie lui installerait kubeadm, un kubelet et un plan
+#  de controle dont elle n'a que faire -- et le kubelet tournerait en boucle
+#  d'echec faute de cluster.
+#
+#  Les hotes de ce groupe arrivent par l'inventaire genere par Terraform
+#  (20-terraform.yml), pour tout profil `debian-base`.
+# ============================================================================
+
+# --- Docker ---------------------------------------------------------------
+docker_users:
+  - "{{ lab_admin_user }}"
+docker_compose_plugin: true
+
+# Le cgroup driver systemd est une exigence de kubelet, absent ici : on garde
+# le defaut de containerd plutot que d'imposer un reglage sans objet.
+docker_containerd_systemd_cgroup: false

@@ -25,6 +25,10 @@ locals {
 
   debian_vms = { for k, v in var.vms : k => v if v.profile == "debian-k8s" }
   kali_vms   = { for k, v in var.vms : k => v if v.profile == "kali" }
+  # Groupe DISTINCT de debian_nodes, et ce n'est pas une coquetterie : site.yml
+  # applique le role `kubernetes` a debian_nodes. Y ranger la VM mail lui
+  # installerait un plan de controle dont elle n'a que faire.
+  base_vms = { for k, v in var.vms : k => v if v.profile == "debian-base" }
 
   # Ligne d'arguments QEMU des VMs macOS, construite ici pour que l'OSK ne
   # soit saisie qu'une fois dans terraform.tfvars.
@@ -69,10 +73,11 @@ module "vm" {
   admin_user      = local.admin_user
   ssh_public_keys = local.ssh_public_keys
 
-  on_boot  = each.value.on_boot
-  started  = each.value.started
-  firewall = each.value.firewall
-  tags     = concat(each.value.tags, ["terraform", each.value.profile])
+  on_boot       = each.value.on_boot
+  started       = each.value.started
+  firewall      = each.value.firewall
+  agent_enabled = each.value.agent
+  tags          = concat(each.value.tags, ["terraform", each.value.profile])
 
   description = coalesce(
     each.value.description != "" ? each.value.description : null,
@@ -153,6 +158,13 @@ resource "local_file" "ansible_inventory" {
       }
       kali_nodes = {
         hosts = { for k, v in local.kali_vms : k => {
+          ansible_host = v.ip
+          vm_id        = v.vm_id
+        } }
+      }
+      # VMs Debian nues (profil debian-base) : Docker sans Kubernetes.
+      base_nodes = {
+        hosts = { for k, v in local.base_vms : k => {
           ansible_host = v.ip
           vm_id        = v.vm_id
         } }

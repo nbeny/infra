@@ -141,4 +141,36 @@ macos_vms = {
   #   tags      = ["ci", "macos"]
   #   description = "Runner de compilation Xcode. Plafonne a Xcode 14.2."
   # }
+
+  # --- Messagerie urbanlink.fr (profil debian-base) --------------------------
+  # Clone du SOCLE 9000, pas d'un template golden : ni Docker ni Kubernetes
+  # preinstalles. Docker arrive ensuite par playbooks/40-mail-vm.yml.
+  #
+  # `agent` : le socle 9000 est l'image cloud brute de Debian, sans
+  # qemu-guest-agent. Il faut donc creer la VM avec `agent = false` -- sinon
+  # l'apply echoue apres cinq minutes d'attente -- puis, une fois
+  # 40-mail-vm.yml joue :
+  #
+  #     qm set 140 --agent enabled=1 && qm stop 140 && qm start 140
+  #
+  # L'ARRET/DEMARRAGE est indispensable : Proxmox n'attache le peripherique
+  # virtio-serial de l'agent qu'au demarrage, et un `reboot` depuis l'invite ne
+  # suffit pas -- le service qemu-guest-agent echoue alors sur une dependance
+  # manquante. Repasser ensuite `agent = true` ici, sans quoi le prochain apply
+  # redesactiverait l'agent, donc le fsfreeze de vzdump.
+  #
+  # "mail" = {
+  #   profile         = "debian-base"
+  #   vm_id           = 140
+  #   ip              = "10.0.0.140"
+  #   cores           = 2
+  #   memory          = 8192
+  #   memory_floating = 4096      # ballooning : rend la RAM inutilisee a l'hote
+  #   disk_size       = 150
+  #   agent           = true
+  #   on_boot         = true
+  #   tags            = ["mail"]
+  #   description     = "Mailcow -- boites urbanlink.fr. Emission via le VPS."
+  # }
+
 }

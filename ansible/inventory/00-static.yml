@@ -69,3 +69,7 @@ all:
         debian_nodes:
         kali_nodes:
         ci_nodes:
+        # VMs Debian nues (profil Terraform `debian-base`), declarees par
+        # l'inventaire genere. Les rattacher ici les fait entrer dans
+        # 90-update.yml et 95-hardening.yml comme n'importe quelle autre VM.
+        base_nodes:

@@ -42,6 +42,10 @@ variable "templates" {
   default = {
     "debian-k8s" = 9100
     "kali"       = 9101
+    # Socle cloud-init nu : ni Docker ni Kubernetes. Docker est pose ensuite par
+    # le role Ansible `docker`, ce qui evite de trainer kubeadm et un kubelet
+    # sans cluster sur une machine qui n'en veut pas.
+    "debian-base" = 9000
   }
 }
 
@@ -91,6 +95,10 @@ variable "vms" {
     on_boot     = optional(bool, true)
     started     = optional(bool, true)
     firewall    = optional(bool, false)
+    # `false` obligatoire pour le profil debian-base : le socle 9000 n'a pas
+    # qemu-guest-agent, et l'apply echouerait apres cinq minutes d'attente.
+    # A repasser a `true` une fois le role `common` joue sur la VM.
+    agent       = optional(bool, true)
     description = optional(string, "")
     tags        = optional(list(string), [])
   }))
@@ -98,8 +106,8 @@ variable "vms" {
   default = {}
 
   validation {
-    condition     = alltrue([for k, v in var.vms : contains(["debian-k8s", "kali"], v.profile)])
-    error_message = "Chaque VM doit avoir un profile valant \"debian-k8s\" ou \"kali\"."
+    condition     = alltrue([for k, v in var.vms : contains(["debian-k8s", "debian-base", "kali"], v.profile)])
+    error_message = "Chaque VM doit avoir un profile valant \"debian-k8s\", \"debian-base\" ou \"kali\"."
   }
 
   validation {

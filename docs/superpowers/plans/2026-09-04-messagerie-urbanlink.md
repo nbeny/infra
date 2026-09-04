@@ -280,6 +280,23 @@ ssh root@192.168.100.50 'cd /root/infra/ansible && ansible-playbook playbooks/40
 
 Attendu : `failed=0`.
 
+- [ ] **Étape 4b : Activer le périphérique de l'agent QEMU**
+
+Le rôle `common` installe `qemu-guest-agent`, mais **son service échoue à démarrer** :
+le périphérique virtio-serial n'existe que si la VM a `agent: 1` côté Proxmox, or elle a
+été créée avec `agent = false`. Un `reboot` depuis l'invité ne suffit pas — Proxmox
+n'attache le matériel qu'au démarrage de la VM.
+
+```bash
+ssh root@192.168.100.50 'qm set 140 --agent enabled=1 && qm stop 140 && sleep 5 && qm start 140 && sleep 25 && qm agent 140 ping && echo AGENT-OK'
+```
+
+Puis **rejouer `40-mail-vm.yml`**, qui échouait sur cette tâche.
+
+⚠️ Repasser ensuite `agent = true` dans `terraform.tfvars` et refaire un `apply` :
+sans cela, le prochain passage de Terraform redésactiverait l'agent — donc le fsfreeze
+de `vzdump`, donc la cohérence des sauvegardes.
+
 - [ ] **Étape 5 : Vérifier, puis rejouer pour prouver l'idempotence**
 
 ```bash

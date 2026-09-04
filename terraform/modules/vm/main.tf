@@ -41,10 +41,15 @@ resource "proxmox_virtual_environment_vm" "this" {
     datastore_id = var.datastore_id
   }
 
-  # L'agent est installe par le role `common` dans le template. Il est requis
-  # pour lire l'IP de la VM et pour l'arreter proprement.
+  # L'agent est installe par le role `common` dans les templates golden. Il est
+  # requis pour lire l'IP de la VM, pour l'arreter proprement et pour le
+  # fsfreeze de vzdump.
+  #
+  # ⚠️ Le SOCLE 9000 ne l'a PAS : c'est l'image cloud brute, sans aucun paquet
+  # ajoute. Une VM clonee de ce socle doit demarrer avec `agent = false`, sinon
+  # l'apply echoue au bout de cinq minutes d'attente. Voir var.agent_enabled.
   agent {
-    enabled = true
+    enabled = var.agent_enabled
     timeout = "5m"
   }
 

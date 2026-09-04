@@ -1,0 +1,22 @@
+---
+# Socle de la VM de messagerie : compte admin, durcissement commun, Docker.
+#
+# Mailcow lui-meme est pose par 42-mailcow.yml, et le tunnel vers le VPS par
+# 41-mail-tunnel.yml. Ce playbook-ci ne fait que rendre la VM administrable et
+# capable de faire tourner des conteneurs.
+#
+#   ansible-playbook playbooks/40-mail-vm.yml
+#
+# ⚠️ Le role `common` installe qemu-guest-agent, absent du socle cloud-init
+# 9000. C'est pour cela que la VM est declaree avec `agent = false` dans
+# terraform.tfvars : le repasser a `true` n'a de sens qu'APRES ce playbook.
+# L'agent ne sert pas qu'a lire l'IP -- c'est lui qui permet le fsfreeze de
+# vzdump, donc la coherence des sauvegardes d'une VM qui ecrit du courrier.
+
+- name: Preparer la VM de messagerie
+  hosts: base_nodes
+  gather_facts: true
+  become: true
+  roles:
+    - common
+    - docker

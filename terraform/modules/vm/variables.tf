@@ -138,3 +138,18 @@ variable "firewall" {
   description = "Active le pare-feu Proxmox sur l'interface. N'activer qu'apres avoir ecrit /etc/pve/firewall/<vmid>.fw, sinon la VM devient injoignable des que le pare-feu datacenter est actif."
   default     = false
 }
+
+variable "agent_enabled" {
+  type        = bool
+  description = <<-EOT
+    Attendre l'agent QEMU a la creation. A laisser a `true` pour les templates
+    golden (9100/9101), ou le role `common` a deja installe qemu-guest-agent.
+
+    A passer a `false` pour une VM clonee du SOCLE cloud-init 9000 : l'image
+    cloud de Debian ne contient PAS l'agent, et le fournisseur echouerait apres
+    cinq minutes d'attente. Le repasser a `true` une fois `common` joue --
+    l'agent sert aussi au fsfreeze de vzdump, donc a la coherence des
+    sauvegardes.
+  EOT
+  default     = true
+}
