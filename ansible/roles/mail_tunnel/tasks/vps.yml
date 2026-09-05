@@ -55,6 +55,13 @@
     - francois.nbeny.fr
   delegate_to: "{{ groups['proxmox'] | first }}"
   changed_when: false
+  # Ce controle traverse Internet et Cloudflare : un alea passager ne doit pas
+  # faire echouer un playbook d'infrastructure. Trois tentatives distinguent
+  # « le site est casse » de « la requete est tombee ».
+  register: mail_tunnel_sites
+  retries: 3
+  delay: 10
+  until: mail_tunnel_sites is succeeded
 
 - name: Publier la politique MTA-STS
   ansible.builtin.include_tasks: mtasts.yml

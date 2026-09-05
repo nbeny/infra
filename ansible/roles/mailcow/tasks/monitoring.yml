@@ -45,9 +45,18 @@
     state: started
     daemon_reload: true
 
-- name: Executer la sonde une premiere fois
+- name: Verifier si la sonde a deja produit ses metriques
+  ansible.builtin.stat:
+    path: "{{ mailcow_textfile_dir }}/mail.prom"
+  register: mailcow_probe_output
+
+# Amorcage seulement : sans cela Prometheus n'aurait rien a lire pendant les
+# quinze premieres minutes. Le minuteur prend le relais ensuite -- rejouer le
+# role n'a donc aucune raison de la relancer, ni de se declarer `changed`.
+- name: Amorcer la sonde au premier passage
   ansible.builtin.command:
     cmd: /usr/local/sbin/mail-metrics.sh
+  when: not mailcow_probe_output.stat.exists
   changed_when: true
 
 - name: Garantir que node_exporter tourne

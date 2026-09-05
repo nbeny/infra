@@ -29,8 +29,12 @@ LAN, publiées par l'openresty du nœud comme les dix consoles existantes.
 | **1** Mailcow | ✅ | 18 conteneurs, wildcard du nœud servi en STARTTLS, `webmail.urbanlink.fr` en LAN, IMAP réel validé, DKIM 2048 publié |
 | **2** Validation | ✅ | Gmail **et** Outlook : arrivée en **boîte de réception**, `dkim=pass spf=pass dmarc=pass`. Sortie mesurée depuis `147.79.102.17` |
 | **3** Bascule MX | ✅ | `MX urbanlink.fr → 10 mail.urbanlink.fr`, propagé. Message réel de Gmail reçu : Postfix voit `209.85.208.42` (l'IP de Google), Rspamd valide `spf=pass` `dkim=pass` contre elle |
-| **4** Observabilité | 🟡 | Sonde DNSBL + file d'attente, cible Prometheus `up`, 4 alertes chargées, **alerte prouvée en conditions réelles** (injection → `firing` → Alertmanager → retour à `inactive`), tableau de bord Grafana, sauvegarde applicative quotidienne, job vzdump. Restent : parsedmarc, DMARC `quarantine`/`reject`, MTA-STS |
+| **4** Observabilité | ✅ | Sonde DNSBL + file d'attente, cible Prometheus `up`, 4 alertes chargées, **alerte prouvée en conditions réelles** (injection → `firing` → Alertmanager → retour à `inactive`), tableau de bord Grafana, sauvegarde applicative quotidienne, job vzdump, **MTA-STS `testing` servi en HTTPS**, TLS-RPT, rapports DMARC collectés chez nous, **accès nomade WireGuard** vérifié. Restent : parsedmarc (les rapports n'arrivent que depuis la bascule), puis DMARC `quarantine`/`reject` |
 | **5** Kratos + résiliation | ⏸️ | Après plusieurs semaines de fonctionnement prouvé |
+
+**Vérification automatisée :** `scripts/mail/verifier-messagerie.sh`, à jouer depuis le nœud.
+36 contrôles, du DNS aux sauvegardes en passant par les ports qui doivent rester
+**fermés**. Il ne modifie rien et sort en erreur au premier échec.
 
 **Actions qui n'appartiennent qu'à l'utilisateur :**
 
