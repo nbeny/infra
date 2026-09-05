@@ -47,3 +47,22 @@ mail_tunnel_vps_host: vps-mail
 mail_tunnel_mail_host: mail
 
 mail_tunnel_keys_dir: /etc/wireguard
+
+# --- Acces nomade ----------------------------------------------------------
+# Le VPS sert de CONCENTRATEUR : les appareils s'y connectent, et atteignent la
+# VM de messagerie par le tunnel deja en place. Aucun port supplementaire n'est
+# ouvert nulle part, et surtout pas submission ni IMAP sur Internet -- le
+# bourrage d'identifiants y est le premier vecteur de compromission d'un
+# serveur mail, et une compromission est precisement ce qui fait blacklister.
+mail_tunnel_peer_subnet: 10.88.1.0/24
+
+# Les cles PRIVEES des appareils sont generees sur le noeud de controle et n'en
+# sortent jamais : elles sont deposees dans /root/.secrets/wireguard/, en 0600.
+# Ce depot n'en voit aucune.
+mail_tunnel_peer_secrets: /root/.secrets/wireguard
+
+mail_tunnel_peers:
+  - name: telephone
+    ip: 10.88.1.10
+  - name: portable
+    ip: 10.88.1.11

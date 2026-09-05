@@ -1,0 +1,75 @@
+---
+# ============================================================================
+#  Appareils nomades
+# ----------------------------------------------------------------------------
+#  Les cles PRIVEES sont generees sur le NOEUD DE CONTROLE et n'en sortent
+#  jamais : ni le VPS, ni ce depot, ni cette conversation ne les voient. Le VPS
+#  ne recoit que les cles publiques.
+# ============================================================================
+
+- name: Creer le repertoire des secrets sur le noeud
+  ansible.builtin.file:
+    path: "{{ mail_tunnel_peer_secrets }}"
+    state: directory
+    mode: "0700"
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  run_once: true
+
+- name: Generer la cle privee de chaque appareil si absente
+  ansible.builtin.shell:
+    cmd: "umask 077 && wg genkey > {{ mail_tunnel_peer_secrets }}/{{ item.name }}.key"
+    creates: "{{ mail_tunnel_peer_secrets }}/{{ item.name }}.key"
+  loop: "{{ mail_tunnel_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  run_once: true
+
+- name: Deriver les cles publiques
+  ansible.builtin.shell:
+    cmd: "wg pubkey < {{ mail_tunnel_peer_secrets }}/{{ item.name }}.key"
+  loop: "{{ mail_tunnel_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: mail_tunnel_peer_pubs
+  changed_when: false
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  run_once: true
+
+- name: Rassembler les cles par appareil
+  ansible.builtin.set_fact:
+    mail_tunnel_peer_keys: >-
+      {{ mail_tunnel_peer_keys | default({})
+         | combine({ item.item.name: {'pub': item.stdout | trim} }) }}
+  loop: "{{ mail_tunnel_peer_pubs.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# --- Configuration a importer dans chaque appareil --------------------------
+- name: Ecrire la configuration de chaque appareil
+  ansible.builtin.template:
+    src: peer.conf.j2
+    dest: "{{ mail_tunnel_peer_secrets }}/{{ item.name }}.conf"
+    mode: "0600"
+  loop: "{{ mail_tunnel_peers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    peer: "{{ item }}"
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  run_once: true
+
+- name: Installer qrencode pour l'import sur telephone
+  ansible.builtin.apt:
+    name: qrencode
+    state: present
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  run_once: true
+
+- name: Rappeler ou trouver les configurations
+  ansible.builtin.debug:
+    msg:
+      - "Configurations des appareils : {{ mail_tunnel_peer_secrets }}/*.conf (sur le noeud, 0600)"
+      - "Pour un telephone, afficher le QR code a scanner dans l'application WireGuard :"
+      - "  qrencode -t ansiutf8 < {{ mail_tunnel_peer_secrets }}/telephone.conf"
+  run_once: true

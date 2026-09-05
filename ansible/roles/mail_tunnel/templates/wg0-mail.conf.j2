@@ -2,6 +2,21 @@
 #
 # Cote VM de messagerie -- a la maison, derriere le NAT du lab.
 
+# ⚠️ TOUTES les directives PostUp/PostDown ci-dessous sont ECRITES POUR ETRE
+# REJOUEES. wg-quick tourne en `set -e` : une seule erreur -- une route qui
+# existe deja, une regle absente qu'on tente de supprimer -- et le tunnel ne
+# remonte pas. C'est arrive le 2026-09-05 : des routes `throw` survivantes
+# d'une instance precedente ont fait echouer `ip route add` avec « File
+# exists », et la messagerie s'est retrouvee sans tunnel.
+#
+# D'ou `ip route replace` plutot que `add`, un `del` prealable avant chaque
+# `ip rule add` (qui, lui, creerait un doublon silencieux), et `|| true` sur
+# tous les PostDown.
+#
+# ⚠️ Le `|| true` du `del` prealable n'est PAS decoratif : sous `set -e`, un
+# point-virgule ne protege de rien. Une suppression de regle inexistante --
+# le cas normal au premier demarrage -- suffisait a faire echouer le tunnel.
+
 [Interface]
 Address = {{ mail_tunnel_mail_ip }}/30
 PrivateKey = {{ wg_private_key }}
@@ -33,8 +48,8 @@ Table = off
 #
 # La VM elle-meme GARDE sa route par defaut vers le lab : elle reste joignable,
 # a jour et administrable meme tunnel coupe.
-PostUp = ip rule add from {{ mail_tunnel_docker_net }} lookup 100 pref 100
-PostDown = ip rule del from {{ mail_tunnel_docker_net }} lookup 100 pref 100
+PostUp = ip rule del from {{ mail_tunnel_docker_net }} lookup 100 pref 100 2>/dev/null || true; ip rule add from {{ mail_tunnel_docker_net }} lookup 100 pref 100
+PostDown = ip rule del from {{ mail_tunnel_docker_net }} lookup 100 pref 100 2>/dev/null || true
 
 # Seconde regle, pour le trafic de l'HOTE et non des conteneurs : tout paquet
 # dont la source est l'adresse du tunnel doit repartir par le tunnel.
@@ -44,10 +59,10 @@ PostDown = ip rule del from {{ mail_tunnel_docker_net }} lookup 100 pref 100
 # passerelle du lab, serait NATee par le Proxmox et n'atteindrait jamais son
 # destinataire. Symptome mesure le 2026-09-05 : les SYN arrivaient bien sur
 # wg0, et l'emetteur ne recevait rien, pas meme un RST.
-PostUp = ip rule add from {{ mail_tunnel_mail_ip }} lookup 100 pref 101
-PostDown = ip rule del from {{ mail_tunnel_mail_ip }} lookup 100 pref 101
-PostUp = ip route add default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
-PostDown = ip route del default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
+PostUp = ip rule del from {{ mail_tunnel_mail_ip }} lookup 100 pref 101 2>/dev/null || true; ip rule add from {{ mail_tunnel_mail_ip }} lookup 100 pref 101
+PostDown = ip rule del from {{ mail_tunnel_mail_ip }} lookup 100 pref 101 2>/dev/null || true
+PostUp = ip route replace default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
+PostDown = ip route del default via {{ mail_tunnel_vps_ip }} dev wg0 table 100 2>/dev/null || true
 
 # --- Les destinations PRIVEES retombent sur la table principale --------------
 # Une route `throw` fait echouer la recherche dans la table 100 et rend la main
@@ -62,17 +77,25 @@ PostDown = ip route del default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
 #     qui les masquait derriere son IP publique : la console devenait
 #     injoignable.
 # Mesure le 2026-09-05.
-PostUp = ip route add throw 10.0.0.0/8 table 100
-PostDown = ip route del throw 10.0.0.0/8 table 100
-PostUp = ip route add throw 172.16.0.0/12 table 100
-PostDown = ip route del throw 172.16.0.0/12 table 100
-PostUp = ip route add throw 192.168.0.0/16 table 100
-PostDown = ip route del throw 192.168.0.0/16 table 100
+PostUp = ip route replace throw 10.0.0.0/8 table 100
+PostDown = ip route del throw 10.0.0.0/8 table 100 2>/dev/null || true
+PostUp = ip route replace throw 172.16.0.0/12 table 100
+PostDown = ip route del throw 172.16.0.0/12 table 100 2>/dev/null || true
+PostUp = ip route replace throw 192.168.0.0/16 table 100
+PostDown = ip route del throw 192.168.0.0/16 table 100 2>/dev/null || true
 
 # Le pair n'accepte que {{ mail_tunnel_mail_ip }} dans ses AllowedIPs : sans ce
 # SNAT, les paquets partiraient en 172.22.1.x et WireGuard les refuserait.
-PostUp = iptables -t nat -A POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }}
-PostDown = iptables -t nat -D POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }}
+# Route de retour vers les appareils nomades. Elle est INDISPENSABLE et elle
+# va dans la table PRINCIPALE : le reseau des appareils ({{ mail_tunnel_peer_subnet }})
+# tombe dans le 10.0.0.0/8 que la table 100 rejette par une route `throw`. Sans
+# cette ligne, un telephone pourrait ouvrir une connexion IMAP et n'en recevoir
+# aucune reponse.
+PostUp = ip route replace {{ mail_tunnel_peer_subnet }} via {{ mail_tunnel_vps_ip }} dev wg0
+PostDown = ip route del {{ mail_tunnel_peer_subnet }} via {{ mail_tunnel_vps_ip }} dev wg0 2>/dev/null || true
+
+PostUp = iptables -t nat -C POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }} 2>/dev/null || iptables -t nat -A POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }}
+PostDown = iptables -t nat -D POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }} 2>/dev/null || true
 
 [Peer]
 # VPS Hostinger

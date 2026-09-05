@@ -11,27 +11,44 @@ PrivateKey = {{ wg_private_key }}
 # L'ABSENCE de MASQUERADE ici est le point du design. Elle preserve l'IP source
 # de l'expediteur jusqu'a Rspamd, sans quoi SPF, DMARC et les listes noires
 # porteraient sur le VPS et ne diraient plus rien.
-PostUp = iptables -t nat -A PREROUTING -i {{ mail_tunnel_vps_wan }} -p tcp --dport 25 -j DNAT --to-destination {{ mail_tunnel_mail_ip }}:25
-PostDown = iptables -t nat -D PREROUTING -i {{ mail_tunnel_vps_wan }} -p tcp --dport 25 -j DNAT --to-destination {{ mail_tunnel_mail_ip }}:25
+PostUp = iptables -t nat -C PREROUTING -i {{ mail_tunnel_vps_wan }} -p tcp --dport 25 -j DNAT --to-destination {{ mail_tunnel_mail_ip }}:25 2>/dev/null || iptables -t nat -A PREROUTING -i {{ mail_tunnel_vps_wan }} -p tcp --dport 25 -j DNAT --to-destination {{ mail_tunnel_mail_ip }}:25
+PostDown = iptables -t nat -D PREROUTING -i {{ mail_tunnel_vps_wan }} -p tcp --dport 25 -j DNAT --to-destination {{ mail_tunnel_mail_ip }}:25 2>/dev/null || true
 
 # Docker impose FORWARD en politique DROP. DOCKER-USER est le point d'accroche
 # officiel pour les regles maison : il est evalue avant les chaines de Docker
 # et survit aux redemarrages du demon, contrairement a un simple -A FORWARD que
 # Docker peut reordonner.
-PostUp = iptables -I DOCKER-USER -i {{ mail_tunnel_vps_wan }} -o wg0 -j ACCEPT
-PostDown = iptables -D DOCKER-USER -i {{ mail_tunnel_vps_wan }} -o wg0 -j ACCEPT
-PostUp = iptables -I DOCKER-USER -i wg0 -o {{ mail_tunnel_vps_wan }} -j ACCEPT
-PostDown = iptables -D DOCKER-USER -i wg0 -o {{ mail_tunnel_vps_wan }} -j ACCEPT
+PostUp = iptables -C DOCKER-USER -i {{ mail_tunnel_vps_wan }} -o wg0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -i {{ mail_tunnel_vps_wan }} -o wg0 -j ACCEPT
+PostDown = iptables -D DOCKER-USER -i {{ mail_tunnel_vps_wan }} -o wg0 -j ACCEPT 2>/dev/null || true
+PostUp = iptables -C DOCKER-USER -i wg0 -o {{ mail_tunnel_vps_wan }} -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -i wg0 -o {{ mail_tunnel_vps_wan }} -j ACCEPT
+PostDown = iptables -D DOCKER-USER -i wg0 -o {{ mail_tunnel_vps_wan }} -j ACCEPT 2>/dev/null || true
 
 # --- Sortie : c'est ici que la messagerie prend l'IP propre du VPS -----------
 # Postfix, a la maison, parle DIRECTEMENT a Gmail et Outlook ; le VPS ne fait
 # que traduire l'adresse source. Pas de file d'attente en double, pas de
 # reecriture d'en-tetes, les codes de rejet reviennent bruts jusqu'a la VM.
-PostUp = iptables -t nat -A POSTROUTING -s {{ mail_tunnel_subnet }} -o {{ mail_tunnel_vps_wan }} -j MASQUERADE
-PostDown = iptables -t nat -D POSTROUTING -s {{ mail_tunnel_subnet }} -o {{ mail_tunnel_vps_wan }} -j MASQUERADE
+PostUp = iptables -t nat -C POSTROUTING -s {{ mail_tunnel_subnet }} -o {{ mail_tunnel_vps_wan }} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s {{ mail_tunnel_subnet }} -o {{ mail_tunnel_vps_wan }} -j MASQUERADE
+PostDown = iptables -t nat -D POSTROUTING -s {{ mail_tunnel_subnet }} -o {{ mail_tunnel_vps_wan }} -j MASQUERADE 2>/dev/null || true
+
+# Le trafic des appareils nomades traverse wg0 pour REPARTIR par wg0 vers la
+# VM. WireGuard sait le faire, mais le noyau doit l'autoriser explicitement :
+# c'est du routage entre deux pairs d'une meme interface.
+PostUp = iptables -C DOCKER-USER -i wg0 -o wg0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -i wg0 -o wg0 -j ACCEPT
+PostDown = iptables -D DOCKER-USER -i wg0 -o wg0 -j ACCEPT 2>/dev/null || true
 
 [Peer]
 # VM de messagerie, a la maison
 PublicKey = {{ hostvars[mail_tunnel_mail_host].wg_public_key }}
+# Un seul /32 suffit : AllowedIPs sert ici de FILTRE d'entree. Les paquets qui
+# reviennent de la VM portent toujours sa propre adresse, y compris ceux
+# destines a un telephone -- ceux-la ressortent par le [Peer] de l'appareil,
+# plus bas, qui declare son adresse a lui.
 AllowedIPs = {{ mail_tunnel_mail_ip }}/32
 PersistentKeepalive = 25
+{% for peer in mail_tunnel_peers %}
+
+[Peer]
+# {{ peer.name }}
+PublicKey = {{ (mail_tunnel_peer_keys[peer.name] | default({})).pub | default('') }}
+AllowedIPs = {{ peer.ip }}/32
+{% endfor %}

@@ -1,0 +1,27 @@
+# Configuration WireGuard -- {{ peer.name }}
+# Generee par Ansible. Contient une cle PRIVEE : ne pas la diffuser.
+#
+# A importer dans l'application WireGuard (Android, iOS, Windows, macOS).
+# Sur telephone, le plus simple est le QR code :
+#   qrencode -t ansiutf8 < {{ mail_tunnel_peer_secrets }}/{{ peer.name }}.conf
+
+[Interface]
+PrivateKey = {{ lookup('file', mail_tunnel_peer_secrets ~ '/' ~ peer.name ~ '.key') | trim }}
+Address = {{ peer.ip }}/32
+
+# PAS de directive `DNS =`, et c'est deliberе : sur Linux elle exige
+# `resolvconf` ou `openresolv`, faute de quoi wg-quick refuse de monter
+# l'interface -- constate le 2026-09-05. Elle n'apporterait rien ici : le nom
+# vpn-mail.urbanlink.fr est PUBLIC, donc le resolveur du reseau visite le
+# resout tres bien.
+
+[Peer]
+PublicKey = {{ hostvars[mail_tunnel_vps_host].wg_public_key }}
+Endpoint = {{ mail_tunnel_public_ip }}:{{ mail_tunnel_port }}
+
+# ⚠️ On ne route QUE la messagerie, pas tout le trafic de l'appareil.
+# `AllowedIPs = 0.0.0.0/0` ferait passer toute la navigation par le VPS : plus
+# lent, et surtout le VPS n'est pas dimensionne pour ca. Ici, seule l'adresse
+# de la VM de messagerie emprunte le tunnel.
+AllowedIPs = {{ mail_tunnel_mail_ip }}/32
+PersistentKeepalive = 25

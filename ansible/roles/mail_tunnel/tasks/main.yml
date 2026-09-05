@@ -56,6 +56,12 @@
       sur les DEUX hotes dans la meme execution : jouer avec -l sur un seul
       d'entre eux ne peut pas fonctionner.
 
+# Les cles des appareils doivent exister AVANT d'ecrire la configuration du
+# VPS, qui les y declare.
+- name: Preparer les appareils nomades
+  ansible.builtin.include_tasks: peers.yml
+  when: inventory_hostname in groups['edge_nodes'] | default([])
+
 - name: Configurer le cote VPS
   ansible.builtin.include_tasks: vps.yml
   when: inventory_hostname in groups['edge_nodes'] | default([])

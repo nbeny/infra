@@ -140,3 +140,9 @@ mailcow_backup_retention_days: 30
 # 03h30 : apres la rotation de journaux de la nuit, avant le reveil des
 # utilisateurs.
 mailcow_backup_schedule: "*-*-* 03:30:00"
+
+# Nom joignable UNIQUEMENT a travers WireGuard. Il resout vers l'adresse du
+# tunnel de la VM : le certificat wildcard le couvre, donc aucun avertissement
+# de securite sur le telephone.
+mailcow_vpn_name: vpn-mail.urbanlink.fr
+mailcow_vpn_ip: "{{ mail_tunnel_mail_ip | default('10.88.0.2') }}"

@@ -243,3 +243,43 @@
       permerror qui invalide les deux. A corriger IMMEDIATEMENT.
     success_msg: >-
       SPF unique sur {{ mailcow_dns_zone }}.
+
+# ---------------------------------------------------------------------------
+#  Nom d'acces nomade
+# ---------------------------------------------------------------------------
+# Publier une adresse PRIVEE dans le DNS public peut surprendre, mais c'est
+# exactement ce que fait deja le wildcard *.urbanlink.fr -> 192.168.100.50.
+# L'interet est le certificat : un telephone qui se connecte a
+# vpn-mail.urbanlink.fr sur le tunnel presente un nom couvert par le wildcard
+# *.urbanlink.fr, donc pas d'avertissement de securite -- alors qu'une
+# connexion a 10.88.0.2 echouerait la verification du nom.
+#
+# Aucune exposition : 10.88.0.2 n'est joignable qu'a travers WireGuard.
+- name: Relever l'enregistrement d'acces nomade
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records?type=A&name={{ mailcow_vpn_name }}
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+  register: mailcow_cf_vpn
+  changed_when: false
+  no_log: true
+
+- name: Publier le nom d'acces nomade
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id }}/dns_records
+    method: POST
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      type: A
+      name: "{{ mailcow_vpn_name }}"
+      content: "{{ mailcow_vpn_ip }}"
+      proxied: false
+      ttl: 300
+      comment: "acces nomade par WireGuard -- adresse privee, volontairement"
+  when: mailcow_cf_vpn.json.result | length == 0
+  no_log: true
