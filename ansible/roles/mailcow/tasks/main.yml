@@ -118,3 +118,6 @@
 
 - name: Poser l'observabilite
   ansible.builtin.include_tasks: monitoring.yml
+
+- name: Poser les sauvegardes
+  ansible.builtin.include_tasks: backup.yml

@@ -1,0 +1,67 @@
+---
+# ============================================================================
+#  Sauvegardes
+# ----------------------------------------------------------------------------
+#  Deux niveaux, et ils ne se remplacent pas :
+#
+#    * la sauvegarde APPLICATIVE (ce fichier) permet de restaurer UNE boite
+#      sans toucher au reste ;
+#    * le vzdump de la VM, cote Proxmox, permet de restaurer la machine.
+#
+#  N'avoir que le second obligerait a restaurer toute la VM -- donc a perdre
+#  le courrier arrive depuis l'instantane -- pour recuperer un seul dossier.
+# ============================================================================
+
+# ⚠️ 0777 n'est PAS une negligence : le script de sauvegarde de Mailcow refuse
+# de demarrer si le repertoire n'est pas inscriptible par « others »
+# (« is not write-able for others, that's required for a backup »). Ses
+# conteneurs y ecrivent sous des UID varies, sans utilisateur commun.
+#
+# Le risque est contenu et assume : cette VM n'a qu'un seul compte interactif,
+# elle n'expose que le port 25 sur Internet, et le repertoire est SOUS un
+# parent en 0700. Le durcir davantage casserait la sauvegarde -- c'est-a-dire
+# echangerait un risque theorique contre une perte de donnees certaine le jour
+# ou il faudra restaurer.
+- name: Creer le parent des sauvegardes, ferme
+  ansible.builtin.file:
+    path: "{{ mailcow_backup_dir | dirname }}"
+    state: directory
+    mode: "0700"
+
+- name: Creer le repertoire de sauvegarde
+  ansible.builtin.file:
+    path: "{{ mailcow_backup_dir }}"
+    state: directory
+    mode: "0777"
+
+- name: Deposer l'unite et le minuteur de sauvegarde
+  ansible.builtin.template:
+    src: "mailcow-backup.{{ item }}.j2"
+    dest: "/etc/systemd/system/mailcow-backup.{{ item }}"
+    mode: "0644"
+  loop:
+    - service
+    - timer
+  notify: Recharger systemd
+
+- name: Activer la sauvegarde quotidienne
+  ansible.builtin.systemd_service:
+    name: mailcow-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verifier que le minuteur est bien programme
+  ansible.builtin.command:
+    cmd: systemctl list-timers mailcow-backup.timer --no-pager
+  register: mailcow_backup_timer
+  changed_when: false
+
+- name: Exiger un prochain declenchement
+  ansible.builtin.assert:
+    that:
+      - "'mailcow-backup.timer' in mailcow_backup_timer.stdout"
+    fail_msg: >-
+      Le minuteur de sauvegarde n'est pas programme. Une sauvegarde
+      configuree mais jamais declenchee est exactement le mode de panne
+      qu'on decouvre le jour ou l'on en a besoin.

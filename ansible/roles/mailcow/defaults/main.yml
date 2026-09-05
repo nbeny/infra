@@ -131,3 +131,12 @@ mailcow_dnsbl_zones:
   - psbl.surriel.com
   - dnsbl.sorbs.net
   - dnsbl-1.uceprotect.net
+
+# --- Sauvegardes -----------------------------------------------------------
+# Le parent (/var/backups/mailcow-data) reste en 0700 ; seul le repertoire
+# final est ouvert, comme l'exige le script de Mailcow.
+mailcow_backup_dir: /var/backups/mailcow-data/store
+mailcow_backup_retention_days: 30
+# 03h30 : apres la rotation de journaux de la nuit, avant le reveil des
+# utilisateurs.
+mailcow_backup_schedule: "*-*-* 03:30:00"

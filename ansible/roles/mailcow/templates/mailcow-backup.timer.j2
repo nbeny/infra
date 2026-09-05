@@ -1,0 +1,13 @@
+# Genere par Ansible (role mailcow).
+[Unit]
+Description=Sauvegarde quotidienne de Mailcow
+
+[Timer]
+OnCalendar={{ mailcow_backup_schedule }}
+# La VM peut etre eteinte a l'heure dite : sans Persistent, la sauvegarde
+# serait simplement sautee, et personne ne le saurait.
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

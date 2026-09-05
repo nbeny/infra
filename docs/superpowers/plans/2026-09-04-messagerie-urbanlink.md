@@ -1444,6 +1444,22 @@ DEFERRED=$(docker exec mailcowdockerized-postfix-mailcow-1 \
 mv "$TMP" "$OUT"
 ```
 
+> **Trois écarts rencontrés à l'exécution, corrigés dans le rôle :**
+>
+> 1. **Pas de `crontab` sur l'image cloud minimale.** Un minuteur systemd fait le
+>    travail sans ajouter de paquet — et `Persistent=true` rattrape les passages
+>    manqués si la VM était éteinte.
+> 2. **Ne pas imposer `--collector.textfile.directory`.** Le paquet Debian active déjà
+>    le collecteur sur `/var/lib/prometheus/node-exporter`. Passer un argument oblige à
+>    redémarrer le service via un handler — or les handlers Ansible ne partent qu'en
+>    **fin de play**, et le play échouait avant de les atteindre : `$ARGS` restait vide
+>    et la sonde écrivait dans le vide.
+> 3. **Le résolveur n'est pas un détail.** Interrogé via `1.1.1.1`, Spamhaus répond
+>    `127.255.255.254` (« open resolver ») — une valeur qui tombe dans la même plage
+>    que les réponses d'inscription. La sonde aurait hurlé en permanence. Elle passe
+>    par l'unbound récursif de Mailcow (`172.22.1.254`), vérifié dans les deux sens :
+>    réponse vide pour notre IP, `127.0.0.2` pour l'IP de test `127.0.0.2`.
+
 - [ ] **Étape 2 : Le déploiement et le minuteur**
 
 `ansible/roles/mailcow/tasks/monitoring.yml` :
@@ -1747,6 +1763,12 @@ Sur la VM, via une tâche Ansible ajoutée à `roles/mailcow/tasks/main.yml` :
       MAILCOW_BACKUP_LOCATION=/var/backups/mailcow
       {{ mailcow_dir }}/helper-scripts/backup_and_restore.sh backup all --delete-days 30
 ```
+
+> ⚠️ **Le répertoire de sauvegarde doit être inscriptible par « others »** : le script
+> de Mailcow refuse de démarrer sinon (« is not write-able for others, that's required
+> for a backup »), ses conteneurs y écrivant sous des UID variés. Le rôle place donc un
+> parent en `0700` et le répertoire final en `0777`. Le durcir davantage échangerait un
+> risque théorique contre une perte de données certaine le jour de la restauration.
 
 - [ ] **Étape 2 : Ajouter la VM à la rotation vzdump**
 

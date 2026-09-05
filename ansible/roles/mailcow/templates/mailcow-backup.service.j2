@@ -1,0 +1,13 @@
+# Genere par Ansible (role mailcow).
+[Unit]
+Description=Sauvegarde applicative de Mailcow
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=MAILCOW_BACKUP_LOCATION={{ mailcow_backup_dir }}
+# `--delete-days` fait la rotation lui-meme : sans lui, le disque se remplit en
+# silence jusqu'a ce que Postfix ne puisse plus ecrire, ce qui coupe la
+# RECEPTION avant que quiconque ne s'en apercoive.
+ExecStart={{ mailcow_dir }}/helper-scripts/backup_and_restore.sh backup all --delete-days {{ mailcow_backup_retention_days }}
