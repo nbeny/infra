@@ -140,13 +140,41 @@ eviter : sans la comparaison des horodatages, on aurait conclu a des sauvegardes
 inutilisables. Le script affiche desormais la commande de verification quand la
 boite ressort vide.
 
-Deux enseignements au passage :
+### Le second passage, sur une sauvegarde posterieure au courrier
+
+Sauvegarde de **20:52:31**, prise en mode `snapshot` sur la VM en marche, sans
+interruption de service : le port 25 a repondu `220 mail.urbanlink.fr ESMTP
+Postcow` pendant toute l'operation, et la file d'attente est restee a zero.
+
+| Controle | Resultat |
+|---|---|
+| Copie isolee, carte reseau coupee | OK |
+| 18 conteneurs Mailcow remontes seuls apres un demarrage a froid | OK |
+| Domaine `urbanlink.fr` en base | OK |
+| 4 boites aux lettres en base | OK |
+| Cle DKIM publique restauree | OK |
+| 3 messages indexes dans la boite de reception | OK |
+| **En-tetes dechiffres et lisibles** | OK |
+| **Corps de message dechiffre** | OK |
+
+**9 controles, aucun echec.** Les trois objets restaures sont exactement ceux de
+la production. Le vmail chiffre et les cles de `/mailcow-crypt` reviennent
+ensemble et se relisent : la sauvegarde n'est plus une hypothese.
+
+Trois enseignements au passage :
 
 - **Dovecot boucle au demarrage sur une copie isolee.** Il tente de telecharger
   les regles SpamAssassin, echoue faute de reseau, et sort. Tant qu'il n'a pas
   tenu, `doveadm` repond `connect(/run/dovecot/auth-userdb) failed` — ce qui
   ressemble a une perte de donnees. Le script attend maintenant que Dovecot se
   stabilise avant de conclure.
+- **L'agent QEMU repond bien avant que la machine ne soit prete.** Lance trop
+  tot, le test a rendu 8 echecs sur 9 sur une machine qui demarrait simplement.
+  Il attend maintenant que la pile ait converge.
+- `doveadm fetch` prefixe ses lignes du **nom du champ demande**, pas du nom de
+  l'en-tete : la sortie commence par `hdr.subject:`, jamais par `Subject:`.
+  Chercher `^Subject:` faisait conclure a des en-tetes illisibles alors que le
+  corps se dechiffrait parfaitement.
 - `qm restore` n'existe pas ; la commande est **`qmrestore`**.
 
 ## 4. Ce qui reste a la main

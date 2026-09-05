@@ -65,6 +65,21 @@ else
 fi
 
 titre "Amorcage a froid"
+# L'agent QEMU repond BIEN AVANT que la machine ne soit prete : il demarre tot,
+# alors que Docker n'a pas encore lance ses conteneurs. Sans cette attente, le
+# test conclut a une restauration ratee sur une machine qui est simplement en
+# train de demarrer -- constate le 2026-09-05, 8 echecs sur 9 pour cette seule
+# raison.
+printf "        convergence de la pile"
+for _ in $(seq 1 40); do
+  n=$(ex 'docker ps --filter name=mailcow -q 2>/dev/null | wc -l')
+  [ "${n:-0}" -ge 15 ] && break
+  printf "."
+  sleep 15
+done
+printf "
+"
+
 n=$(ex 'systemctl is-system-running 2>/dev/null | head -1')
 case "$n" in
   running|degraded) bon "systemd a converge ($n)" ;;
@@ -141,7 +156,11 @@ else
 "
 fi
 
-suj=$(ex 'docker exec mailcowdockerized-dovecot-mailcow-1 doveadm fetch -u alesio@urbanlink.fr "hdr.subject" mailbox INBOX 2>/dev/null | grep -i "^Subject:" | head -3')
+# `doveadm fetch` prefixe chaque ligne du NOM DU CHAMP demande, pas du nom de
+# l'en-tete : la sortie commence par « hdr.subject: », jamais par « Subject: ».
+# Chercher « ^Subject: » faisait conclure a des en-tetes illisibles alors que le
+# corps, lui, se dechiffrait parfaitement.
+suj=$(ex 'docker exec mailcowdockerized-dovecot-mailcow-1 doveadm fetch -u alesio@urbanlink.fr "hdr.subject" mailbox INBOX 2>/dev/null | grep "^hdr.subject:" | head -3')
 if [ -n "${suj:-}" ]; then
   bon "en-tetes dechiffres et lisibles :"
   echo "$suj" | sed 's/^/          /'
@@ -149,7 +168,8 @@ else
   mauvais "impossible de lire les en-tetes"
 fi
 
-corps=$(ex 'docker exec mailcowdockerized-dovecot-mailcow-1 doveadm fetch -u alesio@urbanlink.fr "body" mailbox INBOX 2>/dev/null | head -c 200 | tr -d ""')
+corps=$(ex 'docker exec mailcowdockerized-dovecot-mailcow-1 doveadm fetch -u alesio@urbanlink.fr "body" mailbox INBOX 2>/dev/null | head -c 200 | tr -d "
+"')
 if [ -n "${corps:-}" ]; then
   bon "corps de message dechiffre (${#corps} octets lus)"
 else
