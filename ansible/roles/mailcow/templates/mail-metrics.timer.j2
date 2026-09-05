@@ -1,0 +1,18 @@
+# Genere par Ansible (role mailcow).
+#
+# Un timer systemd plutot que cron : l'image cloud minimale de Debian n'a pas
+# de crontab, et installer un paquet pour une seule tache periodique serait
+# disproportionne.
+[Unit]
+Description=Declenche la sonde de la messagerie toutes les {{ mailcow_probe_interval }}
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ mailcow_probe_interval }}
+# Sans cela, tous les hotes sondant a la meme minute frapperaient les listes
+# noires en rafale.
+RandomizedDelaySec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

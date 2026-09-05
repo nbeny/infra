@@ -797,6 +797,76 @@ spec:
               des journaux acceptes sont perdus
 
     # =======================================================================
+    #  MESSAGERIE -- urbanlink.fr
+    # -----------------------------------------------------------------------
+    #  Cible statique `messagerie` (VM 140, hors cluster). Les metriques
+    #  mail_* viennent d'une sonde locale posee par le role Ansible `mailcow`,
+    #  qui tourne toutes les 15 minutes.
+    #
+    #  Ces quatre regles repondent a l'exigence qui a fait naitre ce chantier :
+    #  ne pas se faire blacklister, et le SAVOIR immediatement si ca arrive.
+    # =======================================================================
+    - name: urbanlink.messagerie
+      rules:
+        - alert: MailIPBlacklisted
+          # Une seule zone suffit a declencher : les grands fournisseurs
+          # consultent plusieurs listes, et Spamhaus a lui seul ferme la porte
+          # d'une bonne moitie d'Internet. `for: 10m` evite de tirer sur une
+          # reponse DNS aberrante isolee.
+          expr: max(mail_dnsbl_listed) > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              L'IP d'emission de la messagerie est LISTEE en liste noire --
+              le courrier sortant part en spam ou en rejet des maintenant
+            description: >-
+              Zone(s) concernee(s) : voir mail_dnsbl_listed. Demander le
+              delistage sur le site de la liste, et chercher la cause AVANT
+              (compte compromis, relais ouvert, plainte utilisateur).
+
+        - alert: MailDNSBLProbeUnhealthy
+          # Une sonde qui repond « propre » sans avoir pu interroger les listes
+          # est pire qu'une sonde absente : elle rassure a tort. Le cas
+          # concret est Spamhaus qui refuse les resolveurs publics et repond
+          # 127.255.255.254 -- une reponse qui RESSEMBLE a une inscription.
+          expr: mail_dnsbl_probe_healthy == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              La sonde des listes noires n'obtient plus de reponse exploitable
+              -- la surveillance du blacklistage est AVEUGLE
+
+        - alert: MailProbeStale
+          # Sans cette regle, la sonde peut cesser de tourner sans que rien ne
+          # le dise : les series gardent leur derniere valeur, rassurante.
+          expr: time() - mail_dnsbl_last_check_timestamp_seconds > 3600
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              La sonde de la messagerie ne rend plus de resultat depuis plus
+              d'une heure (minuteur mail-metrics.timer sur la VM 140)
+
+        - alert: MailQueueNotDraining
+          # Le premier symptome d'un tunnel WireGuard coupe, ou d'un grand
+          # fournisseur qui refuse les remises. Rien ne casse visiblement --
+          # les messages s'accumulent en silence, et c'est pour cela qu'il
+          # faut une alerte.
+          expr: mail_queue_size > 50 or mail_queue_deferred > 20
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              La file d'attente de la messagerie ne s'ecoule pas
+              ({{ $value }} messages) -- verifier le tunnel vers le VPS et les
+              journaux de postfix-mailcow
+    # =======================================================================
     #  CE QUI N'EST DELIBEREMENT PAS SURVEILLE
     # -----------------------------------------------------------------------
     #  Ces absences sont des DECISIONS, pas des oublis. Les ecrire evite qu'on

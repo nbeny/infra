@@ -105,6 +105,24 @@ prometheus:
       # la resout). Il est conserve : le retirer changerait le volume monte dans
       # le pod Prometheus pour un gain nul.
 
+      # --- Messagerie ---------------------------------------------------------
+      # La VM 140 porte Mailcow et vit HORS du cluster : ni ServiceMonitor ni
+      # decouverte possible, c'est une cible statique assumee.
+      #
+      # Elle expose, en plus des metriques systeme habituelles, deux familles
+      # produites par une sonde locale (role Ansible `mailcow`) :
+      #   mail_dnsbl_listed        inscription de l'IP d'emission en liste noire
+      #   mail_queue_size          file d'attente de Postfix
+      # C'est `mail_dnsbl_listed` qui repond a l'exigence de depart : savoir
+      # qu'on est blackliste AVANT que ca ne se voie dans le courrier des
+      # destinataires.
+      - job_name: messagerie
+        static_configs:
+          - targets: ['10.0.0.140:9100']
+            labels:
+              instance: mail
+              role: messagerie
+
       # --- Maillage Istio -----------------------------------------------------
       # Repris TEL QUEL du job `kubernetes-pods` de l'addon Prometheus d'Istio
       # (samples/addons/prometheus.yaml), qui a ete supprime : c'etait le SEUL

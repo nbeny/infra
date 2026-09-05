@@ -115,3 +115,6 @@
 - name: Publier les enregistrements d'authentification
   ansible.builtin.include_tasks: dns.yml
   tags: [dns]
+
+- name: Poser l'observabilite
+  ansible.builtin.include_tasks: monitoring.yml

@@ -103,3 +103,31 @@ mailcow_cloudflare_credentials: /root/.secrets/cloudflare.ini
 # `-all` (et non `~all`) parce qu'un SPF permissif n'apporte rien : il indique
 # aux recepteurs de ne rien conclure d'un echec, ce qui affaiblit DMARC.
 mailcow_spf_content: "v=spf1 ip4:147.79.102.17 include:spf.infomaniak.ch -all"
+
+# --- Observabilite ---------------------------------------------------------
+mailcow_sending_ip: "{{ mail_tunnel_public_ip | default('147.79.102.17') }}"
+# Repertoire textfile PAR DEFAUT du paquet Debian : le collecteur y lit sans
+# qu'on ait rien a passer en argument. Imposer --collector.textfile.directory
+# obligerait a redemarrer le service et a esperer que $ARGS soit bien pris --
+# une piece mobile de plus pour rien.
+mailcow_textfile_dir: /var/lib/prometheus/node-exporter
+
+# Assez frequent pour reagir vite, assez espace pour ne pas marteler les listes.
+mailcow_probe_interval: 15min
+mailcow_postfix_container: mailcowdockerized-postfix-mailcow-1
+
+# Resolveur RECURSIF, et non un resolveur public : Spamhaus refuse ces
+# derniers et repond 127.255.255.254, que l'on confondrait avec une
+# inscription. C'est l'unbound de Mailcow, qui sort par le tunnel.
+mailcow_dnsbl_resolver: "{{ mail_docker_net_prefix }}.254"
+
+# Les listes qui comptent reellement pour Gmail, Outlook et Yahoo. En ajouter
+# davantage produirait du bruit : certaines listes sont si agressives qu'une
+# inscription n'y veut rien dire.
+mailcow_dnsbl_zones:
+  - zen.spamhaus.org
+  - b.barracudacentral.org
+  - bl.spamcop.net
+  - psbl.surriel.com
+  - dnsbl.sorbs.net
+  - dnsbl-1.uceprotect.net

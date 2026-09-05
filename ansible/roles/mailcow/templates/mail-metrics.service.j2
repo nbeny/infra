@@ -1,0 +1,9 @@
+# Genere par Ansible (role mailcow).
+[Unit]
+Description=Sonde listes noires et file d'attente de la messagerie
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mail-metrics.sh

@@ -1,0 +1,74 @@
+#!/bin/bash
+# Genere par Ansible (role mailcow). Toute edition manuelle sera ecrasee.
+#
+# Produit deux familles de metriques au format textfile de node_exporter :
+#   * l'inscription de l'IP d'emission dans les listes noires ;
+#   * l'etat de la file d'attente de Postfix.
+#
+# ⚠️ LE RESOLVEUR N'EST PAS UN DETAIL. Spamhaus REFUSE les requetes venant des
+# resolveurs publics et repond 127.255.255.254 avec « Error: open resolver ».
+# Or 127.255.255.* tombe dans la meme plage que les reponses d'inscription :
+# un script naif conclurait que l'IP est listee, et l'alerte hurlerait en
+# permanence pour rien. On interroge donc l'unbound recursif de Mailcow, qui
+# sort par le tunnel avec l'IP du VPS.
+set -uo pipefail
+
+IP={{ mailcow_sending_ip }}
+RESOLVER={{ mailcow_dnsbl_resolver }}
+REV=$(echo "$IP" | awk -F. '{print $4"."$3"."$2"."$1}')
+OUT={{ mailcow_textfile_dir }}/mail.prom
+TMP="${OUT}.$$"
+
+ZONES="{{ mailcow_dnsbl_zones | join(' ') }}"
+
+healthy=1
+
+{
+  echo "# HELP mail_dnsbl_listed 1 si l'IP d'emission est listee sur cette zone."
+  echo "# TYPE mail_dnsbl_listed gauge"
+  for z in $ZONES; do
+    ans=$(dig +short +time=3 +tries=1 "@${RESOLVER}" "${REV}.${z}" 2>/dev/null | head -1)
+    case "$ans" in
+      127.255.255.*)
+        # Reponse d'ERREUR du service, pas une inscription. Ne pas la compter
+        # comme une inscription, mais ne pas la passer sous silence non plus.
+        v=0; healthy=0 ;;
+      127.*)
+        v=1 ;;
+      *)
+        v=0 ;;
+    esac
+    echo "mail_dnsbl_listed{zone=\"${z}\",ip=\"${IP}\"} ${v}"
+  done
+
+  # Une sonde qui repond « propre » alors qu'elle n'a pas pu interroger les
+  # listes est pire qu'une sonde absente : elle rassure a tort.
+  echo "# HELP mail_dnsbl_probe_healthy 1 si toutes les zones ont repondu normalement."
+  echo "# TYPE mail_dnsbl_probe_healthy gauge"
+  echo "mail_dnsbl_probe_healthy ${healthy}"
+
+  echo "# HELP mail_dnsbl_last_check_timestamp_seconds Date du dernier passage de la sonde."
+  echo "# TYPE mail_dnsbl_last_check_timestamp_seconds gauge"
+  echo "mail_dnsbl_last_check_timestamp_seconds $(date +%s)"
+
+  # --- File d'attente -------------------------------------------------------
+  # Une file qui gonfle est le premier symptome d'un tunnel coupe ou d'un
+  # grand fournisseur qui refuse les remises.
+  q=$(docker exec {{ mailcow_postfix_container }} postqueue -p 2>/dev/null \
+      | tail -1 | grep -oE '^-- [0-9]+ Kbytes in [0-9]+ Request' | grep -oE '[0-9]+ Request' | grep -oE '^[0-9]+')
+  [ -z "${q:-}" ] && q=0
+  d=$(docker exec {{ mailcow_postfix_container }} find /var/spool/postfix/deferred -type f 2>/dev/null | wc -l)
+  [ -z "${d:-}" ] && d=0
+
+  echo "# HELP mail_queue_size Messages en attente dans la file Postfix."
+  echo "# TYPE mail_queue_size gauge"
+  echo "mail_queue_size ${q}"
+  echo "# HELP mail_queue_deferred Messages differes (echec temporaire de remise)."
+  echo "# TYPE mail_queue_deferred gauge"
+  echo "mail_queue_deferred ${d}"
+} > "$TMP"
+
+# Ecriture atomique : node_exporter lit ce repertoire en continu et un fichier
+# a moitie ecrit lui ferait rendre des metriques tronquees.
+mv "$TMP" "$OUT"
+chmod 644 "$OUT"

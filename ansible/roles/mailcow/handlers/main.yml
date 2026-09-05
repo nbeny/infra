@@ -23,3 +23,13 @@
     cmd: docker compose restart sogo-mailcow
     chdir: "{{ mailcow_dir }}"
   changed_when: true
+
+- name: Redemarrer node_exporter
+  ansible.builtin.systemd_service:
+    name: prometheus-node-exporter
+    state: restarted
+    daemon_reload: true
+
+- name: Recharger systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true

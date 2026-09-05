@@ -1,0 +1,81 @@
+---
+# ============================================================================
+#  Observabilite de la messagerie
+# ----------------------------------------------------------------------------
+#  L'exigence de depart etait « ne pas se faire blacklister ». La sonde DNSBL
+#  ci-dessous est la seule chose qui permette de le SAVOIR avant que ca ne se
+#  voie dans le courrier des destinataires.
+# ============================================================================
+
+- name: Installer node_exporter et dnsutils
+  ansible.builtin.apt:
+    name:
+      - prometheus-node-exporter
+      - dnsutils
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Creer le repertoire des metriques textfile
+  ansible.builtin.file:
+    path: "{{ mailcow_textfile_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deposer la sonde
+  ansible.builtin.template:
+    src: mail-metrics.sh.j2
+    dest: /usr/local/sbin/mail-metrics.sh
+    mode: "0750"
+
+- name: Deposer l'unite et le minuteur
+  ansible.builtin.template:
+    src: "mail-metrics.{{ item }}.j2"
+    dest: "/etc/systemd/system/mail-metrics.{{ item }}"
+    mode: "0644"
+  loop:
+    - service
+    - timer
+  notify: Recharger systemd
+
+- name: Activer le minuteur
+  ansible.builtin.systemd_service:
+    name: mail-metrics.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Executer la sonde une premiere fois
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/mail-metrics.sh
+  changed_when: true
+
+- name: Garantir que node_exporter tourne
+  ansible.builtin.systemd_service:
+    name: prometheus-node-exporter
+    enabled: true
+    state: started
+
+- name: Verifier que les metriques sont bien exposees
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:9100/metrics"
+    return_content: true
+  register: mailcow_metrics
+  retries: 6
+  delay: 5
+  until: mailcow_metrics is succeeded
+  changed_when: false
+
+- name: Exiger une sonde en bonne sante
+  ansible.builtin.assert:
+    that:
+      - "'mail_dnsbl_listed' in mailcow_metrics.content"
+      - "'mail_dnsbl_probe_healthy 1' in mailcow_metrics.content"
+    fail_msg: >-
+      La sonde ne rend pas de metriques exploitables. Si
+      mail_dnsbl_probe_healthy vaut 0, c'est que les listes noires ont repondu
+      « open resolver » : le resolveur {{ mailcow_dnsbl_resolver }} n'est pas
+      recursif ou n'est pas joignable. Une sonde qui repond « propre » sans
+      avoir pu interroger est pire qu'une sonde absente.
+    success_msg: >-
+      Sonde DNSBL operationnelle sur {{ mailcow_sending_ip }}.
