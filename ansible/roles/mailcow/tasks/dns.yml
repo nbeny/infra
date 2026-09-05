@@ -128,3 +128,118 @@
     - item.json.result | length > 0
     - item.json.result[0].content != item.item.content
   no_log: true
+
+# ---------------------------------------------------------------------------
+#  SPF -- autoriser l'IP d'emission, SANS toucher au MX
+# ---------------------------------------------------------------------------
+# Publier le SPF AVANT la bascule est deliberе : cela rend l'emission depuis la
+# nouvelle machine verifiable alors qu'Infomaniak recoit encore tout le
+# courrier. L'enregistrement porte donc les DEUX origines pendant la
+# transition ; l'`include` d'Infomaniak ne tombera qu'a la resiliation.
+#
+# ⚠️ On modifie l'enregistrement EXISTANT plutot que d'en ajouter un : deux
+# enregistrements SPF sur un meme nom les invalident TOUS LES DEUX (permerror),
+# ce qui ferait echouer l'authentification de tout le courrier du domaine.
+- name: Relever les TXT de l'apex
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records?type=TXT&name={{ mailcow_dns_zone }}
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+  register: mailcow_cf_apex
+  changed_when: false
+  no_log: true
+
+# ⚠️ Le motif tolere un guillemet initial. Cloudflare stocke certains TXT AVEC
+# leurs guillemets litteraux dans le champ `content` -- c'est le cas de
+# l'enregistrement d'origine de cette zone. Un motif `^v=spf1` ne le reconnait
+# donc PAS, conclut qu'aucun SPF n'existe, et en cree un SECOND.
+#
+# Mesure le 2026-09-05 : deux SPF ont coexiste pendant trois minutes sur
+# urbanlink.fr. Deux enregistrements SPF sur un meme nom les invalident TOUS
+# LES DEUX (permerror) -- l'authentification de tout le courrier du domaine
+# tombe, y compris celui qui part encore d'Infomaniak.
+- name: Isoler l'enregistrement SPF
+  ansible.builtin.set_fact:
+    mailcow_spf_record: >-
+      {{ mailcow_cf_apex.json.result
+         | selectattr('content', 'match', '^"?v=spf1')
+         | list | first | default({}) }}
+
+- name: Exiger un SPF unique
+  ansible.builtin.assert:
+    that:
+      - (mailcow_cf_apex.json.result | selectattr('content', 'match', '^"?v=spf1') | list | length) <= 1
+    fail_msg: >-
+      Plusieurs enregistrements SPF sur {{ mailcow_dns_zone }}. C'est une
+      erreur de configuration qui invalide les deux : tout le courrier du
+      domaine echoue en permerror. A corriger a la main avant de continuer.
+
+- name: Creer le SPF s'il n'existe pas
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id }}/dns_records
+    method: POST
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      type: TXT
+      name: "{{ mailcow_dns_zone }}"
+      content: "{{ mailcow_spf_content }}"
+      ttl: 300
+      comment: "SPF -- ansible role mailcow"
+  when: not mailcow_spf_record
+  no_log: true
+
+- name: Ajouter l'IP d'emission au SPF existant
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records/{{ mailcow_spf_record.id }}
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      content: "{{ mailcow_spf_content }}"
+      ttl: 300
+  when:
+    - mailcow_spf_record | length > 0
+    - (mailcow_spf_record.content | trim('"')) != mailcow_spf_content
+  no_log: true
+
+- name: Recapituler l'etat de l'authentification
+  ansible.builtin.debug:
+    msg:
+      - "SPF   : {{ mailcow_spf_content }}"
+      - "DKIM  : {{ mailcow_dkim_selector }}._domainkey.{{ mailcow_dns_zone }} publie"
+      - "MX    : INCHANGE -- le courrier arrive toujours chez Infomaniak"
+
+# Filet, et il n'est pas decoratif : c'est exactement ce controle qui aurait
+# transforme l'incident du 2026-09-05 en echec bruyant au lieu d'un doublon
+# silencieux decouvert par hasard.
+- name: Relire l'apex apres modification
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records?type=TXT&name={{ mailcow_dns_zone }}
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+  register: mailcow_cf_after
+  changed_when: false
+  no_log: true
+
+- name: Exiger un et un seul SPF apres modification
+  ansible.builtin.assert:
+    that:
+      - (mailcow_cf_after.json.result | selectattr('content', 'match', '^"?v=spf1') | list | length) == 1
+    fail_msg: >-
+      {{ mailcow_cf_after.json.result | selectattr('content', 'match', '^"?v=spf1')
+         | list | length }} enregistrements SPF sur {{ mailcow_dns_zone }}.
+      Tout autre nombre que 1 casse l'authentification du domaine ENTIER :
+      zero laisse n'importe qui usurper l'adresse, deux ou plus provoquent un
+      permerror qui invalide les deux. A corriger IMMEDIATEMENT.
+    success_msg: >-
+      SPF unique sur {{ mailcow_dns_zone }}.
