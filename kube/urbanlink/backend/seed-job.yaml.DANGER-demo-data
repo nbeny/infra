@@ -1,4 +1,28 @@
 # =============================================================================
+#  ⚠️⚠️⚠️ FICHIER RENOMME EXPRES -- `.DANGER-demo-data`, PAS `.yaml`.
+# -----------------------------------------------------------------------------
+#  La production `urbanlink.fr` est censee rester une PLATEFORME VIDE : schema
+#  + donnees de reference seulement (taxonomie, badges), AUCUN utilisateur,
+#  annonce, message ou conversation de demonstration. Ce fichier pose l'exact
+#  contraire -- voir son en-tete d'origine ci-dessous, conserve tel quel.
+#
+#  Le suffixe `.DANGER-demo-data` (et non `.yaml`) est le mecanisme : kustomize
+#  ne resout que des `*.yaml`/`*.yml` explicitement listes dans `resources:`,
+#  donc un fichier qui ne porte plus cette extension ne peut PAS etre pris pour
+#  un manifeste par une ligne ajoutee par erreur -- il faudrait le renommer en
+#  plus de le referencer, deux gestes deliberes au lieu d'un seul oubli.
+#  Avant ce renommage, ce Job n'etait deja PAS dans `kustomization.yaml`
+#  (voir plus bas "IL N'EST PAS DANS LE KUSTOMIZATION"), mais rien n'empechait
+#  qu'une ligne `- backend/seed-job.yaml` y soit ajoutee un jour par erreur --
+#  Argo l'aurait alors applique au cycle suivant, sur la production.
+#
+#  Ce fichier n'est PAS supprime : il reste legitime pour peupler un
+#  environnement de DEMO (jamais `urbanlink.fr`). Pour l'utiliser, le copier
+#  (ou le symlinker) sous un nom `*.yaml` dans l'environnement cible -- jamais
+#  dans `kube/urbanlink/` tel quel.
+# =============================================================================
+#
+# =============================================================================
 #  backend-seed -- pose les donnees de demonstration. DESTRUCTIF.
 # -----------------------------------------------------------------------------
 #  ⚠️⚠️ CE JOB EFFACE LA BASE ENTIERE avant d'ecrire. `prisma/seed.ts` enchaine
