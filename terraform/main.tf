@@ -57,6 +57,9 @@ module "vm" {
   template_vm_id = var.templates[each.value.profile]
   datastore_id   = coalesce(each.value.datastore, local.datastore)
 
+  startup_order    = each.value.startup_order
+  startup_up_delay = each.value.startup_up_delay
+
   cores           = each.value.cores
   sockets         = each.value.sockets
   memory          = each.value.memory

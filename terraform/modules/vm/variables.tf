@@ -153,3 +153,27 @@ variable "agent_enabled" {
   EOT
   default     = true
 }
+
+# ---------------------------------------------------------------------------
+#  Ordre de demarrage
+# ---------------------------------------------------------------------------
+#  La RAM du noeud est SURENGAGEE : 118 Go promis aux VMs pour 110 Go
+#  physiques. Tant que les invites ne touchent pas toute leur memoire, cela
+#  passe -- mais un demarrage a froid les lance toutes en meme temps, et c'est
+#  precisement le moment ou chacune en demande le plus.
+#
+#  Ordonner le demarrage transforme une ruee en file d'attente. Proxmox lance
+#  d'abord les VMs qui ont un ordre, dans l'ordre croissant, puis toutes les
+#  autres : une VM non ordonnee passe donc naturellement en dernier, sans qu'on
+#  ait a la declarer.
+variable "startup_order" {
+  type        = number
+  description = "Rang de demarrage Proxmox. `null` = demarre apres les VMs ordonnees."
+  default     = null
+}
+
+variable "startup_up_delay" {
+  type        = number
+  description = "Secondes a attendre APRES avoir demarre cette VM, avant la suivante."
+  default     = null
+}

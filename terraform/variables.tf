@@ -94,6 +94,11 @@ variable "vms" {
     datastore   = optional(string, null)
     on_boot     = optional(bool, true)
     started     = optional(bool, true)
+    # Rang de demarrage au boot du noeud. Laisser `null` place la VM apres
+    # toutes celles qui ont un rang -- ce qui est le bon defaut pour tout ce
+    # qui n'est pas critique.
+    startup_order    = optional(number, null)
+    startup_up_delay = optional(number, null)
     firewall    = optional(bool, false)
     # `false` obligatoire pour le profil debian-base : le socle 9000 n'a pas
     # qemu-guest-agent, et l'apply echouerait apres cinq minutes d'attente.

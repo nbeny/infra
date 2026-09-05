@@ -31,6 +31,11 @@ vms = {
     memory      = 8192
     disk_size   = 64
     on_boot     = false
+    # `on_boot` NE SUFFIT PAS a garder une VM eteinte. Il ne regit que le
+    # demarrage du noeud ; l'etat courant est regi par `started`, dont le
+    # defaut est `true`. Sans la ligne ci-dessous, un `terraform apply`
+    # RALLUME la VM -- constate le 2026-09-05 sur test-k8s et kali-test.
+    started     = false
     tags        = ["test"]
     description = "VM jetable de validation. Supprimable sans consequence."
   }
@@ -44,6 +49,7 @@ vms = {
     memory      = 8192
     disk_size   = 100        # >= 64 : le template fait deja 64 Go
     on_boot     = false
+    started     = false   # voir la note sur `started` plus haut
     tags        = ["test", "offsec"]
     description = "VM Kali de validation. Supprimable sans consequence."
   }
@@ -78,6 +84,14 @@ vms = {
     memory      = 98304      # 96 Go
     disk_size   = 700
     on_boot     = true
+    # Ordre de demarrage au boot du noeud. La RAM est SURENGAGEE (118 Go
+    # promis pour 110 Go physiques) : un demarrage a froid lancerait toutes
+    # les VMs au moment ou chacune demande le plus de memoire. Un rang
+    # transforme la ruee en file d'attente. `up_delay` est le temps d'attente
+    # APRES cette VM, avant la suivante -- ici, le temps que Kubernetes se
+    # pose. Une VM SANS rang demarre apres toutes celles qui en ont un.
+    startup_order    = 1
+    startup_up_delay = 90
     tags        = ["app", "urbanlink"]
     description = "Cluster Kubernetes hebergeant le stack UrbanLink."
   }

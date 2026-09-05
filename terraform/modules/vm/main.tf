@@ -25,6 +25,16 @@ resource "proxmox_virtual_environment_vm" "this" {
   on_boot = var.on_boot
   started = var.started
 
+  # Bloc omis quand aucun ordre n'est demande : Proxmox demarre alors la VM
+  # apres toutes celles qui en ont un.
+  dynamic "startup" {
+    for_each = var.startup_order == null ? [] : [1]
+    content {
+      order    = var.startup_order
+      up_delay = var.startup_up_delay
+    }
+  }
+
   # Sans cela, Terraform refuse de detruire une VM allumee.
   stop_on_destroy = true
 
