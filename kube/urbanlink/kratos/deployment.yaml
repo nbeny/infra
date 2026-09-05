@@ -17,7 +17,42 @@ spec:
     spec:
       containers:
         - name: kratos
-          image: oryd/kratos:latest
+          # ⚠️ EPINGLE, et ce n'est pas un detail de version comme un autre.
+          #
+          # `:latest` change de VERSION a chaque pull, sans qu'aucun fichier de
+          # ce depot ne bouge -- Argo affiche "Synced" alors que le binaire qui
+          # tourne a change sous ses pieds. Une bascule de version majeure de
+          # Kratos change la semantique du cookie de session, la verification
+          # CSRF, ET le schema de sa base -- trois choses qui ne se remarquent
+          # PAS au demarrage. Le symptome n'est jamais "Kratos refuse de
+          # demarrer" : c'est "plus personne ne peut se connecter", un matin,
+          # sans le moindre changement applicatif visible.
+          #
+          # Mesure sur l'environnement de DEV le 2026-09-05 (pas une hypothese) :
+          # sa base Kratos avait ete migree vers les migrations de janvier 2026
+          # par une image `latest` tiree entre-temps, puis le service a ete
+          # repointe sur `v1.3.1` (migrations d'avril 2024, plus ancien que ce
+          # que la base portait deja) -- chaque connexion repondait 500,
+          # `identities.external_id` present en base mais inconnu du binaire,
+          # `session_devices.identity_id` NOT NULL et jamais peuplee par ce
+          # binaire-la. Le retablissement a exige de reconstruire la base
+          # d'identites -- une option qui n'existe pas en production.
+          #
+          # ⚠️ `v26.2.0` est ce que `latest` resout AUJOURD'HUI (2026-09-05) :
+          # cet epinglage FIGE la production sur ce qu'elle tire deja, il ne la
+          # deplace nulle part. **C'est justement le sens inverse qui casse tout** :
+          # epingler EN DESSOUS du schema deja applique en base est la panne
+          # ci-dessus, pas une precaution. Avant de changer cette valeur,
+          # verifier l'alignement binaire/schema :
+          #
+          #   kubectl -n <ns> exec deploy/kratos -- kratos version
+          #   # et, cote base :  SELECT max(version) FROM schema_migration;
+          #
+          # ⚠️ **`kratos` et `kratos-migrate` (kratos/migrate-job.yaml) DOIVENT
+          # porter le MEME tag** -- c'est le second qui pose le schema que le
+          # premier suppose deja en place. Les faire diverger reproduirait
+          # exactement l'incident du 2026-09-05.
+          image: oryd/kratos:v26.2.0
           command:
             - kratos
             - serve

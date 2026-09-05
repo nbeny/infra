@@ -60,7 +60,16 @@ spec:
               done
       containers:
         - name: kratos-migrate
-          image: oryd/kratos:latest
+          # ⚠️ EPINGLE -- doit rester IDENTIQUE au tag de `kratos/deployment.yaml`
+          # (memes raisons, detaillees la-bas) : c'est CE conteneur qui pose le
+          # schema que le Deployment `kratos` va ensuite supposer en place. Les
+          # laisser diverger, meme d'une version, revient a faire tourner un
+          # serveur contre un schema qu'il n'a pas ecrit lui-meme.
+          #
+          # Verification avant tout changement de version :
+          #   kubectl -n <ns> exec deploy/kratos -- kratos version
+          #   # et, cote base :  SELECT max(version) FROM schema_migration;
+          image: oryd/kratos:v26.2.0
           command:
             - kratos
             - -c
