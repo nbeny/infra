@@ -1,0 +1,9 @@
+# Genere par Ansible (role mail_antiabus). Toute edition manuelle sera ecrasee.
+[Unit]
+Description=Applique les decisions CrowdSec au courrier entrant
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mailguard-sync.sh

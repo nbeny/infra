@@ -1,0 +1,113 @@
+---
+# ============================================================================
+#  Rendre l'API locale de CrowdSec joignable par la VM, sans y toucher
+# ----------------------------------------------------------------------------
+#  Le conteneur CrowdSec du VPS publie son API sur 127.0.0.1:8080 seulement. Il
+#  protege trois sites en production : on ne modifie NI sa composition Docker,
+#  NI son parametrage -- a une exception pres, le mode WAL ci-dessous, qui est
+#  la consequence directe de l'agent qu'on ajoute.
+#
+#  Un relais de socket systemd republie l'API sur l'adresse du tunnel.
+#  `systemd-socket-proxyd` est livre avec systemd : aucun paquet a installer,
+#  aucun conteneur a redemarrer, et un `systemctl disable` suffit a tout defaire.
+# ============================================================================
+
+- name: Deposer le socket du relais d'API
+  ansible.builtin.template:
+    src: crowdsec-lapi-tunnel.socket.j2
+    dest: /etc/systemd/system/crowdsec-lapi-tunnel.socket
+    mode: "0644"
+  notify: Relancer le relais de l'API CrowdSec
+
+- name: Deposer le service du relais d'API
+  ansible.builtin.template:
+    src: crowdsec-lapi-tunnel.service.j2
+    dest: /etc/systemd/system/crowdsec-lapi-tunnel.service
+    mode: "0644"
+  notify: Relancer le relais de l'API CrowdSec
+
+- name: Activer le relais d'API
+  ansible.builtin.systemd_service:
+    name: crowdsec-lapi-tunnel.socket
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# ---------------------------------------------------------------------------
+#  SQLite en mode WAL
+# ---------------------------------------------------------------------------
+#  CrowdSec livre `use_wal: false`, un defaut prudent prevu pour les bases
+#  posees sur un systeme de fichiers reseau. Avec DEUX agents qui ecrivent --
+#  celui du VPS et le notre -- le journal se remplit de :
+#
+#      heartbeat error: API error: updating machine last_heartbeat:
+#      database is locked: unable to update
+#
+#  Constate des la premiere heure de fonctionnement. Le mode WAL est le
+#  correctif que CrowdSec documente pour exactement ce message : il autorise un
+#  ecrivain et plusieurs lecteurs simultanes. La base est sur un volume Docker
+#  local, la reserve qui motive le defaut ne s'applique pas ici.
+#
+#  C'est le SEUL reglage du CrowdSec du VPS que ce role modifie. Il est
+#  reversible d'une ligne, et le bouncer garde ses jeux nftables pendant le
+#  redemarrage du conteneur : la protection ne s'interrompt pas.
+- name: Verifier la presence de la configuration CrowdSec du VPS
+  ansible.builtin.stat:
+    path: "{{ mail_antiabus_cs_vps_config }}"
+  register: mail_antiabus_cs_conf
+
+- name: Activer le mode WAL de SQLite
+  ansible.builtin.replace:
+    path: "{{ mail_antiabus_cs_vps_config }}"
+    # `replace` plutot que `lineinfile` : on change la VALEUR en conservant
+    # l'indentation d'origine, sans avoir a la deviner. La cle vit sous
+    # `db_config:`, elle n'est pas a la colonne 0.
+    regexp: '^(\s*use_wal:\s*)false\s*$'
+    replace: '\g<1>true'
+  when: mail_antiabus_cs_conf.stat.exists
+  notify: Redemarrer CrowdSec sur le VPS
+
+- name: Appliquer avant de declarer l'agent
+  ansible.builtin.meta: flush_handlers
+
+# ---------------------------------------------------------------------------
+#  Compte machine de l'agent
+# ---------------------------------------------------------------------------
+- name: Relever les machines connues de CrowdSec
+  ansible.builtin.command:
+    cmd: docker exec {{ mail_antiabus_cs_container }} cscli machines list -o json
+  register: mail_antiabus_cs_machines
+  changed_when: false
+  # L'API vient peut-etre d'etre redemarree par le handler ci-dessus.
+  retries: 12
+  delay: 5
+  until: mail_antiabus_cs_machines is succeeded
+
+- name: Declarer l'agent de la VM
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ mail_antiabus_cs_container }}"
+      - cscli
+      - machines
+      - add
+      - "{{ mail_antiabus_cs_machine }}"
+      - --password
+      - "{{ mail_antiabus_cs_password }}"
+      # `-f /dev/null` est OBLIGATOIRE, et ce n'est pas du confort. Sans
+      # destination explicite, `cscli machines add` ecrit les identifiants de la
+      # NOUVELLE machine dans /etc/crowdsec/local_api_credentials.yaml -- le
+      # fichier dont se sert l'agent local du VPS. CrowdSec refuse heureusement
+      # d'ecraser un fichier existant, et c'est ce refus qui a fait echouer la
+      # premiere version de cette tache.
+      #
+      # Ne JAMAIS contourner ce garde-fou avec `--force` : la commande
+      # passerait, et l'agent qui protege les trois sites du VPS perdrait son
+      # mot de passe. Nous n'avons pas besoin de ce fichier : l'agent de la VM
+      # recoit ses identifiants par son environnement Docker.
+      - -f
+      - /dev/null
+  when: mail_antiabus_cs_machine not in (mail_antiabus_cs_machines.stdout | from_json | map(attribute='machineId') | list)
+  changed_when: true
+  no_log: true

@@ -1,0 +1,111 @@
+#!/bin/bash
+# Genere par Ansible (role mail_antiabus). Toute edition manuelle sera ecrasee.
+#
+# ============================================================================
+#  Applique les decisions CrowdSec au port 25
+# ============================================================================
+#  POURQUOI CE SCRIPT EXISTE. Le bouncer pare-feu de CrowdSec ne cree qu'une
+#  chaine, sur le hook `input` :
+#
+#      chain crowdsec-chain-input { type filter hook input priority filter; }
+#
+#  Or rien n'ecoute sur le port 25 du VPS : le paquet est DNAT en prerouting
+#  vers la VM puis FORWARDE. Il ne traverse jamais `input`. Les 82 000
+#  decisions du bouncer sont donc structurellement aveugles au courrier.
+#
+#  POURQUOI UNE TABLE A NOUS. Ajouter une chaine dans la table `crowdsec`
+#  serait plus court, mais le bouncer la recree et la vide a chaque demarrage :
+#  la chaine disparaitrait au premier redemarrage du service. Une table separee
+#  lui est inaccessible, et se retire d'un seul
+#  `nft delete table ip {{ mail_antiabus_nft_table }}`.
+#
+#  QUELLES DECISIONS. Uniquement les LOCALES : celles nees de nos propres
+#  scenarios et les bannissements manuels. JAMAIS la liste communautaire ni les
+#  listes tierces. Elles sont nourries d'attaques HTTP et SSH, et un serveur de
+#  courrier legitime partageant une IP avec un hebergeur compromis s'y trouve
+#  sans avoir rien fait. Un `drop` sur SMTP ne se voit pas : l'expediteur
+#  retente cinq jours, puis rend un rebond a son utilisateur.
+#
+#  POURQUOI L'API ET PAS `cscli`. Premiere version :
+#
+#      docker exec crowdsec cscli decisions list -o json --origin crowdsec
+#
+#  Mesure : plus de 180 s sans repondre, et le playbook bloque avec. `cscli`
+#  ramene manifestement l'ensemble des decisions -- 82 000 ici -- avant de
+#  filtrer. Le point d'entree /v1/decisions, celui que les bouncers utilisent,
+#  filtre cote base : 0,25 s pour le meme resultat. Soit 700 fois plus vite.
+set -euo pipefail
+
+TABLE="{{ mail_antiabus_nft_table }}"
+SET="{{ mail_antiabus_nft_set }}"
+ORIGINES="{{ mail_antiabus_decision_origins }}"
+API="{{ mail_antiabus_lapi_local_url }}"
+FICHIER_CLE="{{ mail_antiabus_bouncer_key_file }}"
+AGENT="{{ mail_antiabus_mail_vm_tunnel_ip }}"
+PORT_API="{{ mail_antiabus_lapi_port }}"
+
+# --- 1. La structure, recreee si elle manque --------------------------------
+# Idempotent et auto-reparateur : un redemarrage de la machine, un
+# `nft flush ruleset` pose par un autre outil, et la minute suivante tout est
+# remonte sans intervention.
+if ! nft list table ip "$TABLE" >/dev/null 2>&1; then
+  nft -f - <<NFT
+table ip $TABLE {
+  set $SET {
+    type ipv4_addr
+    flags interval
+    comment "decisions CrowdSec appliquees au courrier entrant"
+  }
+
+  chain garde_forward {
+    type filter hook forward priority filter - 10; policy accept;
+    ip saddr @$SET tcp dport 25 counter drop
+  }
+
+  chain garde_input {
+    type filter hook input priority filter - 10; policy accept;
+    iifname "wg0" tcp dport $PORT_API ip saddr != $AGENT counter drop
+  }
+}
+NFT
+fi
+
+# --- 2. Les decisions -------------------------------------------------------
+if [ ! -r "$FICHIER_CLE" ]; then
+  echo "mailguard : cle d'API absente ($FICHIER_CLE), rien n'est applique" >&2
+  exit 1
+fi
+CLE="$(cat "$FICHIER_CLE")"
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+# `-m 20` : mieux vaut un cycle manque qu'une minuterie qui s'empile.
+curl -sS -m 20 -H "X-Api-Key: $CLE" \
+  "${API}/v1/decisions?origins=${ORIGINES}" \
+  | python3 -c '
+import json, sys
+brut = sys.stdin.read().strip()
+if not brut or brut == "null":
+    sys.exit(0)
+for d in json.loads(brut):
+    # `scope` vaut "Ip" ou "Range" ; le jeu nftables est en mode interval,
+    # il accepte les deux.
+    if (d.get("scope") or "").lower() in ("ip", "range") and d.get("value"):
+        print(d["value"])
+' > "$tmp"
+
+sort -u -o "$tmp" "$tmp"
+nb=$(wc -l < "$tmp")
+
+# --- 3. Application atomique ------------------------------------------------
+# `flush` puis `add` dans la MEME transaction nft : a aucun instant le jeu n'est
+# vide pour un paquet en cours de traitement.
+{
+  echo "flush set ip $TABLE $SET"
+  if [ "$nb" -gt 0 ]; then
+    printf 'add element ip %s %s { %s }\n' "$TABLE" "$SET" "$(paste -sd, "$tmp")"
+  fi
+} | nft -f -
+
+echo "mailguard : $nb adresse(s) bloquee(s) sur le port 25 (origines : $ORIGINES)"

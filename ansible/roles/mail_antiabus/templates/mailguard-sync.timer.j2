@@ -1,0 +1,14 @@
+# Genere par Ansible (role mail_antiabus). Toute edition manuelle sera ecrasee.
+[Unit]
+Description=Synchronisation periodique des decisions CrowdSec vers le port 25
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec={{ mail_antiabus_sync_interval }}
+# Rattrape le retard si la machine etait eteinte : la table nftables est vide au
+# demarrage, elle doit etre repeuplee sans attendre le prochain top.
+Persistent=true
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+# Genere par Ansible (role mail_antiabus). Toute edition manuelle sera ecrasee.
+[Unit]
+Description=Relais vers l'API locale de CrowdSec
+Requires=crowdsec-lapi-tunnel.socket
+After=crowdsec-lapi-tunnel.socket
+
+[Service]
+ExecStart=/lib/systemd/systemd-socket-proxyd {{ mail_antiabus_lapi_backend }}
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+Restart=on-failure

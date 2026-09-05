@@ -1,0 +1,20 @@
+# Genere par Ansible (role mail_antiabus). Toute edition manuelle sera ecrasee.
+#
+# Source `docker` et non un chemin de fichier : Mailcow journalise sur la sortie
+# standard, et le fichier json-file de Docker porte l'identifiant du conteneur
+# dans son nom. Cet identifiant change a chaque recreation -- une mise a jour de
+# Mailcow suffirait a couper l'analyse en silence. Le nom du conteneur, lui, est
+# stable.
+#
+# `type: syslog` parce que Mailcow prefixe ses lignes a la mode syslog
+# (« Sep  5 17:53:56 <hote> postfix/postscreen[2822]: ... »). C'est ce qui
+# permet a l'analyseur d'extraire le programme, donc a la collection
+# crowdsecurity/postfix de s'appliquer.
+{% for c in mail_antiabus_cs_containers %}
+---
+source: docker
+container_name:
+  - {{ c }}
+labels:
+  type: syslog
+{% endfor %}

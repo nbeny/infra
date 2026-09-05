@@ -1,0 +1,39 @@
+---
+# `restart` et non `up -d` : c'est l'entrypoint du conteneur qui fusionne
+# extra.cf dans main.cf, et il ne s'execute qu'au demarrage. Un `up -d` sans
+# changement dans la composition Docker ne recreerait rien du tout.
+- name: Redemarrer Postfix
+  ansible.builtin.command:
+    cmd: docker compose restart postfix-mailcow
+    chdir: "{{ mail_antiabus_mailcow_dir }}"
+  changed_when: true
+
+- name: Redemarrer l'agent CrowdSec
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate
+    chdir: "{{ mail_antiabus_cs_dir }}"
+  changed_when: true
+
+- name: Recharger systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Relancer le relais de l'API CrowdSec
+  ansible.builtin.systemd_service:
+    name: crowdsec-lapi-tunnel.socket
+    state: restarted
+    daemon_reload: true
+
+- name: Resynchroniser les decisions
+  ansible.builtin.systemd_service:
+    name: mailguard-sync.service
+    state: restarted
+    daemon_reload: true
+
+# `docker restart` et non `docker compose restart` : la composition appartient
+# au projet /docker/crowdsec, qui n'est pas le notre. On redemarre le conteneur
+# sans toucher a son fichier.
+- name: Redemarrer CrowdSec sur le VPS
+  ansible.builtin.command:
+    cmd: docker restart {{ mail_antiabus_cs_container }}
+  changed_when: true

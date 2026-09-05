@@ -1,0 +1,14 @@
+# Genere par Ansible (role mail_antiabus). Toute edition manuelle sera ecrasee.
+[Unit]
+Description=API locale CrowdSec, republiee sur le tunnel de la messagerie
+
+[Socket]
+ListenStream={{ mail_antiabus_lapi_listen }}:{{ mail_antiabus_lapi_port }}
+# FreeBind permet de se lier a une adresse qui n'existe pas encore. Sans lui,
+# le socket echouerait au demarrage tant que wg0 n'est pas monte, et il
+# faudrait ordonnancer ce service apres wg-quick -- une dependance de plus pour
+# rien.
+FreeBind=true
+
+[Install]
+WantedBy=sockets.target

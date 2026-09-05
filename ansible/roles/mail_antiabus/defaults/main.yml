@@ -1,0 +1,160 @@
+---
+# ============================================================================
+#  Protection anti-abus de la messagerie
+# ----------------------------------------------------------------------------
+#  Ce role ne duplique RIEN de ce que Mailcow fait deja bien. Audit du
+#  2026-09-05, sur l'installation reelle :
+#
+#    postscreen           ACTIF sur le 25, ~20 listes noires, seuil 6, `enforce`
+#                         -> a deja rejete le seul attaquant reel
+#    smtpd_hard_error_limit    5 (defaut Postfix : 20)
+#    smtpd_soft_error_limit    3 (defaut : 10)
+#    smtpd_error_sleep_time   10s (defaut : 1s)
+#    disable_vrfy_command     yes
+#    reject_unauth_pipelining actif
+#    Rspamd               listes noires, greylisting, SPF/DKIM/DMARC, bayes
+#    Fail2ban Mailcow     9 expressions, bannissement incrementiel
+#
+#  Trois trous seulement, et ce role les comble :
+#
+#    1. Les trois compteurs de debit de Postfix sont a ZERO, donc illimites.
+#    2. Fail2ban ne reconnait AUCUN motif de moissonnage d'adresses.
+#    3. CrowdSec tourne sur le VPS mais ne filtre que sur le hook `input` ;
+#       le port 25 est DNAT puis FORWARDE, il ne le traverse jamais.
+#
+#  Ce que ce role NE fait PAS, deliberement :
+#
+#    * pas de tests protocolaires approfondis de postscreen
+#      (`postscreen_pipelining_enable` et consorts). Ils imposent une
+#      re-connexion, donc un differe sur le PREMIER courrier de tout nouvel
+#      expediteur legitime. Le cout en delivrabilite entrante depasse le gain.
+#    * pas de `reject_unknown_reverse_client_hostname`. Beaucoup de petits
+#      expediteurs legitimes n'ont pas de rDNS valide ; Rspamd score deja ce
+#      signal au lieu de rejeter sec.
+#    * pas de limites Rspamd : elles feraient doublon avec les compteurs anvil
+#      de Postfix, poses ici, qui agissent plus tot et pour moins cher.
+#    * la liste communautaire de CrowdSec n'est JAMAIS appliquee au port 25.
+#      Verifie : l'attaquant SMTP observe n'y figurait pas, et un MTA legitime
+#      partageant une IP avec un hebergeur compromis y figurerait. Un `drop`
+#      sur SMTP se traduit par un differe de cinq jours puis un rebond, sans
+#      que personne ne le voie.
+# ============================================================================
+
+# --- 1. Compteurs de debit Postfix ------------------------------------------
+# Par IP CLIENTE et par tranche de 60 s (anvil_rate_time_unit). En depassement
+# Postfix repond « 450 4.7.1 » : un differe, pas un rejet. Un expediteur
+# legitime retente et passe -- on ne perd pas de courrier.
+mail_antiabus_smtpd_connection_rate_limit: 30
+mail_antiabus_smtpd_message_rate_limit: 60
+mail_antiabus_smtpd_recipient_rate_limit: 60
+mail_antiabus_smtpd_tls_session_rate_limit: 30
+
+# Nos appareils nomades arrivent par le tunnel et ouvrent plusieurs connexions
+# simultanees. Exempter du COMPTAGE n'accorde aucun droit de relais : le relais
+# se decide par `mynetworks`, qu'on ne touche pas.
+mail_antiabus_rate_limit_exempt: "10.88.0.0/16"
+
+# --- 2. Fail2ban de Mailcow -------------------------------------------------
+# Bannissement porte de 30 min a 1 h, plafond de 2 h 45 a 24 h. L'increment
+# etant deja actif, un recidiviste atteint vite le plafond ; le relever est ce
+# qui separe un cout de quelques minutes d'un cout d'une journee.
+mail_antiabus_f2b_ban_time: 3600
+mail_antiabus_f2b_max_ban_time: 86400
+# 10 tentatives en 600 s : inchange. Descendre plus bas ferait bannir un
+# utilisateur legitime qui se trompe de mot de passe trois fois de suite.
+mail_antiabus_f2b_max_attempts: 10
+mail_antiabus_f2b_retry_window: 600
+
+# Expressions AJOUTEES a celles de Mailcow, jamais en remplacement.
+#
+# Le groupe de capture doit etre l'adresse IP, et lui seul : c'est le contrat
+# de l'analyseur de Mailcow.
+#
+# `[^\[]*\[` avant l'IP couvre les DEUX formats du journal : postscreen ecrit
+# « RCPT from [1.2.3.4]:25 », smtpd ecrit « RCPT from hote[1.2.3.4]:25 ».
+mail_antiabus_f2b_extra_regex:
+  # Moissonnage d'annuaire : sondage d'adresses une a une. C'est le motif
+  # d'attaque le plus courant sur un MX, et aucune expression de Mailcow ne le
+  # reconnaissait.
+  - 'NOQUEUE: reject: RCPT from [^\[]*\[([0-9a-f\.:]+)\]:[0-9]+: 5[0-9][0-9] '
+  # Violation de pre-salutation : le client parle avant la banniere. Aucun
+  # client legitime ne fait ca -- c'est la signature d'un robot spammeur.
+  - 'postscreen\[[0-9]+\]: PREGREET [0-9]+ after [0-9\.]+ from \[([0-9a-f\.:]+)\]'
+  # Depassement des limites de commande de postscreen. Le groupe est NON
+  # CAPTURANT -- `(?:...)` et non `(...)`. L'analyseur de Mailcow prend
+  # `result.group(1)` comme adresse IP (data/Dockerfiles/netfilter/main.py:271) :
+  # un groupe capturant en tete lui ferait bannir la chaine « TIME ».
+  - 'postscreen\[[0-9]+\]: COMMAND (?:TIME|COUNT|LENGTH) LIMIT from \[([0-9a-f\.:]+)\]'
+
+# Nos propres reseaux ne doivent jamais pouvoir etre bannis. Un appareil nomade
+# qui se trompe de mot de passe ne doit pas se couper du serveur : il arrive par
+# le tunnel, il est deja authentifie cryptographiquement.
+mail_antiabus_f2b_whitelist: "10.88.0.0/16"
+
+# --- 3. CrowdSec ------------------------------------------------------------
+# Nom de la machine agent aupres de l'API locale de CrowdSec, sur le VPS.
+mail_antiabus_cs_machine: mail-vm
+mail_antiabus_cs_secret_dir: /root/.secrets
+mail_antiabus_cs_password_file: "{{ mail_antiabus_cs_secret_dir }}/crowdsec-mail-agent.pw"
+
+# L'API locale de CrowdSec n'ecoute que sur 127.0.0.1 dans le conteneur du VPS.
+# On ne touche PAS a sa composition Docker -- elle protege trois sites en
+# production. Un relais de socket systemd la republie sur l'adresse du tunnel :
+# additif, reversible, et sans redemarrer CrowdSec.
+mail_antiabus_lapi_listen: "10.88.0.1"
+mail_antiabus_lapi_port: 8080
+mail_antiabus_lapi_backend: "127.0.0.1:8080"
+
+# Repertoire du conteneur agent, sur la VM.
+mail_antiabus_cs_dir: /opt/crowdsec-mail
+# La version DOIT rester compatible avec le moteur du VPS, qui est en v1.7.8.
+# Un agent trop ancien se voit refuser l'enregistrement par l'API.
+mail_antiabus_cs_image: "crowdsecurity/crowdsec:v1.7.8"
+mail_antiabus_timezone: "Europe/Paris"
+# Collections reellement utiles ici. `dovecot` n'a pas ete retenu : submission
+# et IMAP ne sont pas exposes sur Internet, il n'y a pas de mot de passe a
+# forcer depuis l'exterieur.
+mail_antiabus_cs_collections: "crowdsecurity/postfix"
+
+# Conteneurs Mailcow dont les journaux sont analyses.
+mail_antiabus_cs_containers:
+  - "{{ mail_antiabus_postfix_container }}"
+
+# --- 4. Application des decisions sur le port 25 ----------------------------
+# Table nftables qui nous appartient, DISTINCTE de celle du bouncer CrowdSec.
+# C'est deliberé : le bouncer recree et vide la sienne a chaque demarrage, une
+# chaine ajoutee dedans ne survivrait pas. Une table separee est intouchable
+# par lui, et le jour ou l'on retire tout, un `nft delete table` suffit.
+mail_antiabus_nft_table: mailguard
+mail_antiabus_nft_set: mail_blocked
+
+# Seules les decisions LOCALES sont appliquees au courrier : celles nees de nos
+# propres scenarios (`crowdsec`) et les bannissements manuels (`cscli`). Jamais
+# `CAPI` ni les listes `lists:*`, pour la raison expliquee en tete de fichier.
+mail_antiabus_decision_origins: "crowdsec,cscli"
+
+# On s'enregistre comme un vrai bouncer aupres de CrowdSec plutot que d'appeler
+# `cscli`. Ce n'est pas une preference de style : `cscli decisions list
+# --origin` a mis plus de 180 s sans repondre sur cette base de 82 000
+# decisions, la ou /v1/decisions rend le meme resultat en 0,25 s.
+mail_antiabus_bouncer_name: mailguard
+mail_antiabus_bouncer_key_file: /etc/mailguard/api.key
+# L'API est publiee par le conteneur CrowdSec sur la boucle locale du VPS.
+mail_antiabus_lapi_local_url: "http://127.0.0.1:8080"
+
+# Toutes les 60 s. Les decisions ont une duree de vie de plusieurs heures ; une
+# minute de latence a l'application ne change rien, et evite de marteler l'API.
+mail_antiabus_sync_interval: "60s"
+
+# Nom du conteneur CrowdSec deja en place sur le VPS. On ne fait que l'appeler.
+mail_antiabus_cs_container: crowdsec
+# Configuration du CrowdSec du VPS, dans son volume Docker. Le seul fichier de
+# leur installation que ce role touche, et pour un seul reglage.
+mail_antiabus_cs_vps_config: /var/lib/docker/volumes/crowdsec_crowdsec-config/_data/config.yaml
+# Adresse de la VM dans le tunnel : seule autorisee a joindre l'API republiee.
+mail_antiabus_mail_vm_tunnel_ip: "10.88.0.2"
+
+# --- Chemins Mailcow, pour decoupler ce role du role `mailcow` --------------
+mail_antiabus_mailcow_dir: /opt/mailcow-dockerized
+mail_antiabus_mailcow_http_port: 8080
+mail_antiabus_postfix_container: mailcowdockerized-postfix-mailcow-1

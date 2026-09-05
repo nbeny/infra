@@ -1,0 +1,176 @@
+---
+# ============================================================================
+#  Fail2ban de Mailcow : lui apprendre le moissonnage d'annuaire
+# ----------------------------------------------------------------------------
+#  Mailcow livre neuf expressions. Elles couvrent bien l'authentification --
+#  SASL, Dovecot, l'interface, SOGo -- mais AUCUNE ne reconnait le sondage
+#  d'adresses, qui est pourtant le motif d'attaque le plus courant sur un MX
+#  ouvert. On ajoute les notres a la suite des siennes, jamais en remplacement.
+#
+#  On passe par son API plutot que par Redis en direct : c'est le chemin
+#  supporte, et il declenche la relecture par le conteneur netfilter.
+#
+#  DEUX PIEGES, verifies dans le code de Mailcow :
+#
+#  * `edit-regex` REMPLACE la liste entiere et la renumerote a partir de 1
+#    (functions.fail2ban.inc.php:131). Il faut donc reposter les neuf
+#    expressions d'origine en plus des notres.
+#  * La branche des reglages generaux SUPPRIME F2B_WHITELIST et F2B_BLACKLIST
+#    puis les reconstruit depuis le corps de la requete. Omettre `whitelist`
+#    reviendrait a la vider.
+# ============================================================================
+
+- name: Relire la cle d'API de Mailcow
+  ansible.builtin.slurp:
+    src: "{{ mail_antiabus_mailcow_dir }}/.api-key"
+  register: mail_antiabus_api_raw
+  no_log: true
+
+- name: Memoriser la cle d'API
+  ansible.builtin.set_fact:
+    mail_antiabus_api_key: "{{ mail_antiabus_api_raw.content | b64decode | trim }}"
+  no_log: true
+
+- name: Relever la configuration Fail2ban actuelle
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mail_antiabus_mailcow_http_port }}/api/v1/get/fail2ban"
+    headers:
+      X-API-Key: "{{ mail_antiabus_api_key }}"
+    return_content: true
+  register: mail_antiabus_f2b_now
+  changed_when: false
+  no_log: true
+
+# Les cles du dictionnaire renvoye sont des chaines « 1 » a « 9 ». Les trier en
+# tant que chaines placerait « 10 » avant « 2 » et melangerait l'ordre a chaque
+# execution, ce qui ferait croire a un changement. D'ou le passage par `int`.
+- name: Ordonner les expressions existantes
+  ansible.builtin.set_fact:
+    mail_antiabus_f2b_regex_now: >-
+      {{ mail_antiabus_f2b_now.json.regex.keys() | map('int') | sort
+         | map('string') | map('extract', mail_antiabus_f2b_now.json.regex) | list }}
+
+# `reject('in', ...)` preserve l'ordre de la liste d'origine, contrairement a
+# `union` et `difference` qui passent par des ensembles : leur sortie varie
+# d'une execution a l'autre et casserait l'idempotence.
+- name: Calculer la liste d'expressions voulue
+  ansible.builtin.set_fact:
+    mail_antiabus_f2b_regex_target: >-
+      {{ mail_antiabus_f2b_regex_now
+         + (mail_antiabus_f2b_extra_regex | reject('in', mail_antiabus_f2b_regex_now) | list) }}
+
+- name: Ajouter les expressions manquantes
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mail_antiabus_mailcow_http_port }}/api/v1/edit/fail2ban"
+    method: POST
+    headers:
+      X-API-Key: "{{ mail_antiabus_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      items: ["none"]
+      attr:
+        action: edit-regex
+        regex: "{{ mail_antiabus_f2b_regex_target }}"
+    return_content: true
+  register: mail_antiabus_f2b_regex_post
+  when: mail_antiabus_f2b_regex_target != mail_antiabus_f2b_regex_now
+  # Le module `uri` ne remonte JAMAIS `changed` : il n'a aucun moyen de savoir
+  # ce que le serveur a fait. Le `when` ci-dessus ayant deja etabli qu'il y a un
+  # ecart, l'execution de cette tache EST le changement.
+  changed_when: true
+  failed_when: >-
+    mail_antiabus_f2b_regex_post is failed or
+    (mail_antiabus_f2b_regex_post.json is defined and
+     mail_antiabus_f2b_regex_post.json | selectattr('type', 'ne', 'success') | list | length > 0)
+
+- name: Allonger les bannissements et proteger nos reseaux
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mail_antiabus_mailcow_http_port }}/api/v1/edit/fail2ban"
+    method: POST
+    headers:
+      X-API-Key: "{{ mail_antiabus_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      items: ["none"]
+      attr:
+        ban_time: "{{ mail_antiabus_f2b_ban_time }}"
+        max_ban_time: "{{ mail_antiabus_f2b_max_ban_time }}"
+        # A passer explicitement, et en CHAINE « 1 » : Mailcow teste
+        # `$_data['ban_time_increment'] == "1"`. L'omettre desactiverait le
+        # bannissement incrementiel, qui est la moitie de l'interet du dispositif.
+        ban_time_increment: "1"
+        max_attempts: "{{ mail_antiabus_f2b_max_attempts }}"
+        retry_window: "{{ mail_antiabus_f2b_retry_window }}"
+        netban_ipv4: "{{ mail_antiabus_f2b_now.json.netban_ipv4 }}"
+        netban_ipv6: "{{ mail_antiabus_f2b_now.json.netban_ipv6 }}"
+        whitelist: "{{ mail_antiabus_f2b_whitelist }}"
+        blacklist: "{{ mail_antiabus_f2b_now.json.blacklist }}"
+        manage_external: "{{ mail_antiabus_f2b_now.json.manage_external }}"
+    return_content: true
+  register: mail_antiabus_f2b_opts_post
+  changed_when: true
+  when: >-
+    mail_antiabus_f2b_now.json.ban_time != mail_antiabus_f2b_ban_time or
+    mail_antiabus_f2b_now.json.max_ban_time != mail_antiabus_f2b_max_ban_time or
+    mail_antiabus_f2b_now.json.max_attempts != mail_antiabus_f2b_max_attempts or
+    mail_antiabus_f2b_now.json.retry_window != mail_antiabus_f2b_retry_window or
+    mail_antiabus_f2b_now.json.whitelist != mail_antiabus_f2b_whitelist
+
+# ---------------------------------------------------------------------------
+#  Verification
+# ---------------------------------------------------------------------------
+- name: Relire la configuration Fail2ban
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mail_antiabus_mailcow_http_port }}/api/v1/get/fail2ban"
+    headers:
+      X-API-Key: "{{ mail_antiabus_api_key }}"
+    return_content: true
+  register: mail_antiabus_f2b_after
+  changed_when: false
+  no_log: true
+
+- name: Exiger que les expressions et les reglages soient en place
+  ansible.builtin.assert:
+    that:
+      - mail_antiabus_f2b_after.json.regex.values() | list | length == mail_antiabus_f2b_regex_target | length
+      - mail_antiabus_f2b_extra_regex | difference(mail_antiabus_f2b_after.json.regex.values() | list) | length == 0
+      - mail_antiabus_f2b_after.json.ban_time == mail_antiabus_f2b_ban_time
+      - mail_antiabus_f2b_after.json.max_ban_time == mail_antiabus_f2b_max_ban_time
+      # Le point le plus facile a perdre par inadvertance.
+      - mail_antiabus_f2b_after.json.ban_time_increment | bool
+      - mail_antiabus_f2b_after.json.whitelist == mail_antiabus_f2b_whitelist
+    fail_msg: >-
+      Fail2ban n'a pas la configuration attendue :
+      {{ mail_antiabus_f2b_after.json.regex | length }} expressions,
+      ban_time={{ mail_antiabus_f2b_after.json.ban_time }},
+      increment={{ mail_antiabus_f2b_after.json.ban_time_increment }}.
+    success_msg: >-
+      Fail2ban : {{ mail_antiabus_f2b_after.json.regex | length }} expressions,
+      bannissement {{ mail_antiabus_f2b_ban_time }}s a
+      {{ mail_antiabus_f2b_max_ban_time }}s, incrementiel
+    quiet: true
+
+# ---------------------------------------------------------------------------
+#  Les expressions sont-elles VRAIES ?
+# ---------------------------------------------------------------------------
+#  Une expression stockee n'est pas une expression qui fonctionne. Celle des
+#  limites de commande portait au depart un groupe capturant `(TIME|COUNT|...)`
+#  en tete : elle etait acceptee sans broncher, et aurait fait bannir la chaine
+#  « TIME » au lieu d'une adresse IP.
+#
+#  Le test tourne sur le CONTROLEUR : il ne confronte que des chaines a des
+#  expressions, il n'a rien a faire sur la VM.
+- name: Confronter les expressions a de vraies lignes de journal
+  ansible.builtin.script:
+    cmd: "tester-regex-f2b.py {{ mail_antiabus_f2b_extra_regex | to_json | quote }}"
+    executable: python3
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: mail_antiabus_f2b_selftest
+
+- name: Afficher le resultat du test des expressions
+  ansible.builtin.debug:
+    msg: "{{ mail_antiabus_f2b_selftest.stdout | trim }}"

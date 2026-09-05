@@ -1,0 +1,60 @@
+myhostname = {{ mail_antiabus_mailcow_hostname }}
+# Genere par Ansible (role mailcow). Toute edition manuelle sera ecrasee.
+#
+# Ce fichier est le point d'extension prevu par Mailcow pour main.cf :
+# data/Dockerfiles/postfix/postfix.sh l'ajoute a la fin de main.cf au demarrage
+# du conteneur, et data/conf/postfix/extra.cf figure dans son .gitignore
+# (ligne 37). Une mise a jour ne l'emporte donc pas.
+#
+# ATTENTION A LA PREMIERE LIGNE. Le script de demarrage supprime toute ligne
+# nommant l'hote puis la reinjecte en tete. Si elle n'etait pas deja la, le
+# conteneur reecrirait le fichier a chaque demarrage et Ansible le verrait
+# eternellement « changed ». Le fichier doit aussi se terminer par un unique
+# saut de ligne : la substitution de commande du script mange les lignes vides
+# finales.
+#
+# ---------------------------------------------------------------------------
+#  LIMITES DE DEBIT
+# ---------------------------------------------------------------------------
+#  Les trois compteurs ci-dessous etaient a 0, c'est-a-dire ILLIMITES : un seul
+#  client pouvait ouvrir autant de connexions et sonder autant d'adresses qu'il
+#  voulait. C'est la porte ouverte au moissonnage d'adresses et au flood.
+#
+#  postscreen filtre deja en amont, mais sur la REPUTATION : il ne connait que
+#  les adresses deja listees chez Spamhaus, Barracuda et consorts. Une IP encore
+#  inconnue passe. Ces limites, elles, portent sur le COMPORTEMENT et n'ont
+#  besoin de connaitre personne.
+#
+#  Le mode d'echec est volontairement doux. En depassement, Postfix repond
+#  « 450 4.7.1 Error: too much mail from... » : un differe, pas un rejet. Un
+#  expediteur legitime qui toucherait la limite retenterait et passerait. On ne
+#  perd pas de courrier.
+#
+#  Ces valeurs sont larges au regard du volume d'un domaine de quelques boites.
+#  Les compteurs sont par IP CLIENTE et par tranche de 60 s (anvil_rate_time_unit).
+
+# 30 connexions par minute et par IP. Un gros expediteur comme Google repartit
+# ses envois sur de nombreuses adresses, chacune n'ouvrant que peu de
+# connexions : la limite ne le gene pas.
+smtpd_client_connection_rate_limit = {{ mail_antiabus_smtpd_connection_rate_limit }}
+
+# 60 messages par minute et par IP.
+smtpd_client_message_rate_limit = {{ mail_antiabus_smtpd_message_rate_limit }}
+
+# 60 destinataires par minute et par IP -- LA protection contre le moissonnage.
+# Un annuaire se sonde adresse par adresse ; ce compteur rend l'operation
+# couteuse. Pour un domaine de quelques boites, aucun expediteur honnete
+# n'approche ce chiffre.
+smtpd_client_recipient_rate_limit = {{ mail_antiabus_smtpd_recipient_rate_limit }}
+
+# 30 negociations TLS neuves par minute et par IP. Sans ce compteur, une
+# poignee de clients peut saturer le processeur en renegociant en boucle.
+smtpd_client_new_tls_session_rate_limit = {{ mail_antiabus_smtpd_tls_session_rate_limit }}
+
+# Nos propres appareils sont hors comptage. Ils arrivent par le tunnel
+# WireGuard, pas depuis Internet, et un client de messagerie ouvre facilement
+# plusieurs connexions simultanees -- IMAP, envoi, carnet d'adresses.
+#
+# Ceci n'accorde AUCUN droit de relais : le relais se decide par `mynetworks`,
+# qui n'est pas touche. Cette directive ne fait qu'exempter du comptage anvil.
+smtpd_client_event_limit_exceptions = $mynetworks, {{ mail_antiabus_rate_limit_exempt }}

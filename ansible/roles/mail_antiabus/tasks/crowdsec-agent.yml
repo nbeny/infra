@@ -1,0 +1,102 @@
+---
+# ============================================================================
+#  Agent CrowdSec sur la VM de messagerie
+# ----------------------------------------------------------------------------
+#  L'agent LIT les journaux ici, ou ils sont, et envoie ses decisions a l'API
+#  portee par le VPS, ou le trafic entre. C'est le decoupage natif de CrowdSec
+#  en multi-machine, et il tombe juste : la detection a besoin des journaux,
+#  l'application a besoin d'etre au plus tot sur le chemin.
+#
+#  Aucune API locale ici (`DISABLE_LOCAL_API`) : une seule source de verite.
+# ============================================================================
+
+- name: Creer le repertoire de l'agent
+  ansible.builtin.file:
+    path: "{{ mail_antiabus_cs_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deposer la source de journaux
+  ansible.builtin.template:
+    src: crowdsec-acquis.yaml.j2
+    dest: "{{ mail_antiabus_cs_dir }}/acquis.yaml"
+    mode: "0644"
+  notify: Redemarrer l'agent CrowdSec
+
+- name: Deposer la composition de l'agent
+  ansible.builtin.template:
+    src: crowdsec-compose.yml.j2
+    dest: "{{ mail_antiabus_cs_dir }}/docker-compose.yml"
+    mode: "0600"
+  notify: Redemarrer l'agent CrowdSec
+
+- name: Demarrer l'agent
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ mail_antiabus_cs_dir }}"
+  register: mail_antiabus_cs_up
+  changed_when: "'Started' in mail_antiabus_cs_up.stderr or 'Created' in mail_antiabus_cs_up.stderr"
+
+- name: Appliquer avant de verifier
+  ansible.builtin.meta: flush_handlers
+
+# ---------------------------------------------------------------------------
+#  Verification : l'agent parle-t-il vraiment a l'API du VPS ?
+# ---------------------------------------------------------------------------
+#  Un conteneur « Up » ne prouve rien : il peut tourner en boucle d'erreur
+#  d'authentification sans que docker s'en emeuve. On exige que l'API du VPS le
+#  voie, et qu'il ait valide son enregistrement.
+- name: Attendre que l'API du VPS voie l'agent
+  ansible.builtin.command:
+    cmd: docker exec crowdsec cscli machines list -o json
+  delegate_to: "{{ groups['edge_nodes'] | first }}"
+  register: mail_antiabus_cs_seen
+  changed_when: false
+  retries: 12
+  delay: 10
+  until: >-
+    mail_antiabus_cs_seen is succeeded and
+    mail_antiabus_cs_machine in (mail_antiabus_cs_seen.stdout | from_json | map(attribute='machineId') | list)
+
+- name: Exiger que l'agent soit valide et actif
+  ansible.builtin.assert:
+    that:
+      - agent is defined
+      - agent.isValidated | default(false) | bool
+    fail_msg: >-
+      L'agent {{ mail_antiabus_cs_machine }} est connu de l'API mais non valide.
+      Le mot de passe de {{ mail_antiabus_cs_password_file }} ne correspond
+      probablement plus a celui enregistre cote VPS.
+    success_msg: "agent {{ mail_antiabus_cs_machine }} valide aupres de l'API du VPS"
+    quiet: true
+  vars:
+    agent: >-
+      {{ (mail_antiabus_cs_seen.stdout | from_json
+          | selectattr('machineId', 'eq', mail_antiabus_cs_machine) | list | first) | default({}) }}
+
+# `cscli metrics` interroge l'API : sur un agent qui n'en heberge pas, sa forme
+# varie d'une version a l'autre. On lit plutot le journal de l'agent, ou la
+# confirmation d'abonnement est explicite et stable -- et c'est bien la question
+# posee : voit-il le conteneur Postfix ?
+- name: Verifier que l'agent lit vraiment les journaux de Postfix
+  ansible.builtin.shell:
+    cmd: "docker logs crowdsec-mail 2>&1 | grep -c 'connected to container logs' || true"
+  register: mail_antiabus_cs_abonne
+  changed_when: false
+  retries: 10
+  delay: 10
+  until: mail_antiabus_cs_abonne.stdout | int > 0
+
+- name: Exiger l'abonnement a chaque conteneur surveille
+  ansible.builtin.assert:
+    that:
+      - mail_antiabus_cs_abonne.stdout | int >= mail_antiabus_cs_containers | length
+    fail_msg: >-
+      L'agent n'est abonne qu'a {{ mail_antiabus_cs_abonne.stdout | trim }}
+      conteneur(s) sur {{ mail_antiabus_cs_containers | length }} attendu(s).
+      Il tourne, mais il ne voit rien -- exactement la panne que ce role doit
+      eviter.
+    success_msg: >-
+      agent abonne aux journaux de
+      {{ mail_antiabus_cs_containers | join(', ') }}
+    quiet: true

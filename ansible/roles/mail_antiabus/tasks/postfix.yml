@@ -1,0 +1,87 @@
+---
+# ============================================================================
+#  Compteurs de debit Postfix
+# ----------------------------------------------------------------------------
+#  Le seul vrai trou du parametrage livre par Mailcow. Les trois compteurs
+#  etaient a 0 -- illimites : une IP pouvait ouvrir autant de connexions et
+#  sonder autant d'adresses qu'elle voulait, indefiniment.
+#
+#  postscreen filtre en amont, mais sur la REPUTATION. Il ne connait que les
+#  adresses deja listees chez Spamhaus ou Barracuda ; une IP encore inconnue
+#  passe. Ces compteurs, eux, portent sur le COMPORTEMENT.
+# ============================================================================
+
+# Le nom d'hote doit etre repris tel quel en tete de extra.cf (voir le gabarit).
+# On le lit dans mailcow.conf plutot que de le redeclarer : une seule source de
+# verite, et ce role reste independant du role `mailcow`.
+- name: Relever le nom d'hote de Mailcow
+  ansible.builtin.shell:
+    cmd: "set -o pipefail && grep -E '^MAILCOW_HOSTNAME=' {{ mail_antiabus_mailcow_dir }}/mailcow.conf | cut -d= -f2-"
+    executable: /bin/bash
+  register: mail_antiabus_hostname_raw
+  changed_when: false
+
+- name: Memoriser le nom d'hote
+  ansible.builtin.set_fact:
+    mail_antiabus_mailcow_hostname: "{{ mail_antiabus_hostname_raw.stdout | trim }}"
+
+- name: Exiger un nom d'hote non vide
+  ansible.builtin.assert:
+    that:
+      - mail_antiabus_mailcow_hostname | length > 0
+    fail_msg: >-
+      MAILCOW_HOSTNAME est introuvable dans
+      {{ mail_antiabus_mailcow_dir }}/mailcow.conf. Ecrire extra.cf sans cette
+      ligne ferait reecrire le fichier par le conteneur a chaque demarrage.
+    quiet: true
+
+- name: Poser les compteurs de debit
+  ansible.builtin.template:
+    src: postfix-extra.cf.j2
+    dest: "{{ mail_antiabus_mailcow_dir }}/data/conf/postfix/extra.cf"
+    mode: "0644"
+  notify: Redemarrer Postfix
+
+# ---------------------------------------------------------------------------
+#  Verification -- extra.cf sur le disque ne prouve rien
+# ---------------------------------------------------------------------------
+#  Le fichier n'est fusionne dans main.cf qu'au demarrage du conteneur. On lit
+#  donc la configuration EFFECTIVE de Postfix, pas le fichier source.
+- name: Appliquer avant de verifier
+  ansible.builtin.meta: flush_handlers
+
+- name: Relever la configuration effective de Postfix
+  ansible.builtin.shell:
+    cmd: >-
+      docker exec {{ mail_antiabus_postfix_container }}
+      postconf -h smtpd_client_connection_rate_limit smtpd_client_message_rate_limit
+      smtpd_client_recipient_rate_limit smtpd_client_new_tls_session_rate_limit
+  register: mail_antiabus_postconf
+  changed_when: false
+  # L'attente porte sur les VALEURS, pas sur le succes de la commande. C'est la
+  # difference qui compte : `postconf` repond immediatement apres un
+  # `docker compose restart`, mais l'entrypoint n'a pas encore fusionne extra.cf
+  # dans main.cf a ce moment-la. Attendre le seul succes de la commande faisait
+  # lire quatre zeros et echouer a tort. Constate le 2026-09-05.
+  retries: 15
+  delay: 6
+  until:
+    - mail_antiabus_postconf is succeeded
+    - mail_antiabus_postconf.stdout_lines | length == 4
+    - mail_antiabus_postconf.stdout_lines[0] | int == mail_antiabus_smtpd_connection_rate_limit
+    - mail_antiabus_postconf.stdout_lines[1] | int == mail_antiabus_smtpd_message_rate_limit
+    - mail_antiabus_postconf.stdout_lines[2] | int == mail_antiabus_smtpd_recipient_rate_limit
+    - mail_antiabus_postconf.stdout_lines[3] | int == mail_antiabus_smtpd_tls_session_rate_limit
+
+- name: Exiger que les compteurs soient reellement en place
+  ansible.builtin.assert:
+    that:
+      - mail_antiabus_postconf.stdout_lines[0] | int == mail_antiabus_smtpd_connection_rate_limit
+      - mail_antiabus_postconf.stdout_lines[1] | int == mail_antiabus_smtpd_message_rate_limit
+      - mail_antiabus_postconf.stdout_lines[2] | int == mail_antiabus_smtpd_recipient_rate_limit
+      - mail_antiabus_postconf.stdout_lines[3] | int == mail_antiabus_smtpd_tls_session_rate_limit
+    fail_msg: >-
+      Postfix tourne avec {{ mail_antiabus_postconf.stdout_lines }} au lieu des
+      valeurs attendues. extra.cf n'a pas ete fusionne dans main.cf.
+    success_msg: "compteurs de debit actifs : {{ mail_antiabus_postconf.stdout_lines | join(', ') }}"
+    quiet: true

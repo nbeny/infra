@@ -1,0 +1,121 @@
+---
+# ============================================================================
+#  Application des decisions sur le port 25
+# ----------------------------------------------------------------------------
+#  Le chainon manquant : CrowdSec detecte (agent sur la VM), l'API arbitre
+#  (VPS), et c'est ici que la decision devient un paquet jete -- avant le
+#  tunnel, donc avant de couter quoi que ce soit a la liaison domestique.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+#  Cle d'API du bouncer
+# ---------------------------------------------------------------------------
+#  On s'enregistre comme un vrai bouncer plutot que d'appeler `cscli`. Ce n'est
+#  pas qu'une question de forme : `cscli decisions list --origin` a mis plus de
+#  180 s sans repondre sur cette base de 82 000 decisions, alors que le point
+#  d'entree /v1/decisions rend le meme resultat en 0,25 s.
+- name: Creer le repertoire de mailguard
+  ansible.builtin.file:
+    path: "{{ mail_antiabus_bouncer_key_file | dirname }}"
+    state: directory
+    mode: "0700"
+
+- name: Verifier si la cle du bouncer existe
+  ansible.builtin.stat:
+    path: "{{ mail_antiabus_bouncer_key_file }}"
+  register: mail_antiabus_bouncer_key
+
+- name: Enregistrer le bouncer et conserver sa cle
+  when: not mail_antiabus_bouncer_key.stat.exists
+  block:
+    # Un bouncer du meme nom peut subsister d'une installation precedente dont
+    # la cle a ete perdue. CrowdSec refuserait alors de le recreer.
+    - name: Retirer un bouncer homonyme orphelin
+      ansible.builtin.command:
+        cmd: docker exec {{ mail_antiabus_cs_container }} cscli bouncers delete {{ mail_antiabus_bouncer_name }}
+      register: mail_antiabus_bouncer_del
+      changed_when: mail_antiabus_bouncer_del.rc == 0
+      failed_when: false
+
+    - name: Enregistrer le bouncer
+      ansible.builtin.command:
+        cmd: docker exec {{ mail_antiabus_cs_container }} cscli bouncers add {{ mail_antiabus_bouncer_name }} -o raw
+      register: mail_antiabus_bouncer_add
+      changed_when: true
+      no_log: true
+
+    - name: Conserver la cle
+      ansible.builtin.copy:
+        content: "{{ mail_antiabus_bouncer_add.stdout_lines | last | trim }}"
+        dest: "{{ mail_antiabus_bouncer_key_file }}"
+        mode: "0600"
+      no_log: true
+
+- name: Deposer le synchroniseur
+  ansible.builtin.template:
+    src: mailguard-sync.sh.j2
+    dest: /usr/local/sbin/mailguard-sync.sh
+    mode: "0755"
+  notify: Resynchroniser les decisions
+
+- name: Deposer le service de synchronisation
+  ansible.builtin.template:
+    src: mailguard-sync.service.j2
+    dest: /etc/systemd/system/mailguard-sync.service
+    mode: "0644"
+  notify: Recharger systemd
+
+- name: Deposer la minuterie de synchronisation
+  ansible.builtin.template:
+    src: mailguard-sync.timer.j2
+    dest: /etc/systemd/system/mailguard-sync.timer
+    mode: "0644"
+  notify: Recharger systemd
+
+- name: Appliquer les unites avant de les activer
+  ansible.builtin.meta: flush_handlers
+
+- name: Activer la minuterie
+  ansible.builtin.systemd_service:
+    name: mailguard-sync.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# La minuterie ne se declenchera pas avant une minute : on force un premier
+# passage pour que la protection soit en place a la fin du playbook.
+#
+# `timeout` explicite : la premiere version de ce script pouvait bloquer plus de
+# trois minutes sur `cscli`, et emportait le playbook avec elle. Un
+# synchroniseur qui ne rend pas la main en 60 s a un probleme qu'il vaut mieux
+# voir tout de suite.
+- name: Synchroniser une premiere fois
+  ansible.builtin.command:
+    cmd: timeout 60 /usr/local/sbin/mailguard-sync.sh
+  register: mail_antiabus_sync_run
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+#  Verification : la chaine est-elle sur le BON hook ?
+# ---------------------------------------------------------------------------
+#  C'est tout l'objet de ce role. Une chaine sur `input` ne verrait jamais un
+#  paquet destine au port 25, puisqu'il est DNAT puis forwarde. On exige donc
+#  explicitement `hook forward`, pas seulement l'existence de la table.
+- name: Relever la table posee
+  ansible.builtin.command:
+    cmd: nft list table ip {{ mail_antiabus_nft_table }}
+  register: mail_antiabus_nft_state
+  changed_when: false
+
+- name: Exiger une chaine sur le hook forward filtrant le port 25
+  ansible.builtin.assert:
+    that:
+      - "'hook forward' in mail_antiabus_nft_state.stdout"
+      - "'tcp dport 25' in mail_antiabus_nft_state.stdout"
+      - "mail_antiabus_nft_set in mail_antiabus_nft_state.stdout"
+    fail_msg: >-
+      La table {{ mail_antiabus_nft_table }} n'a pas de chaine `forward`
+      filtrant le port 25. Les decisions ne seraient jamais appliquees au
+      courrier -- exactement le defaut que ce role corrige.
+    success_msg: "{{ mail_antiabus_sync_run.stdout | trim }}"
+    quiet: true

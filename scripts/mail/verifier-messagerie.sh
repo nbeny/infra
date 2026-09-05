@@ -176,6 +176,52 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "Protections anti-abus"
+# ---------------------------------------------------------------------------
+# Ces quatre controles portent sur le role mail_antiabus. Chacun verifie un
+# EFFET, pas la presence d'un fichier de configuration.
+
+# 1. Les compteurs de debit de Postfix. Ils etaient a zero -- illimites -- dans
+#    la configuration livree par Mailcow.
+debits=$(vm "sudo docker exec mailcowdockerized-postfix-mailcow-1 postconf -h   smtpd_client_connection_rate_limit smtpd_client_recipient_rate_limit 2>/dev/null | tr '\n' ' '")
+if echo "$debits" | grep -qE '^[1-9][0-9]* [1-9][0-9]*'; then
+  ok "compteurs de debit Postfix actifs ($debits)"
+else
+  ko "compteurs de debit Postfix a zero ou absents (« $debits »)"
+fi
+
+# 2. Fail2ban doit connaitre le moissonnage d'annuaire. Neuf expressions, c'est
+#    le jeu d'origine de Mailcow : les notres n'ont pas ete posees.
+nb_regex=$(vm "K=\$(sudo cat /opt/mailcow-dockerized/.api-key);   curl -s -H \"X-API-Key: \$K\" http://127.0.0.1:8080/api/v1/get/fail2ban   | python3 -c 'import sys,json; print(len(json.load(sys.stdin)[\"regex\"]))'")
+if [ "${nb_regex:-0}" -ge 12 ]; then
+  ok "Fail2ban : $nb_regex expressions (moissonnage inclus)"
+else
+  ko "Fail2ban : seulement ${nb_regex:-0} expressions, le moissonnage n'est pas couvert"
+fi
+
+# 3. L'agent CrowdSec de la VM doit etre vu ET valide par l'API du VPS.
+agent=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "root@${VPS}"   "docker exec crowdsec cscli machines list -o json 2>/dev/null" 2>/dev/null   | python3 -c 'import sys,json
+try:
+    m=[x for x in json.load(sys.stdin) if x["machineId"]=="mail-vm"]
+    print("valide" if m and m[0].get("isValidated") else ("non-valide" if m else "absent"))
+except Exception:
+    print("illisible")' 2>/dev/null)
+attendu "agent CrowdSec de la VM" "${agent:-illisible}" "valide"
+
+# 4. LE controle central : la chaine doit etre sur le hook FORWARD. Sur `input`
+#    elle ne verrait jamais un paquet du port 25, qui est DNAT puis forwarde --
+#    c'est precisement le defaut du bouncer livre par CrowdSec.
+garde=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "root@${VPS}"   "nft list table ip mailguard 2>/dev/null" 2>/dev/null)
+contient "chaine mailguard sur le hook forward" "$garde" "hook forward"
+contient "mailguard filtre bien le port 25" "$garde" "tcp dport 25"
+
+if ssh -o BatchMode=yes -o ConnectTimeout=10 "root@${VPS}"      "systemctl is-active --quiet mailguard-sync.timer" 2>/dev/null; then
+  ok "minuterie de synchronisation des decisions active"
+else
+  ko "minuterie mailguard-sync inactive : les bannissements ne seraient jamais appliques"
+fi
+
+# ---------------------------------------------------------------------------
 section "Ce qui ne doit pas avoir casse"
 # ---------------------------------------------------------------------------
 # Trois tentatives : ces requetes traversent Internet et le proxy Cloudflare.

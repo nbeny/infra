@@ -1,0 +1,20 @@
+---
+# Protection anti-abus de la messagerie.
+#
+# Les deux hotes sont dans le MEME play, et ce n'est pas un detail : l'agent
+# CrowdSec de la VM s'enregistre aupres de l'API portee par le VPS. Jouer avec
+# `-l` sur un seul des deux laisserait la moitie de la chaine en place.
+#
+#   ansible-playbook playbooks/43-mail-antiabus.yml
+#
+# Prerequis : 41-mail-tunnel.yml (le tunnel porte l'API) et 42-mailcow.yml.
+#
+# Ce playbook ne touche NI a la composition Docker de Mailcow, NI a celle du
+# CrowdSec deja en place sur le VPS -- qui protege trois sites en production.
+
+- name: Proteger la messagerie des abus
+  hosts: edge_nodes:base_nodes
+  gather_facts: true
+  become: true
+  roles:
+    - mail_antiabus

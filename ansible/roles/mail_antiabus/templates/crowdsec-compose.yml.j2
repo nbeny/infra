@@ -1,0 +1,34 @@
+# Genere par Ansible (role mail_antiabus). Toute edition manuelle sera ecrasee.
+#
+# Agent SEUL : l'API locale est desactivee, les decisions partent vers celle du
+# VPS. Une seule source de verite, et le bouncer du VPS les applique.
+#
+# `network_mode: host` est necessaire pour deux raisons : joindre 10.88.0.1 par
+# le tunnel, et lire la socket Docker sans passer par un reseau intermediaire.
+
+services:
+  crowdsec:
+    image: {{ mail_antiabus_cs_image }}
+    container_name: crowdsec-mail
+    restart: always
+    network_mode: host
+    environment:
+      - TZ={{ mail_antiabus_timezone }}
+      - DISABLE_LOCAL_API=true
+      - LOCAL_API_URL=http://{{ mail_antiabus_lapi_listen }}:{{ mail_antiabus_lapi_port }}
+      - AGENT_USERNAME={{ mail_antiabus_cs_machine }}
+      - AGENT_PASSWORD={{ mail_antiabus_cs_password }}
+      - COLLECTIONS={{ mail_antiabus_cs_collections }}
+      # Aucun signal n'est envoye a la communaute : ce serait a l'API du VPS de
+      # le faire, et elle le fait deja.
+      - DISABLE_ONLINE_API=true
+    volumes:
+      # En lecture seule : l'agent n'a besoin que de lire les journaux.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - crowdsec-config:/etc/crowdsec
+      - crowdsec-data:/var/lib/crowdsec/data
+
+volumes:
+  crowdsec-config:
+  crowdsec-data:

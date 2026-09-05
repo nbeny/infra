@@ -1,0 +1,61 @@
+---
+# L'ordre compte : l'API locale de CrowdSec doit etre joignable et le compte
+# machine cree AVANT que l'agent de la VM ne tente de s'y enregistrer. Ansible
+# execute chaque `include_tasks` pour tous les hotes du play avant de passer au
+# suivant, donc placer les taches du VPS en premier suffit a garantir cet
+# ordre, meme si les deux hotes sont dans le meme play.
+#
+# `apply` est indispensable sur chaque include : un `tags:` pose sur l'include
+# ne conditionne QUE l'include lui-meme. Sans lui, `--tags postfix` inclurait
+# le fichier puis sauterait chacune de ses taches, et le playbook afficherait
+# un succes sans avoir rien fait.
+
+# Le secret de l'agent CrowdSec est prepare pour les DEUX hotes avant tout le
+# reste : le VPS en a besoin pour creer le compte machine, la VM pour s'y
+# connecter. Il est genere une seule fois sur le controleur.
+- name: Preparer le secret de l'agent CrowdSec
+  ansible.builtin.include_tasks:
+    file: secret.yml
+    apply:
+      tags: [crowdsec, mailguard]
+  tags: [crowdsec, mailguard]
+
+- name: Durcir Postfix sur la VM
+  ansible.builtin.include_tasks:
+    file: postfix.yml
+    apply:
+      tags: [postfix]
+  when: inventory_hostname in groups['base_nodes'] | default([])
+  tags: [postfix]
+
+- name: Apprendre le moissonnage a Fail2ban
+  ansible.builtin.include_tasks:
+    file: fail2ban.yml
+    apply:
+      tags: [fail2ban]
+  when: inventory_hostname in groups['base_nodes'] | default([])
+  tags: [fail2ban]
+
+- name: Publier l'API CrowdSec sur le tunnel
+  ansible.builtin.include_tasks:
+    file: crowdsec-lapi.yml
+    apply:
+      tags: [crowdsec]
+  when: inventory_hostname in groups['edge_nodes'] | default([])
+  tags: [crowdsec]
+
+- name: Poser l'agent CrowdSec sur la VM
+  ansible.builtin.include_tasks:
+    file: crowdsec-agent.yml
+    apply:
+      tags: [crowdsec]
+  when: inventory_hostname in groups['base_nodes'] | default([])
+  tags: [crowdsec]
+
+- name: Appliquer les decisions sur le port 25
+  ansible.builtin.include_tasks:
+    file: mailguard.yml
+    apply:
+      tags: [crowdsec, mailguard]
+  when: inventory_hostname in groups['edge_nodes'] | default([])
+  tags: [crowdsec, mailguard]
