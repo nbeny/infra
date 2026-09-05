@@ -1,0 +1,20 @@
+# Genere par Ansible (role mail_tunnel).
+#
+# Un conteneur nginx minuscule dont l'unique role est de servir un fichier de
+# 80 octets en HTTPS. C'est le prix a payer pour MTA-STS : la politique DOIT
+# etre publiee sur https://mta-sts.<domaine>/.well-known/mta-sts.txt, et sa
+# validite repose sur le certificat de ce site -- pas sur le DNS.
+services:
+  mta-sts:
+    image: nginx:alpine
+    container_name: mta-sts
+    restart: unless-stopped
+    volumes:
+      - {{ mail_tunnel_mtasts_dir }}/well-known:/usr/share/nginx/html/.well-known:ro
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.mtasts.rule: "Host(`{{ mail_tunnel_mtasts_host }}`)"
+      traefik.http.routers.mtasts.entrypoints: "websecure"
+      traefik.http.routers.mtasts.tls: "true"
+      traefik.http.routers.mtasts.tls.certresolver: "letsencrypt"
+      traefik.http.services.mtasts.loadbalancer.server.port: "80"

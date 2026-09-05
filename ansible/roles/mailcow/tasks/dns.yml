@@ -73,6 +73,22 @@
       - name: "{{ mailcow_dkim_selector }}._domainkey.{{ mailcow_dns_zone }}"
         content: "{{ mailcow_dkim_pub.json.dkim_txt }}"
         why: "cle publique DKIM"
+      # MTA-STS : l'`id` doit CHANGER a chaque modification de la politique,
+      # sinon les serveurs emetteurs gardent l'ancienne en cache jusqu'a
+      # `max_age` -- une semaine ici. C'est le seul moyen qu'ils ont de savoir
+      # qu'il faut la relire.
+      - name: "_mta-sts.{{ mailcow_dns_zone }}"
+        content: "v=STSv1; id={{ mailcow_mtasts_id }}"
+        why: "pointeur vers la politique MTA-STS"
+      # TLS-RPT : sans lui, un echec de negociation TLS entre un expediteur et
+      # nous serait totalement invisible. C'est ce qui rend le passage de
+      # MTA-STS en `enforce` decidable sur preuves plutot qu'a l'aveugle.
+      - name: "_smtp._tls.{{ mailcow_dns_zone }}"
+        content: "v=TLSRPTv1; rua=mailto:tlsrpt@{{ mailcow_dns_zone }}"
+        why: "rapports d'echec TLS"
+      - name: "_dmarc.{{ mailcow_dns_zone }}"
+        content: "{{ mailcow_dmarc_content }}"
+        why: "politique DMARC"
 
 - name: Relever les enregistrements TXT existants
   ansible.builtin.uri:
@@ -264,6 +280,41 @@
       Authorization: "Bearer {{ mailcow_cf_token }}"
   register: mailcow_cf_vpn
   changed_when: false
+  no_log: true
+
+# L'enregistrement de la politique MTA-STS est PROXIFIE, contrairement a tous
+# les autres poses ici. Ce n'est pas une inconsequence : le port 443 du VPS
+# n'est joignable QUE depuis Cloudflare -- verifie le 2026-09-05, 80 et 25
+# repondent, 443 non. En nuage gris, la politique serait donc inaccessible, et
+# un serveur emetteur qui ne peut pas lire la politique se rabat silencieusement
+# sur du SMTP ordinaire : MTA-STS ne servirait a rien.
+- name: Relever l'enregistrement de la politique MTA-STS
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records?type=A&name={{ mailcow_mtasts_host }}
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+  register: mailcow_cf_mtasts
+  changed_when: false
+  no_log: true
+
+- name: Publier le nom de la politique MTA-STS
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id }}/dns_records
+    method: POST
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      type: A
+      name: "{{ mailcow_mtasts_host }}"
+      content: "{{ mailcow_sending_ip }}"
+      proxied: true
+      ttl: 1
+      comment: "politique MTA-STS -- proxifie, le 443 du VPS n'est ouvert qu'a Cloudflare"
+  when: mailcow_cf_mtasts.json.result | length == 0
   no_log: true
 
 - name: Publier le nom d'acces nomade

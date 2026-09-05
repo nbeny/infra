@@ -55,3 +55,6 @@
     - francois.nbeny.fr
   delegate_to: "{{ groups['proxmox'] | first }}"
   changed_when: false
+
+- name: Publier la politique MTA-STS
+  ansible.builtin.include_tasks: mtasts.yml

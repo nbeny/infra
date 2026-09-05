@@ -146,3 +146,27 @@ mailcow_backup_schedule: "*-*-* 03:30:00"
 # de securite sur le telephone.
 mailcow_vpn_name: vpn-mail.urbanlink.fr
 mailcow_vpn_ip: "{{ mail_tunnel_mail_ip | default('10.88.0.2') }}"
+
+# --- MTA-STS ---------------------------------------------------------------
+mailcow_mtasts_host: mta-sts.urbanlink.fr
+# ⚠️ A INCREMENTER a chaque modification de la politique servie par le VPS.
+# Sans changement d'id, les serveurs emetteurs conservent l'ancienne politique
+# jusqu'a max_age -- une semaine.
+mailcow_mtasts_id: "20260905140000"
+
+# --- DMARC -----------------------------------------------------------------
+# Deux destinataires de rapports : celui de Cloudflare, deja en place et qui
+# offre un tableau de bord tout fait, ET une boite a nous -- sans quoi on
+# dependrait entierement d'un tiers pour decider du durcissement.
+#
+# `p=none` EST MAINTENU, et ce n'est pas de la frilosite. Kratos emet encore
+# via Infomaniak en tant que contact@urbanlink.fr : si Infomaniak reecrit
+# l'adresse d'enveloppe pour ses rebonds, l'alignement SPF echoue et la
+# signature DKIM porte leur domaine, pas le notre. En `quarantine`, les mails
+# de verification de compte partiraient donc en indesirables -- silencieusement.
+#
+# Sequence : lire les rapports, migrer Kratos (phase 5), PUIS passer a
+# `quarantine`, puis `reject`. Chaque etape sur preuves.
+mailcow_dmarc_content: >-
+  v=DMARC1; p=none; rua=mailto:f0377b57202644169e025f479791f760@dmarc-reports.cloudflare.net,mailto:dmarc@urbanlink.fr;
+  ruf=mailto:dmarc@urbanlink.fr; fo=1

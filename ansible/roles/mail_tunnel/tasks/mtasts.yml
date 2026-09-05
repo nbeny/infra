@@ -1,0 +1,65 @@
+---
+# ============================================================================
+#  MTA-STS et TLS-RPT
+# ----------------------------------------------------------------------------
+#  MTA-STS dit aux serveurs qui nous ecrivent : « exige TLS et un certificat
+#  valide pour mon MX ; en cas d'echec, ne livre pas en clair ». Sans lui, un
+#  attaquant en position d'intermediaire peut supprimer l'annonce STARTTLS et
+#  lire le courrier en clair -- une degradation que rien ne signale.
+#
+#  La politique est servie en HTTPS depuis le VPS, PAS depuis la maison :
+#  Traefik y detient deja un resolveur ACME, et le nom doit etre joignable
+#  publiquement.
+# ============================================================================
+
+- name: Creer l'arborescence de la politique
+  ansible.builtin.file:
+    path: "{{ mail_tunnel_mtasts_dir }}/well-known"
+    state: directory
+    mode: "0755"
+
+- name: Ecrire la politique MTA-STS
+  ansible.builtin.template:
+    src: mta-sts.txt.j2
+    dest: "{{ mail_tunnel_mtasts_dir }}/well-known/mta-sts.txt"
+    mode: "0644"
+  register: mail_tunnel_mtasts_policy
+
+- name: Deposer le compose du service
+  ansible.builtin.template:
+    src: mta-sts-compose.yml.j2
+    dest: "{{ mail_tunnel_mtasts_dir }}/docker-compose.yml"
+    mode: "0644"
+  register: mail_tunnel_mtasts_compose
+
+- name: Demarrer le service
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ mail_tunnel_mtasts_dir }}"
+  register: mail_tunnel_mtasts_up
+  changed_when: "'Started' in mail_tunnel_mtasts_up.stderr or 'Created' in mail_tunnel_mtasts_up.stderr"
+
+# Le certificat ACME est demande par Traefik au premier acces : on patiente.
+- name: Verifier que la politique est servie en HTTPS
+  ansible.builtin.uri:
+    url: "https://{{ mail_tunnel_mtasts_host }}/.well-known/mta-sts.txt"
+    return_content: true
+    validate_certs: true
+  register: mail_tunnel_mtasts_check
+  retries: 12
+  delay: 10
+  until: mail_tunnel_mtasts_check is succeeded
+  changed_when: false
+  delegate_to: "{{ groups['proxmox'] | first }}"
+
+- name: Exiger une politique coherente
+  ansible.builtin.assert:
+    that:
+      - "'version: STSv1' in mail_tunnel_mtasts_check.content"
+      - "'mx: ' ~ (mailcow_hostname | default('mail.urbanlink.fr')) in mail_tunnel_mtasts_check.content"
+    fail_msg: >-
+      La politique servie ne correspond pas au MX. Un MX absent de la
+      politique fait REFUSER la remise par tout serveur qui applique
+      MTA-STS -- c'est-a-dire Gmail et Outlook.
+    success_msg: >-
+      Politique MTA-STS servie et coherente ({{ mail_tunnel_mtasts_mode }}).

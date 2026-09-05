@@ -66,3 +66,15 @@ mail_tunnel_peers:
     ip: 10.88.1.10
   - name: portable
     ip: 10.88.1.11
+
+# --- MTA-STS ---------------------------------------------------------------
+mail_tunnel_mtasts_host: mta-sts.urbanlink.fr
+mail_tunnel_mtasts_dir: /opt/mta-sts
+
+# `testing` d'abord, et ce n'est pas de la timidite : en `enforce`, un serveur
+# emetteur REFUSE de livrer si le TLS echoue ou si le certificat ne correspond
+# pas. Un renouvellement rate ne provoquerait plus une degradation silencieuse
+# mais un ARRET du courrier entrant. On passe en `enforce` apres une semaine
+# de rapports TLS-RPT sans echec -- c'est-a-dire avec des preuves.
+mail_tunnel_mtasts_mode: testing
+mail_tunnel_mtasts_max_age: 604800
