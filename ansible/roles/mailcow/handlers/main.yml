@@ -8,3 +8,18 @@
     cmd: docker compose up -d
     chdir: "{{ mailcow_dir }}"
   changed_when: true
+
+# SOGo genere sa configuration d'execution (sources d'utilisateurs SQL, une par
+# domaine) UNE SEULE FOIS, au demarrage du conteneur, dans
+# /var/lib/sogo/GNUstep/Defaults/sogod.plist.
+#
+# Or ce role demarre la pile PUIS cree les domaines : au premier passage, SOGo
+# boote donc avec zero domaine et aucune source d'utilisateurs. Il repond alors
+# 403 « Unauthorized » a toute connexion au webmail, alors que le reste de
+# Mailcow fonctionne parfaitement -- l'authentification IMAP passe, la console
+# accepte le mot de passe, et seul le webmail refuse. Mesure le 2026-09-05.
+- name: Redemarrer SOGo
+  ansible.builtin.command:
+    cmd: docker compose restart sogo-mailcow
+    chdir: "{{ mailcow_dir }}"
+  changed_when: true

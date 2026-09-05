@@ -173,6 +173,10 @@
   loop_control:
     label: "{{ item.name }}"
   when: item.name not in (mailcow_domains.json | default([]) | map(attribute='domain_name') | list)
+  # Indispensable : SOGo ne relit ses domaines qu'au demarrage. Sans ce
+  # redemarrage, un domaine cree apres le premier `up` reste invisible du
+  # webmail, qui repond 403 a ses utilisateurs.
+  notify: Redemarrer SOGo
 
 # ---------------------------------------------------------------------------
 #  Boites et alias

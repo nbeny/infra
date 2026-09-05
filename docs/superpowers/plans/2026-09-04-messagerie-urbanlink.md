@@ -1178,6 +1178,32 @@ Puis `Aliases` : `postmaster@urbanlink.fr` et `abuse@urbanlink.fr` → `contact@
 les grands fournisseurs, et `abuse@` est l'adresse que les opérateurs utilisent pour
 signaler un problème avant de blacklister.
 
+- [ ] **Étape 3b : Redémarrer SOGo après la création du domaine**
+
+**Sans cela, le webmail répond `403 Unauthorized` à tous les utilisateurs**, alors que
+tout le reste fonctionne — la console Mailcow accepte le mot de passe, l'IMAP aussi.
+SOGo génère ses sources d'utilisateurs (une par domaine) **une seule fois, au démarrage
+du conteneur**. La pile ayant été démarrée avant que le domaine n'existe, il a booté
+sans aucune source.
+
+```bash
+ssh -J root@192.168.100.50 nbeny@10.0.0.140   'cd /opt/mailcow-dockerized && sudo docker compose restart sogo-mailcow'
+```
+
+Le rôle le fait désormais tout seul (handler `Redemarrer SOGo`, notifié par la création
+de domaine). Vérifier :
+
+```bash
+ssh -J root@192.168.100.50 nbeny@10.0.0.140   "sudo docker compose -f /opt/mailcow-dockerized/docker-compose.yml exec -T sogo-mailcow sh -c 'grep -c urbanlink.fr /var/lib/sogo/GNUstep/Defaults/sogod.plist'"
+```
+
+Attendu : un nombre supérieur à 0. À `0`, le webmail refusera toute connexion.
+
+⚠️ Piège de diagnostic rencontré : `c_password` vaut le même haché pour tous les
+utilisateurs dans `_sogo_static_view`. **C'est normal et voulu** (« deny direct login »
+dans le code de Mailcow) — SOGo n'authentifie pas par mot de passe, il fait confiance à
+l'en-tête `x-webobjects-remote-user` posé par son nginx. Ne pas chercher là.
+
 - [ ] **Étape 4 : Générer la clé DKIM**
 
 `Configuration → Options → ARC/DKIM keys → Add ARC/DKIM key` :
