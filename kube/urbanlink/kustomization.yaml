@@ -53,6 +53,9 @@
 #      kibana (après elasticsearch-setup), puis kibana-setup (après kibana —
 #      il attend lui-même que le statut passe à `available`)
 #   7. backend (après pgbouncer, redis, kratos, minio, kafka, temporal, elasticsearch)
+#      -- backend-badges (hook PreSync, poids 1) suit backend-migrate (poids 0,
+#      implicite) dans la même vague : badges de référence uniquement, pas de
+#      données de démo. Voir backend/badges-job.yaml.
 #   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
 #   9. frontend (après backend)
 #  10. coturn (DaemonSet hostNetwork sur nœuds publics), geoipupdate, pgadmin
@@ -165,6 +168,7 @@ resources:
 - pgadmin/deployment.yaml
 - pgadmin/service.yaml
 - backend/migrate-job.yaml
+- backend/badges-job.yaml
 - backend/deployment.yaml
 - backend/service.yaml
 - backend/hpa.yaml
