@@ -28,13 +28,13 @@ LAN, publiées par l'openresty du nœud comme les dix consoles existantes.
 | **0** Fondations | ✅ | Une connexion venue d'Internet atteint la VM et y arrive avec `82.65.87.60` comme source — le DNAT préserve bien l'IP de l'expéditeur |
 | **1** Mailcow | ✅ | 18 conteneurs, wildcard du nœud servi en STARTTLS, `webmail.urbanlink.fr` en LAN, IMAP réel validé, DKIM 2048 publié |
 | **2** Validation | ✅ | Gmail **et** Outlook : arrivée en **boîte de réception**, `dkim=pass spf=pass dmarc=pass`. Sortie mesurée depuis `147.79.102.17` |
-| **3** Bascule MX | ⏸️ | En attente du rDNS et du feu vert |
+| **3** Bascule MX | ✅ | `MX urbanlink.fr → 10 mail.urbanlink.fr`, propagé. Message réel de Gmail reçu : Postfix voit `209.85.208.42` (l'IP de Google), Rspamd valide `spf=pass` `dkim=pass` contre elle |
 | **4** Observabilité | 🟡 | Sonde DNSBL + file d'attente, cible Prometheus `up`, 4 alertes chargées, **alerte prouvée en conditions réelles** (injection → `firing` → Alertmanager → retour à `inactive`), tableau de bord Grafana, sauvegarde applicative quotidienne, job vzdump. Restent : parsedmarc, DMARC `quarantine`/`reject`, MTA-STS |
 | **5** Kratos + résiliation | ⏸️ | Après plusieurs semaines de fonctionnement prouvé |
 
 **Actions qui n'appartiennent qu'à l'utilisateur :**
 
-- **rDNS** `147.79.102.17 → mail.urbanlink.fr` dans le hPanel Hostinger — bloque la phase 3 ;
+- **rDNS** `147.79.102.17 → mail.urbanlink.fr` — ⚠️ **la modification n'a pas pris** : les serveurs faisant AUTORITE (`rdns1/rdns2.hostinger.com`) renvoyaient encore `srv859050.hstgr.cloud` le 2026-09-05. Ce n'est donc pas un cache. Le PTR a un TTL de 86400 s : après correction, compter jusqu'à 24 h de propagation ;
 - inscriptions **Google Postmaster Tools** et **Microsoft SNDS / JMRP** ;
 - résiliation Infomaniak, en toute fin de parcours.
 
