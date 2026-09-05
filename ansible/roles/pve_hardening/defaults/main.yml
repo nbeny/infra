@@ -13,17 +13,31 @@ pve_hardening_all: false
 # --- Constat 1 : aucune sauvegarde (CRITIQUE) ------------------------------
 pve_hardening_backup: false
 pve_hardening_backup_storage: pool2-backup
-pve_hardening_backup_schedule: "02:00"
+pve_hardening_backup_schedule: "04:30"
 # VM 100 n'a JAMAIS ete sauvegardee : c'est elle qui compte en premier.
 # "all" est possible, mais lire l'avertissement de volumetrie dans le role.
-pve_hardening_backup_vmids: "100"
+# ⚠️ Etait "100" -- une VM qui N'EXISTE PLUS sur ce noeud. Un job pointant sur
+# un VMID absent echoue silencieusement chaque nuit : on croit sauvegarder.
+#
+# 140 est la VM de messagerie, et c'est aujourd'hui la seule dont la perte
+# serait irrattrapable : elle porte du courrier, c'est-a-dire des donnees que
+# rien d'autre ne reconstruit -- contrairement au cluster, qui se redeploie
+# depuis ce depot.
+#
+# Le mode `snapshot` s'appuie sur qemu-guest-agent pour geler le systeme de
+# fichiers le temps de l'instantane. Sans agent, la sauvegarde reste coherente
+# au niveau bloc mais pas au niveau applicatif -- d'ou l'insistance a l'activer
+# sur cette VM.
+pve_hardening_backup_vmids: "140"
 pve_hardening_backup_mode: snapshot
 pve_hardening_backup_compress: zstd
 # Retention volontairement courte : un vzdump est une image COMPLETE a chaque
 # fois, sans deduplication. Deux copies de la VM 100 remplissent deja ~1,2 To.
-pve_hardening_backup_retention: "keep-last=2,keep-monthly=1"
+pve_hardening_backup_retention: "keep-last=3,keep-weekly=2,keep-monthly=1"
 # Marge libre exigee sur le stockage avant de creer le job, en Gio.
-pve_hardening_backup_min_free_gb: 800
+# 800 Gio se justifiaient pour la VM 100 et son disque d'un tera. La VM de
+# messagerie fait 150 Gio, dont 6 utilises.
+pve_hardening_backup_min_free_gb: 200
 
 # --- Constat 2 : origine joignable en direct (CRITIQUE) --------------------
 # Restreint 80/443 aux plages Cloudflare. N'active QUE si tous tes domaines

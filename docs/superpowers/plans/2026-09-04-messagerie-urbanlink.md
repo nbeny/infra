@@ -21,6 +21,25 @@ LAN, publiées par l'openresty du nœud comme les dix consoles existantes.
 
 ---
 
+## État d'avancement — mis à jour le 2026-09-05
+
+| Phase | État | Preuve |
+|---|---|---|
+| **0** Fondations | ✅ | Une connexion venue d'Internet atteint la VM et y arrive avec `82.65.87.60` comme source — le DNAT préserve bien l'IP de l'expéditeur |
+| **1** Mailcow | ✅ | 18 conteneurs, wildcard du nœud servi en STARTTLS, `webmail.urbanlink.fr` en LAN, IMAP réel validé, DKIM 2048 publié |
+| **2** Validation | ✅ | Gmail **et** Outlook : arrivée en **boîte de réception**, `dkim=pass spf=pass dmarc=pass`. Sortie mesurée depuis `147.79.102.17` |
+| **3** Bascule MX | ⏸️ | En attente du rDNS et du feu vert |
+| **4** Observabilité | 🟡 | Sonde DNSBL + file d'attente, cible Prometheus `up`, 4 alertes chargées, **alerte prouvée en conditions réelles** (injection → `firing` → Alertmanager → retour à `inactive`), tableau de bord Grafana, sauvegarde applicative quotidienne, job vzdump. Restent : parsedmarc, DMARC `quarantine`/`reject`, MTA-STS |
+| **5** Kratos + résiliation | ⏸️ | Après plusieurs semaines de fonctionnement prouvé |
+
+**Actions qui n'appartiennent qu'à l'utilisateur :**
+
+- **rDNS** `147.79.102.17 → mail.urbanlink.fr` dans le hPanel Hostinger — bloque la phase 3 ;
+- inscriptions **Google Postmaster Tools** et **Microsoft SNDS / JMRP** ;
+- résiliation Infomaniak, en toute fin de parcours.
+
+---
+
 ## Rappels d'exécution valables pour TOUTES les tâches
 
 **Le dépôt s'édite sur Windows, s'exécute sur le nœud.** Après toute modification de
