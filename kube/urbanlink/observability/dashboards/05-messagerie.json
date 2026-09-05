@@ -1,0 +1,195 @@
+{
+  "title": "Messagerie urbanlink.fr",
+  "uid": "urbanlink-messagerie",
+  "tags": ["urbanlink", "messagerie"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "editable": true,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Listes noires — IP d'émission",
+      "description": "Nombre de listes sur lesquelles 147.79.102.17 est inscrite. Toute valeur non nulle signifie que le courrier sortant part en spam ou en rejet dès maintenant.",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(mail_dnsbl_listed)", "legendFormat": "listes", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "propre", "color": "green", "index": 0 } } }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Fraîcheur de la sonde",
+      "description": "Temps écoulé depuis le dernier passage de la sonde. Une sonde muette est indiscernable d'une sonde rassurante : au-delà d'une heure, la surveillance du blacklistage est aveugle.",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "time() - mail_dnsbl_last_check_timestamp_seconds", "legendFormat": "âge", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1800 },
+              { "color": "red", "value": 3600 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Santé de la sonde",
+      "description": "0 signifie que les listes noires ont répondu « open resolver » au lieu d'un verdict : la sonde ne sait rien, et son silence ne prouve rien.",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "mail_dnsbl_probe_healthy", "legendFormat": "santé", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "AVEUGLE", "color": "red", "index": 0 },
+                "1": { "text": "OK", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "File d'attente",
+      "description": "Messages en attente de remise. Une file qui gonfle est le premier symptôme d'un tunnel coupé ou d'un fournisseur qui refuse les remises.",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "mail_queue_size", "legendFormat": "en attente", "refId": "A" },
+        { "expr": "mail_queue_deferred", "legendFormat": "différés", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 20 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Inscription par liste noire",
+      "description": "Une série par liste interrogée. Voir laquelle a inscrit l'IP oriente la demande de délistage.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "mail_dnsbl_listed", "legendFormat": "{{zone}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "max": 1,
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 15 }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["max"] } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "File d'attente dans le temps",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "mail_queue_size", "legendFormat": "en attente", "refId": "A" },
+        { "expr": "mail_queue_deferred", "legendFormat": "différés", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Ressources de la VM de messagerie",
+      "description": "La VM porte dix-huit conteneurs. Le disque est ce qui la tue en premier : Postfix cesse d'accepter du courrier avant que quiconque ne s'en aperçoive.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{instance=\"mail\"} / node_memory_MemTotal_bytes{instance=\"mail\"})",
+          "legendFormat": "mémoire utilisée %",
+          "refId": "A"
+        },
+        {
+          "expr": "100 * (1 - node_filesystem_avail_bytes{instance=\"mail\",mountpoint=\"/\"} / node_filesystem_size_bytes{instance=\"mail\",mountpoint=\"/\"})",
+          "legendFormat": "disque / utilisé %",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "max": 100, "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    }
+  ]
+}

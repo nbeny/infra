@@ -276,6 +276,16 @@ configMapGenerator:
   options:
     labels:
       grafana_dashboard: "1"
+# Tableau de bord de la MESSAGERIE, volontairement separe des precedents :
+# ceux-ci viennent du depot APPLICATIF via la CI (rsync de config/), tandis que
+# la messagerie est un objet d'infrastructure. Le poser dans config/ le ferait
+# dependre d'une CI qui ne le concerne pas -- et qui est aujourd'hui rouge.
+- files:
+  - observability/dashboards/05-messagerie.json
+  name: grafana-dashboard-messagerie
+  options:
+    labels:
+      grafana_dashboard: "1"
 - files:
   - config/prod/observability/grafana-datasources.yaml
   name: grafana-datasources
