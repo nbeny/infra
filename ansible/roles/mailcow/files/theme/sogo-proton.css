@@ -1,0 +1,2044 @@
+/* ==========================================================================
+ *  urbanlink -- refonte visuelle de SOGo, inspiree de Proton Mail
+ * --------------------------------------------------------------------------
+ *  Deploye par le role Ansible `mailcow` (tasks/theme.yml). Ne PAS editer sur
+ *  la VM : le fichier y est ecrase a chaque execution du playbook.
+ *
+ *  Chaine de service, verifiable de bout en bout :
+ *      ansible/roles/mailcow/files/theme/sogo-proton.css   (source, ce fichier)
+ *        -> /opt/mailcow-dockerized/data/conf/sogo/custom-theme.css   (VM)
+ *        -> bind mount dans le conteneur nginx-mailcow, a
+ *           /usr/local/lib/GNUstep/SOGo/WebServerResources/css/custom-theme.css
+ *        -> servi par la directive `location /SOGo/WebServerResources/`
+ *        -> injecte dans le <head> par custom-theme.js
+ *
+ *  POURQUOI CE DETOUR. SOGo 5.12 n'expose aucune directive
+ *  `SOGoUIAdditionalCSSFiles` -- seule `SOGoUIAdditionalJSFiles` existe (verifie
+ *  par `grep -ao SOGoUIAdditional /usr/local/lib`). Et un `sub_filter` nginx ne
+ *  peut pas servir de rechange : sogod compresse ses reponses en gzip des que le
+ *  client l'accepte, et le bloc `location ^~ /SOGo` livre avec mailcow definit
+ *  ses propres `proxy_set_header`, ce qui coupe l'heritage et interdit d'y
+ *  neutraliser `Accept-Encoding` depuis un fichier `.custom`. L'injection par
+ *  JavaScript est donc le seul point d'accroche supporte.
+ *
+ *  REGLE DE CASCADE. Angular Material genere son theme A L'EXECUTION et
+ *  l'injecte dans un <style> du <head> (~170 Ko constates). custom-theme.js
+ *  redeplace notre <link> en fin de <head> une fois Angular amorce, ce qui nous
+ *  place APRES lui. Les `!important` qui subsistent ici ne visent donc pas
+ *  Angular Material mais la directive `md-colors`, qui ecrit des styles EN
+ *  LIGNE : rien d'autre ne peut les battre.
+ * ========================================================================== */
+
+/* ==========================================================================
+ *  1. Jetons de design
+ * ========================================================================== */
+
+:root,
+[data-pm-theme="light"] {
+  /* Primaire : le violet est l'identite. Il doit rester visible, pas decoratif. */
+  --pm-primary: #6d4aff;
+  --pm-primary-hover: #5c39f0;
+  --pm-primary-active: #4d2cd6;
+  --pm-primary-soft: #efeaff;
+  --pm-primary-softer: #f7f4ff;
+  --pm-primary-text: #ffffff;
+  --pm-on-soft: #4526c9;
+
+  /* Accent magenta : reserve aux etats "epingle" et aux touches ponctuelles. */
+  --pm-accent: #c026a8;
+  --pm-accent-soft: #fbeaf7;
+
+  /* Surfaces, du plus profond au plus haut. */
+  --pm-bg: #f2f1f7;
+  --pm-sidebar: #edebf5;
+  --pm-toolbar: #ffffff;
+  --pm-surface: #ffffff;
+  --pm-surface-2: #f8f7fc;
+  --pm-surface-hover: #eeeaff;
+  --pm-surface-selected: #e5dcff;
+  --pm-modal: #ffffff;
+  --pm-scrim: rgba(27, 19, 64, 0.42);
+
+  /* Texte. */
+  --pm-text: #1b1340;
+  --pm-text-secondary: #565073;
+  --pm-text-muted: #8b86a3;
+  --pm-text-on-primary: #ffffff;
+
+  --pm-border: #e0dded;
+  --pm-border-strong: #cdc8e0;
+
+  --pm-success: #0f9b73;
+  --pm-success-soft: #e4f6f0;
+  --pm-warning: #b7791f;
+  --pm-warning-soft: #fdf3e2;
+  --pm-danger: #d8383d;
+  --pm-danger-soft: #fdeaea;
+
+  /* Marqueur d'etoile : ambre, distinct du violet primaire. */
+  --pm-star: #e8a33d;
+
+  --pm-radius-sm: 6px;
+  --pm-radius-md: 10px;
+  --pm-radius-lg: 16px;
+  --pm-radius-pill: 999px;
+
+  --pm-shadow-sm: 0 1px 2px rgba(27, 19, 64, 0.06), 0 1px 3px rgba(27, 19, 64, 0.04);
+  --pm-shadow-md: 0 4px 12px rgba(27, 19, 64, 0.10), 0 1px 3px rgba(27, 19, 64, 0.06);
+  --pm-shadow-lg: 0 12px 32px rgba(27, 19, 64, 0.16), 0 2px 8px rgba(27, 19, 64, 0.08);
+  --pm-shadow-primary: 0 2px 8px rgba(109, 74, 255, 0.32);
+
+  /* Une seule duree pour toute l'interface : au-dela, les transitions
+   * commencent a se voir les unes par rapport aux autres. */
+  --pm-motion: 120ms;
+  --pm-ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  /* Aucune police n'est telechargee : la pile s'appuie sur ce qui est deja
+   * installe, et retombe sur Roboto que SOGo embarque de toute facon. */
+  --pm-font: "Inter", "Inter Variable", "Segoe UI Variable Text", "Segoe UI",
+             -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial,
+             sans-serif;
+  --pm-font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas,
+                  "Liberation Mono", monospace;
+}
+
+/* Le mode sombre de Proton n'est pas un noir : c'est un indigo tres desature.
+ * Un #000 absolu ecrase la hierarchie des surfaces -- on ne distingue plus une
+ * modale de son fond. Chaque palier ci-dessous est donc separe du precedent
+ * d'au moins 4 % de luminance. */
+[data-pm-theme="dark"] {
+  --pm-primary: #8e70ff;
+  --pm-primary-hover: #9d84ff;
+  --pm-primary-active: #7a58f5;
+  --pm-primary-soft: #2b2350;
+  --pm-primary-softer: #221c40;
+  --pm-primary-text: #ffffff;
+  --pm-on-soft: #c7b6ff;
+
+  --pm-accent: #e05bc4;
+  --pm-accent-soft: #3a2140;
+
+  --pm-bg: #131019;
+  --pm-sidebar: #191622;
+  --pm-toolbar: #1e1a29;
+  --pm-surface: #211d2c;
+  --pm-surface-2: #272233;
+  --pm-surface-hover: #2f2942;
+  --pm-surface-selected: #3a3160;
+  --pm-modal: #262130;
+  --pm-scrim: rgba(6, 4, 12, 0.66);
+
+  --pm-text: #ebe8f5;
+  --pm-text-secondary: #aaa4c2;
+  --pm-text-muted: #7d7795;
+  --pm-text-on-primary: #ffffff;
+
+  --pm-border: #322c44;
+  --pm-border-strong: #453d5c;
+
+  --pm-success: #3ecfa5;
+  --pm-success-soft: #16332c;
+  --pm-warning: #e0a643;
+  --pm-warning-soft: #352813;
+  --pm-danger: #f4676b;
+  --pm-danger-soft: #3a1d20;
+
+  --pm-star: #f0b54a;
+
+  --pm-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --pm-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.48);
+  --pm-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.58);
+  --pm-shadow-primary: 0 2px 10px rgba(142, 112, 255, 0.36);
+}
+
+/* ==========================================================================
+ *  2. Base
+ * ========================================================================== */
+
+html,
+body.main {
+  background-color: var(--pm-bg) !important;
+  color: var(--pm-text);
+  font-family: var(--pm-font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body.main,
+body.main md-content,
+body.main md-list,
+body.main md-card,
+body.main md-dialog,
+body.main md-toolbar,
+body.main .md-button,
+body.main input,
+body.main textarea,
+body.main select,
+body.main md-select-value,
+body.main md-input-container label,
+body.main .md-subheader,
+body.main md-tooltip {
+  font-family: var(--pm-font);
+}
+
+/* Le corps des messages garde ses propres polices : un courriel HTML doit
+ * s'afficher tel que son expediteur l'a compose. */
+body.main .mailer_mailcontent,
+body.main .msg-body,
+body.main .sg-mail-part {
+  font-family: inherit;
+}
+
+/* Barres de defilement discretes, dans le ton de la surface. */
+body.main ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+body.main ::-webkit-scrollbar-track {
+  background: transparent;
+}
+body.main ::-webkit-scrollbar-thumb {
+  background: var(--pm-border-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--pm-radius-pill);
+}
+body.main ::-webkit-scrollbar-thumb:hover {
+  background: var(--pm-text-muted);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+body.main * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--pm-border-strong) transparent;
+}
+
+/* SOGo ne pose AUCUNE couleur sur ses liens : ils tombent sur le bleu par
+ * defaut du navigateur (#0000ee). Anodin sur fond blanc, illisible sur fond
+ * sombre -- l'adresse de l'expediteur etait quasi invisible dans la vue de
+ * lecture. Mesure : `color: rgb(0, 0, 238)`. */
+body.main a {
+  color: var(--pm-primary);
+  text-decoration: none;
+}
+body.main a:hover {
+  text-decoration: underline;
+}
+/* Les liens qui sont en realite des boutons gardent la couleur du bouton. */
+body.main a.md-button,
+body.main a.sg-icon-button,
+body.main a.sg-folder-name {
+  text-decoration: none;
+}
+
+/* Anneau de focus unique pour toute l'interface. L'accessibilite au clavier de
+ * SOGo est correcte ; il ne manquait qu'un indicateur visible. */
+body.main :focus-visible {
+  outline: 2px solid var(--pm-primary);
+  outline-offset: 2px;
+  border-radius: var(--pm-radius-sm);
+}
+
+/* Transitions : uniquement ce qui change de couleur ou glisse. Animer la
+ * geometrie de listes virtualisees ferait ramer le defilement. */
+body.main .md-button,
+body.main md-list-item,
+body.main md-icon,
+body.main md-menu-item .md-button,
+body.main .sg-icon-button,
+body.main md-chip,
+body.main input,
+body.main textarea {
+  transition:
+    background-color var(--pm-motion) var(--pm-ease),
+    color var(--pm-motion) var(--pm-ease),
+    border-color var(--pm-motion) var(--pm-ease),
+    box-shadow var(--pm-motion) var(--pm-ease),
+    opacity var(--pm-motion) var(--pm-ease),
+    transform var(--pm-motion) var(--pm-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.main *,
+  body.main *::before,
+  body.main *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+/* ==========================================================================
+ *  3. Ossature : les trois colonnes
+ * ========================================================================== */
+
+body.main main.view,
+body.main .view-list,
+body.main .view-detail,
+body.main #detailView {
+  background-color: var(--pm-bg) !important;
+}
+
+/* La colonne centrale (liste) et la colonne de droite (lecture) sont posees
+ * sur le fond ; ce sont leurs cartes internes qui portent la surface. */
+body.main .view-list {
+  border-right: 1px solid var(--pm-border);
+}
+
+body.main md-content {
+  background-color: transparent;
+  color: var(--pm-text);
+}
+
+/* `md-colors` ecrit ces fonds EN LIGNE depuis la palette Angular Material.
+ * Seul !important les reprend. */
+body.main #detailView,
+body.main #detailView > md-content,
+body.main .view-detail > md-content {
+  background-color: var(--pm-bg) !important;
+  color: var(--pm-text) !important;
+}
+
+body.main .sg-md-title {
+  color: var(--pm-text-muted) !important;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* ==========================================================================
+ *  4. Barre laterale
+ * ========================================================================== */
+
+body.main md-sidenav.md-sidenav-left,
+body.main md-sidenav.md-sidenav-left md-content {
+  background-color: var(--pm-sidebar) !important;
+  color: var(--pm-text) !important;
+  border-right: 1px solid var(--pm-border);
+}
+
+body.main md-sidenav.md-sidenav-left {
+  box-shadow: none;
+}
+
+/* --- En-tete : marque puis identite ------------------------------------- */
+
+/* Bandeau de marque insere par custom-theme.js. */
+body.main .pm-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 4px;
+  min-height: 32px;
+}
+body.main .pm-brand img {
+  height: 22px;
+  width: auto;
+  max-width: 150px;
+  object-fit: contain;
+}
+body.main .pm-brand .pm-brand-name {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--pm-text);
+}
+
+/* SOGo empile l'avatar au-dessus du nom dans une barre `md-tall` de 128 px.
+ * On remet le tout sur une seule ligne : la barre laterale sert a naviguer,
+ * pas a afficher un portrait. */
+body.main md-sidenav.md-sidenav-left md-toolbar,
+body.main md-sidenav.md-sidenav-left md-toolbar.md-tall {
+  background-color: transparent !important;
+  color: var(--pm-text) !important;
+  box-shadow: none;
+  min-height: 0;
+  height: auto;
+  padding: 4px 12px 10px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+body.main md-sidenav.md-sidenav-left md-toolbar sg-avatar-image {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--pm-primary-soft);
+  overflow: hidden;
+}
+/* La taille de l'icone est posee EN LIGNE par SOGo (`style="font-size: 40px"`),
+ * d'ou le !important -- rien d'autre ne la reprend. */
+body.main md-sidenav.md-sidenav-left md-toolbar sg-avatar-image md-icon {
+  font-size: 21px !important;
+  width: 21px;
+  height: 21px;
+  min-width: 21px;
+  margin: 0;
+  color: var(--pm-on-soft);
+}
+body.main md-sidenav.md-sidenav-left md-toolbar > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+body.main md-sidenav.md-sidenav-left md-toolbar .sg-md-title {
+  color: var(--pm-text) !important;
+  font-size: 14px;
+  font-weight: 600;
+}
+body.main md-sidenav.md-sidenav-left md-toolbar .md-caption {
+  color: var(--pm-text-secondary);
+  font-size: 12px;
+}
+
+/* --- Bouton Nouveau message --------------------------------------------- *
+ * Element majeur de l'interface : c'est la seule commande de la barre a
+ * porter la couleur primaire pleine. Il est injecte par custom-theme.js et
+ * declenche le bouton flottant natif de SOGo, ce qui evite de reimplementer
+ * la logique de composition.                                               */
+
+body.main .pm-compose-wrap {
+  padding: 4px 12px 12px;
+}
+
+body.main .pm-compose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--pm-radius-pill);
+  background: var(--pm-primary);
+  color: var(--pm-primary-text);
+  font-family: var(--pm-font);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: var(--pm-shadow-primary);
+  transition:
+    background-color var(--pm-motion) var(--pm-ease),
+    box-shadow var(--pm-motion) var(--pm-ease),
+    transform var(--pm-motion) var(--pm-ease);
+}
+body.main .pm-compose:hover {
+  background: var(--pm-primary-hover);
+  box-shadow: var(--pm-shadow-md);
+}
+body.main .pm-compose:active {
+  background: var(--pm-primary-active);
+  transform: translateY(1px);
+  box-shadow: none;
+}
+/* `margin: 0` explicite : la feuille de SOGo pose `margin: auto` sur md-icon,
+ * ce qui repoussait l'icone a gauche et le libelle a droite au lieu de les
+ * garder groupes au centre. */
+body.main .pm-compose md-icon,
+body.main .pm-compose .material-icons,
+body.main .pm-compose svg {
+  color: var(--pm-primary-text);
+  fill: currentColor;
+  font-size: 19px;
+  width: 19px;
+  height: 19px;
+  min-width: 19px;
+  margin: 0 !important;
+  flex: 0 0 auto;
+}
+body.main .pm-compose span {
+  flex: 0 1 auto;
+}
+
+/* Le bouton flottant natif fait double emploi une fois le bouton Compose en
+ * place. On le masque sur grand ecran et on le conserve en mobile, ou la
+ * barre laterale est un tiroir ferme. */
+@media (min-width: 960px) {
+  body.main.pm-has-compose .sg-fab-bottom-center {
+    display: none !important;
+  }
+}
+
+/* --- En-tetes de compte -------------------------------------------------- */
+
+body.main .sg-account-section > md-list:first-child md-list-item {
+  min-height: 28px;
+  height: 28px;
+}
+body.main .sg-account-section > md-list:first-child .md-list-item-inner > div,
+body.main .sg-account-section > md-list:first-child .sg-no-wrap {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pm-text-muted);
+}
+
+body.main md-divider {
+  border-top-color: var(--pm-border);
+}
+
+/* --- Elements de la barre, hors boites aux lettres ------------------------ *
+ * Agendas et carnets d'adresses n'utilisent PAS `sg-mailbox-list-item` : sans
+ * cette regle, leurs entrees restaient des bandes pleine largeur au milieu
+ * d'une colonne faite de pastilles arrondies.
+ *
+ * Le `:not()` n'est pas decoratif : ce selecteur est plus specifique que celui
+ * des boites aux lettres (trois types contre deux) et l'emporterait sur lui. */
+body.main md-sidenav.md-sidenav-left md-list-item:not(.sg-mailbox-list-item) {
+  background-color: transparent !important;
+  color: var(--pm-text) !important;
+  min-height: 36px;
+  margin: 1px 8px;
+  width: calc(100% - 16px);
+  border-radius: var(--pm-radius-md);
+  font-size: 13.5px;
+}
+body.main md-sidenav.md-sidenav-left md-list-item:not(.sg-mailbox-list-item):hover {
+  background-color: var(--pm-surface-hover) !important;
+}
+body.main md-sidenav.md-sidenav-left md-list-item md-icon {
+  color: var(--pm-text-secondary);
+  font-size: 19px;
+  width: 19px;
+  height: 19px;
+  min-width: 19px;
+}
+
+/* --- Elements de dossier ------------------------------------------------- */
+
+body.main md-list-item.sg-mailbox-list-item {
+  background-color: transparent !important;
+  color: var(--pm-text) !important;
+  min-height: 36px;
+  height: 36px;
+  margin: 1px 8px;
+  padding: 0 4px 0 8px;
+  width: calc(100% - 16px);
+  border-radius: var(--pm-radius-md);
+}
+
+body.main md-list-item.sg-mailbox-list-item:hover {
+  background-color: var(--pm-surface-hover) !important;
+}
+
+/* Selection : fond violet clair + barre laterale. Deux signaux valent mieux
+ * qu'un pour les daltoniens. */
+/* L'indicateur est une OMBRE INTERNE, pas un ::before. Angular Material
+ * neutralise les pseudo-elements de md-list-item quand il enveloppe son
+ * contenu dans un bouton (`_md-button-wrap`) : la regle s'applique, le
+ * navigateur calcule bien ses valeurs, et rien n'est peint. Verifie au
+ * DevTools le 2026-09-05. L'ombre interne, elle, respecte le rayon et se
+ * peint par-dessus le fond. */
+body.main md-list-item.sg-mailbox-list-item.sg-selected,
+body.main md-list-item.sg-mailbox-list-item.md-bg {
+  background-color: var(--pm-surface-selected) !important;
+  color: var(--pm-text) !important;
+  box-shadow: inset 3px 0 0 var(--pm-primary);
+}
+body.main md-list-item.sg-mailbox-list-item.sg-selected .sg-item-name,
+body.main md-list-item.sg-mailbox-list-item.sg-selected .sg-item-name md-icon {
+  color: var(--pm-on-soft) !important;
+}
+body.main md-list-item.sg-mailbox-list-item.sg-selected .sg-item-name span {
+  font-weight: 600;
+}
+
+body.main .sg-mailbox-list-item .sg-item-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--pm-text);
+  margin: 0;
+  min-width: 0;
+}
+body.main .sg-mailbox-list-item .sg-item-name > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+body.main .sg-mailbox-list-item .sg-item-name md-icon {
+  color: var(--pm-text-secondary);
+  font-size: 19px;
+  width: 19px;
+  height: 19px;
+  min-width: 19px;
+  margin: 0;
+}
+body.main .sg-mailbox-list-item .sg-font-medium {
+  font-weight: 650;
+  color: var(--pm-text);
+}
+
+/* Pastille de compteur : petite, pleine, jamais criarde. */
+body.main .sg-mailbox-list-item .sg-counter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: auto;
+  border-radius: var(--pm-radius-pill);
+  background: var(--pm-primary);
+  color: var(--pm-primary-text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+}
+body.main md-list-item.sg-mailbox-list-item.sg-selected .sg-counter-badge {
+  background: var(--pm-primary);
+  color: var(--pm-primary-text);
+}
+
+/* Le chevron d'arborescence : discret tant qu'il n'y a pas de survol. */
+body.main .sg-mailbox-list-item md-checkbox.sg-folder .md-icon {
+  border-color: transparent;
+  background: transparent;
+}
+body.main .sg-mailbox-list-item md-icon.md-menu {
+  color: var(--pm-text-muted);
+  opacity: 0;
+  font-size: 18px;
+}
+body.main md-list-item.sg-mailbox-list-item:hover md-icon.md-menu,
+body.main md-list-item.sg-mailbox-list-item.sg-selected md-icon.md-menu {
+  opacity: 1;
+}
+body.main .sg-mailbox-list-item md-icon.md-menu:hover {
+  color: var(--pm-primary);
+}
+
+/* --- Quota --------------------------------------------------------------- */
+
+body.main .sg-quota {
+  padding: 6px 20px 10px;
+}
+body.main .sg-quota md-progress-linear .md-container {
+  height: 4px;
+  border-radius: var(--pm-radius-pill);
+  background-color: var(--pm-border);
+  overflow: hidden;
+}
+body.main .sg-quota md-progress-linear .md-bar {
+  background-color: var(--pm-primary);
+}
+body.main .sg-quota md-progress-linear.md-warn .md-bar {
+  background-color: var(--pm-warning);
+}
+/* Specificite volontairement renforcee (classes repetees) : la regle
+ * generique sur `.md-fg.md-primary`, plus bas dans ce fichier, gagnait
+ * l'egalite de specificite par ordre d'apparition et repeignait le quota en
+ * violet vif. */
+body.main .sg-quota.sg-quota .sg-md-caption.sg-md-caption {
+  color: var(--pm-text-muted) !important;
+  font-size: 11px;
+}
+
+/* ==========================================================================
+ *  5. Barre superieure
+ * ========================================================================== */
+
+body.main md-toolbar.toolbar-main,
+body.main md-toolbar:not(.md-menu-toolbar) {
+  background-color: var(--pm-toolbar) !important;
+  color: var(--pm-text) !important;
+  box-shadow: none;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+body.main md-toolbar.toolbar-main {
+  min-height: 56px;
+  height: 56px;
+}
+body.main md-toolbar.toolbar-main .md-toolbar-tools {
+  height: 56px;
+  max-height: 56px;
+  padding: 0 12px;
+}
+
+/* Le pave de date occupait un quart de la barre pour une information que le
+ * systeme affiche deja. On le reduit a une ligne lisible. */
+body.main .sg-date-group {
+  display: none;
+}
+body.main p.sg-date-today.sg-md-display-3 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 56px;
+  color: var(--pm-text-secondary);
+  margin: 0 4px;
+  letter-spacing: -0.01em;
+}
+body.main p.sg-date-today.sg-md-display-3::after {
+  content: attr(data-pm-date-suffix);
+  font-weight: 400;
+  color: var(--pm-text-muted);
+  margin-left: 6px;
+}
+
+body.main md-toolbar .md-button.md-icon-button md-icon,
+body.main md-toolbar .sg-icon-button md-icon {
+  color: var(--pm-text-secondary);
+}
+body.main md-toolbar .md-button.md-icon-button:hover md-icon,
+body.main md-toolbar .sg-icon-button:hover md-icon {
+  color: var(--pm-primary);
+}
+body.main md-toolbar .md-button.md-icon-button[disabled] md-icon {
+  color: var(--pm-primary) !important;
+  opacity: 1;
+}
+
+/* ==========================================================================
+ *  6. Barre de la liste : recherche, filtre, tri
+ * ========================================================================== */
+
+/* En mode normal SOGo affiche une loupe, le nom du dossier, puis trois
+ * commandes. Le tout est retaille en champ de recherche arrondi -- le clic
+ * bascule deja en mode recherche, aucune ligne de JS n'est necessaire. */
+body.main .view-list > md-toolbar.md-accent,
+body.main .view-list > md-toolbar.md-hue-1,
+body.main .view-list > md-toolbar.sg-toolbar-secondary,
+body.main .view-list > md-toolbar {
+  background-color: var(--pm-toolbar) !important;
+  color: var(--pm-text) !important;
+  border-bottom: 1px solid var(--pm-border);
+  box-shadow: none;
+  min-height: 56px;
+  height: 56px;
+}
+
+body.main .view-list > md-toolbar .md-toolbar-tools {
+  height: 56px;
+  max-height: 56px;
+  padding: 0 10px;
+  gap: 2px;
+}
+
+body.main .view-list > md-toolbar .md-toolbar-tools .sg-folder-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--pm-text-secondary);
+  text-decoration: none;
+  line-height: 34px;
+  margin-left: -4px;
+}
+
+/* Le groupe loupe + nom devient un champ. */
+body.main .view-list > md-toolbar .md-toolbar-tools > .md-button:first-child.sg-icon-button {
+  margin: 0;
+  min-width: 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--pm-radius-pill) 0 0 var(--pm-radius-pill);
+  background: var(--pm-surface-2);
+}
+body.main .view-list > md-toolbar .md-toolbar-tools > .sg-folder-name {
+  background: var(--pm-surface-2);
+  border-radius: 0 var(--pm-radius-pill) var(--pm-radius-pill) 0;
+  padding: 0 14px 0 6px;
+  height: 34px;
+  border: 1px solid transparent;
+}
+body.main .view-list > md-toolbar .md-toolbar-tools > .sg-folder-name:hover {
+  border-color: var(--pm-border-strong);
+  color: var(--pm-text);
+}
+
+/* Mode recherche : le champ occupe la barre. */
+body.main .view-list > md-toolbar form.md-toolbar-tools md-input-container {
+  margin: 0;
+  padding: 0;
+}
+body.main .view-list > md-toolbar form.md-toolbar-tools input[type="search"] {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--pm-radius-pill);
+  background: var(--pm-surface-2);
+  border: 1px solid var(--pm-border);
+  color: var(--pm-text);
+  font-size: 13.5px;
+}
+body.main .view-list > md-toolbar form.md-toolbar-tools input[type="search"]:focus {
+  border-color: var(--pm-primary);
+  box-shadow: 0 0 0 3px var(--pm-primary-soft);
+  background: var(--pm-surface);
+  outline: none;
+}
+
+/* Sous-titre de la liste : compte de messages et tri actif. */
+body.main #messagesList .md-subheader,
+body.main #messagesList .md-subheader .md-subheader-inner {
+  background: transparent !important;
+  color: var(--pm-text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 10px 16px 6px;
+  box-shadow: none;
+}
+body.main #messagesList .md-subheader md-icon {
+  color: var(--pm-text-muted);
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}
+
+/* Barre de selection multiple : on la teinte en primaire pour signaler qu'on
+ * a change de mode. */
+body.main .view-list > md-toolbar.sg-toolbar-secondary[aria-hidden="false"] {
+  background-color: var(--pm-primary-soft) !important;
+}
+body.main .view-list > md-toolbar.sg-toolbar-secondary label.md-truncate {
+  color: var(--pm-on-soft);
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+/* ==========================================================================
+ *  7. Liste des messages
+ * ========================================================================== */
+
+body.main md-list.sg-section-list {
+  padding: 0 8px 16px;
+}
+
+body.main md-list-item.sg-message-list-item {
+  background-color: var(--pm-surface) !important;
+  color: var(--pm-text) !important;
+  border-radius: var(--pm-radius-md);
+  margin: 3px 0;
+  min-height: 62px;
+  border: 1px solid transparent;
+  box-shadow: var(--pm-shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+body.main md-list-item.sg-message-list-item .md-button.md-no-style,
+body.main md-list-item.sg-message-list-item > .md-button {
+  border-radius: var(--pm-radius-md);
+  padding: 0 12px;
+}
+
+body.main md-list-item.sg-message-list-item:hover {
+  background-color: var(--pm-surface-2) !important;
+  border-color: var(--pm-border-strong);
+  box-shadow: var(--pm-shadow-md);
+}
+body.main md-list-item.sg-message-list-item.unread:hover {
+  box-shadow: inset 3px 0 0 var(--pm-primary), var(--pm-shadow-md);
+}
+
+/* Non lu : fond legerement teinte, texte gras, et un point violet en bord de
+ * ligne. Le poids seul ne suffit pas quand la liste est dense. */
+body.main md-list-item.sg-message-list-item.unread {
+  background-color: var(--pm-surface) !important;
+  box-shadow: inset 3px 0 0 var(--pm-primary), var(--pm-shadow-sm);
+}
+body.main md-list-item.sg-message-list-item.unread .sg-md-subhead > div > span,
+body.main md-list-item.sg-message-list-item.unread .sg-tile-subject,
+body.main md-list-item.sg-message-list-item.unread .sg-tile-date {
+  font-weight: 700;
+  color: var(--pm-text);
+}
+
+/* Lu : le contenu recule d'un cran. */
+body.main md-list-item.sg-message-list-item:not(.unread) .sg-md-subhead > div > span {
+  font-weight: 500;
+  color: var(--pm-text-secondary);
+}
+body.main md-list-item.sg-message-list-item:not(.unread) .sg-tile-subject {
+  color: var(--pm-text-secondary);
+  font-weight: 400;
+}
+
+/* Selection : fond violet doux, bordure primaire. Angular Material pose
+ * `md-accent md-bg md-hue-2` sur l'element ; on reprend la main dessus. */
+body.main md-list-item.sg-message-list-item.md-bg,
+body.main md-list-item.sg-message-list-item.md-accent {
+  background-color: var(--pm-surface-selected) !important;
+  border-color: var(--pm-primary);
+  box-shadow: inset 3px 0 0 var(--pm-primary), var(--pm-shadow-md);
+}
+body.main md-list-item.sg-message-list-item.md-bg .sg-tile-subject,
+body.main md-list-item.sg-message-list-item.md-bg .sg-md-subhead > div > span,
+body.main md-list-item.sg-message-list-item.md-bg .sg-tile-date,
+body.main md-list-item.sg-message-list-item.md-bg .sg-tile-size {
+  color: var(--pm-on-soft) !important;
+}
+
+/* Message epingle. */
+body.main md-list-item.sg-message-list-item.sg-star-bg {
+  background-color: var(--pm-surface) !important;
+  box-shadow: inset -3px 0 0 var(--pm-star), var(--pm-shadow-sm);
+}
+body.main md-list-item.sg-message-list-item.sg-star-bg.unread {
+  box-shadow: inset 3px 0 0 var(--pm-primary), inset -3px 0 0 var(--pm-star),
+              var(--pm-shadow-sm);
+}
+
+/* --- Contenu d'une ligne ------------------------------------------------- */
+
+body.main .sg-message-list-item .sg-tile-content {
+  padding: 10px 4px 10px 0;
+  gap: 3px;
+}
+
+body.main .sg-message-list-item .sg-md-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+body.main .sg-message-list-item .sg-md-subhead > div:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.main .sg-message-list-item .sg-tile-date {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--pm-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+body.main .sg-message-list-item .sg-md-body {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+body.main .sg-message-list-item .sg-tile-subject {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.main .sg-message-list-item .sg-tile-size {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--pm-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Avatar : rond, initiales lisibles, teinte primaire par defaut. */
+body.main .sg-avatar-selectable {
+  margin: 0 12px 0 0;
+  border-radius: 50%;
+}
+body.main sg-avatar-image,
+body.main sg-avatar-image img,
+body.main .sg-avatar-image--zoomable {
+  border-radius: 50%;
+  overflow: hidden;
+}
+body.main .sg-avatar-selectable md-icon {
+  background: var(--pm-primary-soft);
+  color: var(--pm-on-soft);
+  border-radius: 50%;
+}
+body.main .sg-avatar-selectable:hover {
+  transform: scale(1.06);
+}
+body.main .sg-avatar-selected md-icon,
+body.main .sg-avatar-selected {
+  background: var(--pm-primary) !important;
+  color: var(--pm-primary-text) !important;
+}
+
+/* Icones d'etat en fin de ligne. */
+body.main .sg-message-list-item .sg-tile-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
+}
+body.main .sg-message-list-item .sg-tile-icons md-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  color: var(--pm-text-muted);
+}
+body.main .sg-message-list-item .sg-tile-icons md-icon.sg-icon-star {
+  color: var(--pm-star);
+}
+
+/* Pastilles d'etiquette. */
+/* Le conteneur reste dans le DOM meme sans etiquette : vide, il consommait
+ * quand meme la gouttiere du flex et decalait tous les objets. */
+body.main .sg-message-list-item .sg-category-dot-container:empty {
+  display: none;
+}
+
+body.main .sg-category-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  display: inline-block;
+}
+body.main .sg-label-outline {
+  display: inline-block;
+  padding: 1px 7px;
+  margin-right: 6px;
+  border-radius: var(--pm-radius-pill);
+  background: var(--pm-primary-soft);
+  color: var(--pm-on-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Compteur de fil de discussion. */
+body.main .sg-message-list-item .sg-tile-btn {
+  min-width: 0;
+  min-height: 20px;
+  height: 20px;
+  padding: 0 8px;
+  margin: 0;
+  border-radius: var(--pm-radius-pill);
+  background: var(--pm-primary-soft);
+  color: var(--pm-on-soft) !important;
+  font-size: 11px;
+  font-weight: 700;
+}
+body.main .sg-message-list-item .sg-tile-btn md-icon {
+  color: var(--pm-on-soft) !important;
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+}
+
+/* Chargement : ossature grise plutot qu'une ligne vide. */
+body.main md-list-item.sg-message-list-item.sg-skeleton {
+  background: linear-gradient(
+      90deg,
+      var(--pm-surface-2) 25%,
+      var(--pm-surface-hover) 50%,
+      var(--pm-surface-2) 75%
+    ) !important;
+  background-size: 400% 100%;
+  animation: pm-shimmer 1.4s ease-in-out infinite;
+  border-color: transparent;
+  box-shadow: none;
+}
+@keyframes pm-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+body.main md-progress-linear .md-bar,
+body.main md-progress-circular path {
+  stroke: var(--pm-primary);
+}
+body.main md-progress-linear.md-accent .md-bar {
+  background-color: var(--pm-primary);
+}
+body.main md-progress-circular.md-accent path {
+  stroke: var(--pm-primary);
+}
+
+/* ==========================================================================
+ *  8. Lecture d'un message
+ * ========================================================================== */
+
+body.main .view-detail md-card,
+body.main #detailView md-card {
+  background-color: var(--pm-surface) !important;
+  color: var(--pm-text) !important;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-lg);
+  box-shadow: var(--pm-shadow-sm);
+  margin: 12px;
+  overflow: hidden;
+}
+
+/* Barre d'actions du message : posee en haut, collante, fond de surface. */
+body.main .view-detail md-card > md-card-actions:first-child {
+  background: var(--pm-surface-2);
+  border-bottom: 1px solid var(--pm-border);
+  margin: 0;
+  padding: 6px 10px;
+  gap: 2px;
+}
+
+body.main .view-detail .sg-md-headline {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+  line-height: 1.3;
+  color: var(--pm-text);
+  padding: 4px 0 10px;
+}
+
+body.main .view-detail .msg-date {
+  color: var(--pm-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+body.main .view-detail .msg-recipients,
+body.main .view-detail .md-subhead {
+  color: var(--pm-text-secondary) !important;
+  font-size: 13px;
+}
+body.main .view-detail .md-subhead.md-primary {
+  color: var(--pm-primary) !important;
+}
+
+body.main .view-detail md-card-header {
+  padding: 14px 18px 6px;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+body.main .view-detail .mailer_mailcontent,
+body.main .view-detail .msg-body {
+  padding: 18px;
+  color: var(--pm-text);
+  font-size: 14px;
+  line-height: 1.6;
+}
+body.main .view-detail .mailer_mailcontent a {
+  color: var(--pm-primary);
+}
+
+/* Un courriel HTML impose souvent un fond blanc. En mode sombre on l'isole
+ * dans une carte claire plutot que d'inverser ses couleurs, ce qui rendrait
+ * illisibles les images et les signatures. */
+[data-pm-theme="dark"] body.main .view-detail iframe,
+[data-pm-theme="dark"] body.main .view-detail .mailer_mailcontent > div[class^="msgclass"] {
+  background: #ffffff;
+  border-radius: var(--pm-radius-md);
+}
+
+/* Pieces jointes. */
+body.main .sg-attachment-name {
+  color: var(--pm-primary);
+  font-weight: 500;
+}
+body.main .sg-attachment-size {
+  color: var(--pm-text-muted);
+  font-size: 11.5px;
+}
+
+/* Source brute du message. */
+body.main .view-detail pre,
+body.main .plain-text {
+  font-family: var(--pm-font-mono);
+  font-size: 12.5px;
+  background: var(--pm-surface-2);
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-md);
+  padding: 12px;
+}
+
+/* ==========================================================================
+ *  9. Composition
+ * ========================================================================== */
+
+body.main .sg-mail-editor,
+body.main md-dialog.sg-mail-editor {
+  border-radius: var(--pm-radius-lg);
+  background: var(--pm-surface) !important;
+  border: 1px solid var(--pm-border);
+  box-shadow: var(--pm-shadow-lg);
+  overflow: hidden;
+}
+
+body.main .sg-mail-editor md-toolbar {
+  background: var(--pm-surface-2) !important;
+  color: var(--pm-text) !important;
+  border-bottom: 1px solid var(--pm-border);
+  min-height: 52px;
+  height: 52px;
+}
+body.main .sg-mail-editor md-toolbar .md-toolbar-tools {
+  height: 52px;
+  max-height: 52px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+body.main .sg-mail-editor .msg-header-content,
+body.main .sg-mail-editor .pseudo-input-container {
+  border-bottom: 1px solid var(--pm-border);
+  padding: 2px 16px;
+}
+body.main .pseudo-input-label {
+  color: var(--pm-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 46px;
+}
+body.main .pseudo-input-field {
+  color: var(--pm-text);
+  font-size: 14px;
+}
+
+body.main .sg-mail-editor-content {
+  background: var(--pm-surface);
+}
+
+/* Selecteur d'identite. Angular Material lui applique `md-bg md-hue-1`, soit
+ * le 200 de la palette primaire : un bandeau violet clair de 735 px sur lequel
+ * notre couleur de texte -- claire en mode sombre -- devenait illisible
+ * (mesure : #ebe8f5 sur #d2c2ff). On le ramene a un champ ordinaire. */
+body.main .sg-mail-editor md-autocomplete.md-bg,
+body.main .sg-mail-editor md-autocomplete[class*="md-hue"] {
+  background-color: var(--pm-surface-2) !important;
+  color: var(--pm-text) !important;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-md);
+  box-shadow: none;
+}
+body.main .sg-mail-editor md-autocomplete input,
+body.main .sg-mail-editor md-autocomplete .md-input {
+  color: var(--pm-text) !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+body.main .sg-mail-editor md-autocomplete .md-button.md-icon-button md-icon {
+  color: var(--pm-text-secondary);
+}
+
+/* --- Editeur de texte riche --------------------------------------------- *
+ * Mailcow embarque CKEditor 5, pas 4 : les classes sont `.ck-*` et non
+ * `.cke_*`, et l'edition se fait DANS la page, sans iframe. Consequence
+ * directe : la couleur de texte du corps de page descendait jusqu'a la zone
+ * de saisie. En mode sombre, on ecrivait donc en texte clair sur fond blanc.
+ *
+ * CKEditor 5 expose son theme sous forme de variables CSS : on les rebranche
+ * sur les jetons du notre plutot que de surcharger ses regles une par une.
+ *
+ * Le fond de la zone de saisie SUIT le theme, comme chez les messageries
+ * modernes. Le HTML produit ne porte aucune couleur de fond : le destinataire
+ * verra le message sur la sienne, quelle qu'elle soit.                      */
+
+body.main .ck.ck-editor {
+  --ck-color-base-background: var(--pm-surface);
+  --ck-color-base-foreground: var(--pm-surface-2);
+  --ck-color-base-border: var(--pm-border);
+  --ck-color-base-text: var(--pm-text);
+  --ck-color-text: var(--pm-text);
+  --ck-color-toolbar-background: var(--pm-surface-2);
+  --ck-color-toolbar-border: var(--pm-border);
+  --ck-color-button-default-hover-background: var(--pm-surface-hover);
+  --ck-color-button-default-active-background: var(--pm-surface-selected);
+  --ck-color-button-on-background: var(--pm-primary-soft);
+  --ck-color-button-on-hover-background: var(--pm-surface-selected);
+  --ck-color-button-on-color: var(--pm-on-soft);
+  --ck-color-panel-background: var(--pm-modal);
+  --ck-color-panel-border: var(--pm-border);
+  --ck-color-dropdown-panel-background: var(--pm-modal);
+  --ck-color-dropdown-panel-border: var(--pm-border);
+  --ck-color-list-background: var(--pm-modal);
+  --ck-color-list-button-hover-background: var(--pm-surface-hover);
+  --ck-color-list-button-on-background: var(--pm-primary-soft);
+  --ck-color-list-button-on-text: var(--pm-on-soft);
+  --ck-color-input-background: var(--pm-surface);
+  --ck-color-input-border: var(--pm-border);
+  --ck-color-input-text: var(--pm-text);
+  --ck-color-focus-border: var(--pm-primary);
+  --ck-color-shadow-drop: rgba(0, 0, 0, 0.18);
+  --ck-color-tooltip-background: var(--pm-text);
+  --ck-color-tooltip-text: var(--pm-bg);
+  --ck-border-radius: var(--pm-radius-sm);
+
+  border: 0;
+}
+
+body.main .ck.ck-toolbar {
+  background: var(--pm-surface-2) !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--pm-border) !important;
+  border-radius: 0 !important;
+  padding: 4px 6px;
+}
+body.main .ck.ck-button,
+body.main .ck.ck-button .ck-button__label {
+  color: var(--pm-text-secondary);
+}
+body.main .ck.ck-button.ck-on {
+  color: var(--pm-on-soft);
+}
+body.main .ck.ck-button:not(.ck-disabled):hover {
+  background: var(--pm-surface-hover);
+}
+
+body.main .ck.ck-editor__main > .ck-editor__editable,
+body.main .ck.ck-content {
+  background: var(--pm-surface) !important;
+  color: var(--pm-text) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  min-height: 240px;
+  padding: 16px 18px;
+  line-height: 1.6;
+}
+body.main .ck.ck-content a {
+  color: var(--pm-primary);
+}
+body.main .ck.ck-content blockquote {
+  border-left: 3px solid var(--pm-border-strong);
+  color: var(--pm-text-secondary);
+  padding-left: 12px;
+  margin-left: 0;
+}
+body.main .ck.ck-editor__editable.ck-focused {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+body.main .sg-mail-editor-attachments {
+  background: var(--pm-surface-2);
+  border-top: 1px solid var(--pm-border);
+  padding: 8px 12px;
+}
+
+body.main .sg-dropzone.sg-over-dropzone {
+  outline: 2px dashed var(--pm-primary);
+  outline-offset: -6px;
+  background: var(--pm-primary-softer);
+}
+
+/* ==========================================================================
+ *  10. Systeme de boutons
+ * ========================================================================== */
+
+body.main .md-button {
+  border-radius: var(--pm-radius-md);
+  font-family: var(--pm-font);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--pm-text);
+  min-height: 36px;
+  line-height: 36px;
+}
+
+/* Primaire plein. */
+body.main .md-button.md-raised,
+body.main .md-button.md-raised.md-primary,
+body.main .md-button.md-primary.md-raised {
+  background-color: var(--pm-primary) !important;
+  color: var(--pm-primary-text) !important;
+  box-shadow: var(--pm-shadow-primary);
+}
+body.main .md-button.md-raised:hover {
+  background-color: var(--pm-primary-hover) !important;
+  box-shadow: var(--pm-shadow-md);
+}
+body.main .md-button.md-raised:active {
+  background-color: var(--pm-primary-active) !important;
+  box-shadow: none;
+}
+
+/* Secondaire : contour. */
+body.main .md-button.sg-outline-button {
+  border: 1px solid var(--pm-border-strong);
+  background: var(--pm-surface);
+  color: var(--pm-text);
+}
+body.main .md-button.sg-outline-button:hover {
+  border-color: var(--pm-primary);
+  color: var(--pm-primary);
+  background: var(--pm-primary-softer);
+}
+
+/* Tertiaire / fantome : le defaut de SOGo.
+ *
+ * `:not(.md-no-style)` n'est pas cosmetique. Angular Material recouvre chaque
+ * ligne de liste cliquable d'un <button class="md-no-style md-button"> en
+ * position absolue, cale sur toute la surface de la ligne. Lui donner un fond
+ * au survol le rendait OPAQUE : expediteur, objet, date et heure
+ * disparaissaient des qu'on passait la souris sur un message. Diagnostique au
+ * `elementsFromPoint` le 2026-09-05 -- le texte etait bien la, simplement
+ * recouvert. `md-no-style` signifie litteralement « ne stylez pas ce
+ * bouton » : il faut le respecter. */
+body.main .md-button:not(.md-raised):not(.md-fab):not(.md-icon-button):not(.md-no-style):hover {
+  background-color: var(--pm-surface-hover);
+}
+body.main .md-button.md-primary:not(.md-raised) {
+  color: var(--pm-primary) !important;
+}
+body.main .md-button.md-accent:not(.md-raised) {
+  color: var(--pm-accent) !important;
+}
+
+/* Les utilitaires `md-fg` d'Angular Material figent la teinte 500 de la
+ * palette. Lisible sur fond clair, illisible sur fond sombre -- l'adresse de
+ * l'expediteur disparaissait dans la vue de lecture. On les rebranche sur les
+ * jetons, qui eux changent avec le mode. */
+body.main .md-default-theme.md-fg.md-primary,
+body.main .md-fg.md-primary,
+body.main .md-subhead.md-primary {
+  color: var(--pm-primary) !important;
+}
+body.main .md-default-theme.md-fg.md-accent,
+body.main .md-fg.md-accent {
+  color: var(--pm-accent) !important;
+}
+
+/* Destructif. */
+body.main .md-button.md-warn:not(.md-raised) {
+  color: var(--pm-danger) !important;
+}
+body.main .md-button.md-warn.md-raised {
+  background-color: var(--pm-danger) !important;
+  color: #fff !important;
+  box-shadow: none;
+}
+body.main .md-button.md-warn:not(.md-raised):hover {
+  background-color: var(--pm-danger-soft);
+}
+
+/* Boutons-icone. */
+body.main .md-button.md-icon-button,
+body.main .sg-icon-button {
+  border-radius: var(--pm-radius-md);
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  line-height: 36px;
+  padding: 0;
+  margin: 0 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+body.main .md-button.md-icon-button:hover,
+body.main .sg-icon-button:hover {
+  background-color: var(--pm-surface-hover);
+}
+body.main .md-button.md-icon-button:active,
+body.main .sg-icon-button:active {
+  background-color: var(--pm-surface-selected);
+}
+body.main .md-button md-icon,
+body.main .sg-icon-button md-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  color: var(--pm-text-secondary);
+}
+
+body.main .md-button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Angular Material laisse la classe `md-focused` apres un clic a la souris,
+ * ce qui figeait un fond violet sur le dernier bouton clique. L'anneau de
+ * `:focus-visible` couvre deja le besoin d'accessibilite au clavier, et lui ne
+ * se declenche pas a la souris. */
+body.main .md-button.md-icon-button.md-focused:not(:hover),
+body.main .sg-icon-button.md-focused:not(:hover) {
+  background-color: transparent;
+}
+
+/* Bouton flottant, conserve en mobile. */
+body.main .md-button.md-fab,
+body.main md-fab-trigger .md-button.md-fab {
+  background-color: var(--pm-primary) !important;
+  color: var(--pm-primary-text) !important;
+  box-shadow: var(--pm-shadow-primary);
+  border-radius: var(--pm-radius-lg);
+}
+body.main .md-button.md-fab:hover {
+  background-color: var(--pm-primary-hover) !important;
+}
+body.main .md-button.md-fab md-icon {
+  color: var(--pm-primary-text) !important;
+}
+
+/* L'encre Material par defaut est un gris terne ; on la teinte. */
+body.main .md-ripple {
+  background-color: var(--pm-primary) !important;
+  opacity: 0.10;
+}
+
+/* ==========================================================================
+ *  11. Champs
+ * ========================================================================== */
+
+body.main md-input-container {
+  margin: 10px 0;
+  padding-bottom: 14px;
+}
+
+body.main md-input-container > input,
+body.main md-input-container > textarea,
+body.main md-input-container .md-input,
+body.main md-select .md-select-value {
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-md);
+  background: var(--pm-surface);
+  color: var(--pm-text);
+  padding: 8px 12px;
+  font-size: 14px;
+  font-family: var(--pm-font);
+  min-height: 38px;
+  box-shadow: none;
+}
+
+body.main md-input-container.md-input-focused > input,
+body.main md-input-container.md-input-focused > textarea,
+body.main md-input-container.md-input-focused .md-input,
+body.main md-select.md-input-focused .md-select-value,
+body.main input:focus,
+body.main textarea:focus {
+  border-color: var(--pm-primary) !important;
+  box-shadow: 0 0 0 3px var(--pm-primary-soft);
+  outline: none;
+}
+
+body.main md-input-container.md-input-invalid > input,
+body.main md-input-container.md-input-invalid .md-input {
+  border-color: var(--pm-danger) !important;
+  box-shadow: 0 0 0 3px var(--pm-danger-soft);
+}
+body.main md-input-container.md-input-invalid label,
+body.main md-input-container .md-input-message-animation {
+  color: var(--pm-danger) !important;
+}
+
+body.main md-input-container label,
+body.main md-input-container .md-placeholder {
+  color: var(--pm-text-muted) !important;
+  font-size: 13px;
+  font-weight: 500;
+}
+body.main md-input-container.md-input-focused label {
+  color: var(--pm-primary) !important;
+}
+
+body.main ::placeholder {
+  color: var(--pm-text-muted);
+  opacity: 1;
+}
+/* Les champs de la fenetre de composition sont les plus sollicites : leur
+ * texte indicatif merite un cran de contraste en plus. */
+body.main .sg-mail-editor ::placeholder {
+  color: var(--pm-text-secondary);
+}
+
+/* Les champs des listes de destinataires ne sont pas des enfants DIRECTS d'un
+ * md-input-container : ils vivent dans md-chips / md-autocomplete et gardaient
+ * donc le noir par defaut d'Angular Material, illisible en mode sombre. */
+body.main md-chips input,
+body.main md-autocomplete input,
+body.main md-contact-chips input,
+body.main .md-chips input {
+  color: var(--pm-text) !important;
+  background: transparent;
+  font-family: var(--pm-font);
+}
+
+body.main md-select .md-select-value span {
+  color: var(--pm-text);
+}
+body.main md-select .md-select-icon {
+  color: var(--pm-text-muted);
+}
+
+/* ==========================================================================
+ *  12. Menus, panneaux, modales, notifications
+ * ========================================================================== */
+
+body.main md-menu-content,
+body.main .md-open-menu-container,
+body.main ._md-panel,
+body.main .md-panel {
+  background-color: var(--pm-modal) !important;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-lg);
+  box-shadow: var(--pm-shadow-lg);
+  padding: 6px;
+  overflow: hidden;
+}
+
+body.main md-menu-content md-menu-item {
+  min-height: 36px;
+  height: 36px;
+}
+body.main md-menu-content md-menu-item > .md-button {
+  border-radius: var(--pm-radius-sm);
+  min-height: 34px;
+  height: 34px;
+  line-height: 34px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--pm-text);
+  padding: 0 10px;
+  margin: 0;
+}
+body.main md-menu-content md-menu-item > .md-button:hover {
+  background-color: var(--pm-surface-hover);
+  color: var(--pm-on-soft);
+}
+body.main md-menu-content md-menu-item > .md-button md-icon {
+  color: var(--pm-text-secondary);
+  margin-right: 8px;
+}
+body.main md-menu-divider,
+body.main md-menu-content md-divider {
+  background-color: var(--pm-border);
+  margin: 4px 6px;
+}
+
+body.main md-dialog {
+  background-color: var(--pm-modal) !important;
+  color: var(--pm-text) !important;
+  border-radius: var(--pm-radius-lg);
+  border: 1px solid var(--pm-border);
+  box-shadow: var(--pm-shadow-lg);
+  overflow: hidden;
+}
+body.main md-dialog md-toolbar {
+  background: var(--pm-surface-2) !important;
+  border-bottom: 1px solid var(--pm-border);
+}
+body.main md-dialog md-dialog-content {
+  padding: 20px;
+  color: var(--pm-text);
+}
+body.main md-dialog .md-dialog-content-body,
+body.main md-dialog .sg-dialog-message {
+  color: var(--pm-text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+body.main md-dialog md-dialog-actions {
+  border-top: 1px solid var(--pm-border);
+  padding: 10px 16px;
+  gap: 6px;
+}
+body.main md-backdrop.md-dialog-backdrop,
+body.main md-backdrop.md-opaque {
+  background-color: var(--pm-scrim);
+}
+
+body.main md-tooltip .md-content,
+body.main .md-tooltip {
+  background: var(--pm-text) !important;
+  color: var(--pm-bg) !important;
+  border-radius: var(--pm-radius-sm);
+  font-size: 11.5px;
+  font-weight: 500;
+  height: auto;
+  line-height: 1.5;
+  padding: 5px 9px;
+}
+
+body.main md-toast .md-toast-content {
+  background: var(--pm-text) !important;
+  color: var(--pm-bg) !important;
+  border-radius: var(--pm-radius-md);
+  box-shadow: var(--pm-shadow-lg);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+body.main md-toast .md-toast-content .md-button {
+  color: var(--pm-primary) !important;
+}
+
+/* ==========================================================================
+ *  13. Controles : cases, puces, interrupteurs, onglets
+ * ========================================================================== */
+
+body.main md-checkbox .md-icon {
+  border-color: var(--pm-border-strong);
+  border-radius: var(--pm-radius-sm);
+  border-width: 1.5px;
+}
+body.main md-checkbox.md-checked .md-icon {
+  background-color: var(--pm-primary);
+  border-color: var(--pm-primary);
+}
+body.main md-checkbox .md-label {
+  color: var(--pm-text);
+  font-size: 13.5px;
+}
+
+body.main md-radio-button .md-on {
+  background-color: var(--pm-primary);
+}
+body.main md-radio-button.md-checked .md-off {
+  border-color: var(--pm-primary);
+}
+
+body.main md-switch.md-checked .md-thumb {
+  background-color: var(--pm-primary);
+}
+body.main md-switch.md-checked .md-bar {
+  background-color: var(--pm-primary-soft);
+}
+
+body.main md-chip,
+body.main md-chips md-chip {
+  background: var(--pm-primary-soft);
+  color: var(--pm-on-soft);
+  border-radius: var(--pm-radius-pill);
+  font-size: 12.5px;
+  font-weight: 500;
+  height: 28px;
+  line-height: 28px;
+  padding: 0 10px 0 12px;
+}
+body.main md-chip .md-chip-remove md-icon {
+  color: var(--pm-on-soft);
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}
+body.main md-chip.md-warn {
+  background: var(--pm-danger-soft);
+  color: var(--pm-danger);
+}
+body.main md-chips .md-chips {
+  box-shadow: none;
+  border-bottom: 1px solid var(--pm-border);
+}
+body.main md-chips.md-focused .md-chips {
+  border-bottom-color: var(--pm-primary);
+  box-shadow: none;
+}
+
+body.main md-tabs md-tabs-wrapper {
+  background: transparent;
+  border-bottom: 1px solid var(--pm-border);
+}
+body.main md-tabs .md-tab {
+  text-transform: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pm-text-muted);
+}
+body.main md-tabs .md-tab.md-active {
+  color: var(--pm-primary);
+}
+body.main md-tabs md-ink-bar {
+  background: var(--pm-primary);
+  height: 2.5px;
+  border-radius: var(--pm-radius-pill);
+}
+
+body.main .sg-color-chip,
+body.main .sg-color-sample {
+  border-radius: var(--pm-radius-sm);
+}
+
+/* ==========================================================================
+ *  14. Agenda
+ * ========================================================================== */
+
+/* La grille horaire de SOGo n'utilise AUCUNE classe `sg-` : elle est batie
+ * sur .calendarView > .daysView > .days > sg-calendar-day.day > .hourCells >
+ * .clickableHourCell. Sans ces regles, la semaine restait un pave blanc au
+ * milieu de l'interface sombre. */
+body.main md-content.md-flex {
+  background-color: transparent !important;
+}
+
+body.main .calendarView,
+body.main .daysView {
+  background: var(--pm-surface);
+}
+
+body.main .clickableHourCell {
+  background-color: var(--pm-surface) !important;
+  border-color: var(--pm-border) !important;
+}
+body.main .clickableHourCell.outOfDay {
+  background-color: var(--pm-surface-2) !important;
+}
+body.main .clickableHourCell:hover {
+  background-color: var(--pm-surface-hover) !important;
+}
+
+body.main .hourCells,
+body.main sg-calendar-day.day,
+body.main .days,
+body.main .daysView,
+body.main .hours,
+body.main .hours .hour {
+  border-color: var(--pm-border) !important;
+}
+body.main .hours .hour {
+  color: var(--pm-text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+body.main .sg-calendar-list md-list-item,
+body.main .sg-calendar-day {
+  border-color: var(--pm-border);
+}
+
+body.main .sg-calendar-tile-header,
+body.main .sg-calendar-tile-week {
+  background: var(--pm-surface-2) !important;
+  color: var(--pm-text-secondary) !important;
+  border-color: var(--pm-border) !important;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.main .sg-calendar-date {
+  color: var(--pm-text);
+  font-weight: 600;
+}
+body.main .sg-date-today .sg-calendar-date,
+body.main .sg-calendar-date.sg-date-today {
+  background: var(--pm-primary);
+  color: var(--pm-primary-text);
+  border-radius: 50%;
+}
+
+body.main .sg-event {
+  border-radius: var(--pm-radius-sm);
+  border-left: 3px solid var(--pm-primary);
+  background: var(--pm-primary-soft);
+  color: var(--pm-on-soft);
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: var(--pm-shadow-sm);
+  padding: 2px 6px;
+}
+body.main .sg-event--tentative {
+  background: var(--pm-warning-soft);
+  border-left-color: var(--pm-warning);
+  color: var(--pm-warning);
+}
+body.main .sg-event--declined,
+body.main .sg-event--cancelled {
+  background: var(--pm-danger-soft);
+  border-left-color: var(--pm-danger);
+  color: var(--pm-danger);
+  text-decoration: line-through;
+}
+body.main .sg-event--needs-action {
+  border-left-style: dashed;
+}
+body.main .sg-event--ghost,
+body.main .sg-event--dragging {
+  opacity: 0.7;
+  box-shadow: var(--pm-shadow-md);
+}
+
+body.main .sg-time-selected,
+body.main .sg-droppable-over {
+  background: var(--pm-primary-softer);
+}
+body.main .sg-time-selection-indicator {
+  background: var(--pm-accent);
+}
+
+body.main md-datepicker .md-datepicker-input-container {
+  border-bottom-color: var(--pm-border);
+}
+body.main .md-calendar-date-today .md-calendar-date-selection-indicator {
+  border-color: var(--pm-primary);
+  color: var(--pm-primary);
+}
+body.main .md-calendar-selected-date .md-calendar-date-selection-indicator,
+body.main .md-calendar-date-selection-indicator:hover {
+  background: var(--pm-primary);
+  color: var(--pm-primary-text);
+}
+body.main .md-calendar-day-header th {
+  color: var(--pm-text-muted);
+}
+
+/* ==========================================================================
+ *  15. Contacts
+ * ========================================================================== */
+
+body.main .sg-avatar-list md-list-item,
+body.main md-list-item.md-2-line {
+  border-radius: var(--pm-radius-md);
+}
+body.main .view-list md-list-item.md-2-line:hover {
+  background: var(--pm-surface-hover) !important;
+}
+
+body.main .sg-avatar-public {
+  background: var(--pm-accent-soft);
+  color: var(--pm-accent);
+}
+
+body.main .sg-form-section,
+body.main .sg-has-form-sections md-card {
+  background: var(--pm-surface) !important;
+  border: 1px solid var(--pm-border);
+  border-radius: var(--pm-radius-lg);
+}
+
+body.main .md-subheader,
+body.main .sg-md-subheader {
+  background: transparent !important;
+  color: var(--pm-text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ==========================================================================
+ *  16. Preferences
+ * ========================================================================== */
+
+body.main md-card {
+  background-color: var(--pm-surface) !important;
+  color: var(--pm-text) !important;
+  border-radius: var(--pm-radius-lg);
+  border: 1px solid var(--pm-border);
+  box-shadow: var(--pm-shadow-sm);
+}
+body.main md-card md-card-title-text .md-headline {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--pm-text);
+}
+
+body.main md-list-item,
+body.main md-list-item .md-list-item-text h3,
+body.main md-list-item .md-list-item-text p {
+  color: var(--pm-text);
+}
+body.main md-list-item .md-list-item-text p {
+  color: var(--pm-text-secondary);
+}
+
+/* ==========================================================================
+ *  17. Bascule clair / sombre
+ * ========================================================================== */
+
+/* L'icone est un SVG en ligne, pas une ligature Material Icons : la police
+ * embarquee par SOGo 5.12 date d'avant `dark_mode` / `light_mode`, et une
+ * ligature inconnue ne rend AUCUN glyphe -- le bouton etait present, cliquable
+ * et parfaitement invisible. Verifie au DevTools le 2026-09-05. */
+body.main .pm-theme-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--pm-text-secondary);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke var(--pm-motion) var(--pm-ease);
+}
+body.main .pm-theme-toggle:hover svg {
+  stroke: var(--pm-primary);
+}
+
+/* ==========================================================================
+ *  18. Adaptatif
+ * ========================================================================== */
+
+@media (max-width: 959px) {
+  /* Le tiroir se superpose : il lui faut une vraie surface et une ombre,
+   * sinon il se confond avec la liste en dessous. */
+  body.main md-sidenav.md-sidenav-left {
+    box-shadow: var(--pm-shadow-lg);
+    border-right: 0;
+  }
+  body.main md-toolbar.toolbar-main,
+  body.main .view-list > md-toolbar {
+    min-height: 52px;
+    height: 52px;
+  }
+  body.main md-toolbar.toolbar-main .md-toolbar-tools,
+  body.main .view-list > md-toolbar .md-toolbar-tools {
+    height: 52px;
+    max-height: 52px;
+  }
+  body.main .view-list {
+    border-right: 0;
+  }
+  body.main .view-detail md-card,
+  body.main #detailView md-card {
+    margin: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+  /* Composition en plein ecran. */
+  body.main md-dialog.sg-mail-editor {
+    border-radius: 0;
+    max-width: 100%;
+    max-height: 100%;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+@media (max-width: 599px) {
+  body.main md-list-item.sg-message-list-item {
+    margin: 2px 0;
+    border-radius: var(--pm-radius-sm);
+  }
+  body.main md-list.sg-section-list {
+    padding: 0 4px 12px;
+  }
+  body.main .sg-message-list-item .sg-tile-size {
+    display: none;
+  }
+  body.main p.sg-date-today.sg-md-display-3 {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+ *  19. Impression -- l'interface disparait, le message reste
+ * ========================================================================== */
+
+@media print {
+  body.main md-sidenav,
+  body.main .view-list,
+  body.main md-toolbar,
+  body.main .pm-compose-wrap,
+  body.main .pm-brand,
+  body.main .sg-fab-bottom-center {
+    display: none !important;
+  }
+  body.main .view-detail md-card {
+    border: 0;
+    box-shadow: none;
+    margin: 0;
+  }
+}

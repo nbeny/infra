@@ -1,0 +1,152 @@
+/* ==========================================================================
+ *  urbanlink -- accord visuel de l'interface Mailcow avec le theme SOGo
+ * --------------------------------------------------------------------------
+ *  Deploye vers data/web/css/build/0081-custom-mailcow.css, l'emplacement
+ *  prevu par Mailcow : le fichier est deja ignore par son .gitignore et il
+ *  est concatene dans le bundle servi sous /cache/<empreinte>.css. Une mise a
+ *  jour de Mailcow ne le touche pas.
+ *
+ *  PORTEE VOLONTAIREMENT ETROITE. C'est la page de connexion qui compte ici :
+ *  elle est la premiere vue et elle jurerait avec le webmail. Le reste de
+ *  l'administration Mailcow est un Bootstrap dense que repeindre en entier
+ *  reviendrait a maintenir un second theme -- on se limite donc aux
+ *  primitives partagees : boutons, champs, cartes, liens.
+ * ========================================================================== */
+
+:root {
+  --pm-primary: #6d4aff;
+  --pm-primary-hover: #5c39f0;
+  --pm-primary-active: #4d2cd6;
+  --pm-primary-soft: #efeaff;
+  --pm-border: #e0dded;
+  --pm-radius-md: 10px;
+  --pm-radius-pill: 999px;
+  --pm-shadow-md: 0 4px 12px rgba(27, 19, 64, 0.10), 0 1px 3px rgba(27, 19, 64, 0.06);
+  --pm-shadow-primary: 0 2px 8px rgba(109, 74, 255, 0.32);
+}
+
+/* Le fond de la page de connexion : un degrade tres lave, pour que la carte
+ * blanche se detache sans avoir besoin d'une ombre lourde. */
+body {
+  background: linear-gradient(180deg, #f4f2fb 0%, #eeebf8 100%);
+}
+
+.card {
+  border: 1px solid var(--pm-border);
+  border-radius: 16px;
+  box-shadow: var(--pm-shadow-md);
+}
+
+.card-header {
+  background: transparent;
+  border-bottom: 1px solid var(--pm-border);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* Bootstrap nomme « success » le bouton de connexion. On le repeint en
+ * primaire : c'est une action d'entree, pas une confirmation. */
+.btn-success,
+.btn-primary {
+  background-color: var(--pm-primary);
+  border-color: var(--pm-primary);
+  box-shadow: var(--pm-shadow-primary);
+}
+.btn-success:hover,
+.btn-primary:hover,
+.btn-success:focus,
+.btn-primary:focus {
+  background-color: var(--pm-primary-hover);
+  border-color: var(--pm-primary-hover);
+}
+.btn-success:active,
+.btn-primary:active,
+.btn-check:checked + .btn-success,
+.show > .btn-success.dropdown-toggle {
+  background-color: var(--pm-primary-active);
+  border-color: var(--pm-primary-active);
+}
+
+.btn {
+  border-radius: var(--pm-radius-md);
+  font-weight: 600;
+}
+
+.form-control,
+.form-select,
+.input-group-text {
+  border-radius: var(--pm-radius-md);
+  border-color: var(--pm-border);
+}
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--pm-primary);
+  box-shadow: 0 0 0 3px var(--pm-primary-soft);
+}
+
+/* Les champs d'un input-group perdent leurs coins interieurs, sinon les
+ * arrondis se chevauchent avec l'icone accolee. */
+.input-group > .form-control:not(:first-child),
+.input-group > .form-select:not(:first-child) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.input-group > .input-group-text:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+a,
+.btn-link {
+  color: var(--pm-primary);
+}
+a:hover,
+.btn-link:hover {
+  color: var(--pm-primary-active);
+}
+
+.nav-pills .nav-link.active,
+.page-item.active .page-link {
+  background-color: var(--pm-primary);
+  border-color: var(--pm-primary);
+}
+.page-link {
+  color: var(--pm-primary);
+}
+
+.form-check-input:checked {
+  background-color: var(--pm-primary);
+  border-color: var(--pm-primary);
+}
+.form-check-input:focus {
+  border-color: var(--pm-primary);
+  box-shadow: 0 0 0 3px var(--pm-primary-soft);
+}
+
+.badge.bg-primary {
+  background-color: var(--pm-primary) !important;
+}
+
+.dropdown-item:active,
+.dropdown-item.active {
+  background-color: var(--pm-primary);
+}
+.dropdown-menu {
+  border-radius: 14px;
+  border-color: var(--pm-border);
+  box-shadow: var(--pm-shadow-md);
+  padding: 6px;
+}
+.dropdown-item {
+  border-radius: 8px;
+}
+
+/* Mode sombre. Mailcow charge sa propre feuille APRES ce fichier ; on ne
+ * redefinit donc que le fond de page, qu'elle ne fixe pas, et rien d'autre.
+ *
+ * Le declencheur est la PRESENCE de son <link id="dark-mode-theme">, pas
+ * `prefers-color-scheme` : Mailcow laisse l'utilisateur forcer le mode clair
+ * via localStorage, et une requete media ignorerait ce choix. */
+html:has(#dark-mode-theme) body {
+  background: linear-gradient(180deg, #16131d 0%, #100e16 100%);
+}

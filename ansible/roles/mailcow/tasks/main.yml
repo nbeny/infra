@@ -121,3 +121,16 @@
 
 - name: Poser les sauvegardes
   ansible.builtin.include_tasks: backup.yml
+
+# Volontairement en DERNIER : la verification de fin interroge le nginx de
+# Mailcow, qui doit donc deja tourner et repondre.
+- name: Appliquer le theme de l'interface
+  ansible.builtin.include_tasks:
+    file: theme.yml
+    # `apply` est indispensable : un `tags:` pose sur l'include ne conditionne
+    # que l'include lui-meme. Sans lui, `--tags theme` inclurait le fichier
+    # puis sauterait chacune de ses taches, faute de tag -- et le playbook
+    # afficherait un succes sans avoir rien fait.
+    apply:
+      tags: [theme]
+  tags: [theme]

@@ -1,0 +1,122 @@
+---
+# ============================================================================
+#  Refonte visuelle de SOGo, inspiree de Proton Mail
+# ----------------------------------------------------------------------------
+#  Aucun fichier livre par Mailcow n'est modifie, aucun conteneur n'est ecrit,
+#  et sa composition Docker n'est pas touchee. Tout est depose dans des chemins
+#  que le .gitignore de Mailcow couvre deja :
+#
+#      data/conf/nginx/*.custom                   (lignes 31 et 78)
+#      data/web/css/build/0081-custom-mailcow.css (ligne 66)
+#
+#  Une mise a jour de Mailcow (`git pull`, `update.sh`) les laisse en place.
+#  C'est la contrainte que le theme devait respecter.
+#
+#  Le point d'accroche cote SOGo n'a rien exige non plus : sogo.conf declare
+#  DEJA `SOGoUIAdditionalJSFiles = (js/theme.js, js/custom-sogo.js)`, donc la
+#  balise <script> existe de toute facon. Il suffisait de servir NOTRE contenu
+#  a cette URL, ce que font les blocs `location =` de site.proton-theme.custom.
+# ============================================================================
+
+- name: Deposer les fichiers du theme
+  ansible.builtin.copy:
+    src: "theme/{{ item.src }}"
+    dest: "{{ mailcow_dir }}/data/conf/nginx/{{ item.file }}"
+    mode: "0644"
+  loop: "{{ mailcow_theme_routes }}"
+  loop_control:
+    label: "{{ item.file }}"
+  # Rien a notifier : data/conf/nginx est monte dans nginx en tant que
+  # REPERTOIRE. Un montage de repertoire suit les chemins et non les inodes,
+  # donc le remplacement d'un fichier a l'interieur est visible des la requete
+  # suivante. C'est ce qui manquait a la premiere version, qui montait chaque
+  # fichier individuellement et servait indefiniment l'inode capture au
+  # demarrage du conteneur.
+
+- name: Publier les fichiers du theme
+  ansible.builtin.template:
+    src: nginx-theme.conf.j2
+    dest: "{{ mailcow_dir }}/data/conf/nginx/site.proton-theme.custom"
+    mode: "0644"
+  notify: Recharger nginx Mailcow
+
+- name: Accorder l'interface Mailcow au theme
+  ansible.builtin.copy:
+    src: theme/mailcow-login.css
+    dest: "{{ mailcow_dir }}/data/web/css/build/0081-custom-mailcow.css"
+    mode: "0644"
+  # Le bundle servi sous /cache/<empreinte>.css est indexe par un sha1 du
+  # CONTENU concatene (inc/lib/CSSminifierExtended.php) : il s'invalide donc
+  # tout seul, sans purge ni redemarrage de php-fpm.
+
+# La premiere version du theme passait par un docker-compose.override.yml.
+# Le laisser en place ferait resservir a nginx les fichiers figes qu'il monte.
+# On le retire donc explicitement plutot que de compter sur une intervention
+# manuelle.
+- name: Retirer l'ancien fichier d'override
+  ansible.builtin.file:
+    path: "{{ mailcow_dir }}/docker-compose.override.yml"
+    state: absent
+  notify: Redemarrer mailcow
+
+# ---------------------------------------------------------------------------
+#  Verification : « le fichier est sur l'hote » ne prouve rien
+# ---------------------------------------------------------------------------
+#  C'est la lecon du premier deploiement : les fichiers etaient corrects sur la
+#  VM et le navigateur recevait autre chose, sans le moindre message d'erreur.
+#  On compare donc l'empreinte de ce que sert REELLEMENT nginx a celle de la
+#  source du depot. Un simple controle de presence ne verrait pas qu'une
+#  version anterieure du meme fichier est servie -- exactement la panne
+#  rencontree.
+#
+#  Ces URL sont publiques : `location =` l'emporte sur le `location ^~ /SOGo`
+#  porteur de l'`auth_request`. Aucune session a ouvrir pour ce controle.
+
+# Sans ce vidage, la verification passerait AVANT le rechargement de nginx --
+# les handlers ne s'executent qu'en fin de play -- et testerait l'ancienne
+# configuration.
+- name: Appliquer la configuration avant de verifier
+  ansible.builtin.meta: flush_handlers
+
+- name: Relever ce que nginx sert vraiment
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}{{ item.urls | first }}"
+    return_content: true
+  loop: "{{ mailcow_theme_routes }}"
+  loop_control:
+    label: "{{ item.urls | first }}"
+  register: mailcow_theme_served
+  changed_when: false
+  # Le conteneur nginx vient peut-etre d'etre relance par le handler.
+  retries: 6
+  delay: 5
+  until: mailcow_theme_served is succeeded
+
+- name: Relever l'empreinte des sources du depot
+  ansible.builtin.stat:
+    path: "{{ role_path }}/files/theme/{{ item.src }}"
+    checksum_algorithm: sha1
+  loop: "{{ mailcow_theme_routes }}"
+  loop_control:
+    label: "{{ item.src }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: mailcow_theme_local
+
+- name: Exiger que nginx serve exactement la version du depot
+  ansible.builtin.assert:
+    that:
+      - item.0.status == 200
+      - (item.0.content | hash('sha1')) == item.1.stat.checksum
+    fail_msg: >-
+      {{ item.0.url }} ne sert pas la version du depot
+      (servi {{ item.0.content | hash('sha1') }},
+      attendu {{ item.1.stat.checksum }}).
+    success_msg: "{{ item.0.url }} : conforme au depot"
+    # Sans `quiet`, chaque succes deverse l'objet `stat` complet de la source :
+    # une quarantaine de lignes par fichier, qui noient la sortie du playbook.
+    quiet: true
+  loop: "{{ mailcow_theme_served.results | zip(mailcow_theme_local.results) | list }}"
+  loop_control:
+    label: "{{ item.0.url }}"

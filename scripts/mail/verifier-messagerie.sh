@@ -178,9 +178,24 @@ fi
 # ---------------------------------------------------------------------------
 section "Ce qui ne doit pas avoir casse"
 # ---------------------------------------------------------------------------
+# Trois tentatives : ces requetes traversent Internet et le proxy Cloudflare.
+# Un 522 isole -- Cloudflare n'a pas joint l'origine sur CE coup-la -- ne dit
+# rien de l'etat du site. Vu le 2026-09-05 : le script annoncait francois.nbeny.fr
+# en panne, six requetes lancees dans la foulee depuis deux points repondaient
+# toutes 200. Un controle qui declenche sur un alea reseau apprend a ignorer
+# ses propres alertes.
 for site in nbeny.fr francois.nbeny.fr; do
-  c=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "https://$site")
-  if [ "$c" = "200" ] || [ "$c" = "301" ]; then ok "$site repond ($c)"; else ko "$site : HTTP $c"; fi
+  c=000
+  for essai in 1 2 3; do
+    c=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "https://$site")
+    case "$c" in 200|301|302) break ;; esac
+    sleep 3
+  done
+  if [ "$c" = "200" ] || [ "$c" = "301" ] || [ "$c" = "302" ]; then
+    ok "$site repond ($c)"
+  else
+    ko "$site : HTTP $c apres 3 tentatives"
+  fi
 done
 
 # ---------------------------------------------------------------------------

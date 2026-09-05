@@ -1,0 +1,55 @@
+# Genere par Ansible (role mailcow, tasks/theme.yml). Toute edition manuelle
+# sera ecrasee.
+#
+# Depose dans data/conf/nginx/site.proton-theme.custom, que le vhost de Mailcow
+# charge deja par `include /etc/nginx/conf.d/site.*.custom;`. Le motif
+# `data/conf/nginx/*.custom` figure dans le .gitignore de Mailcow : ni
+# `git pull` ni `update.sh` ne le touchent.
+#
+# ---------------------------------------------------------------------------
+#  POURQUOI SERVIR LES FICHIERS D'ICI, ET PAS PAR UN MONTAGE DEDIE
+# ---------------------------------------------------------------------------
+#  Premiere version : un docker-compose.override.yml montait chaque fichier du
+#  theme dans le conteneur nginx. Ca marche une fois, puis plus jamais.
+#
+#  Un montage bind portant sur un FICHIER se lie a son inode, pas a son chemin.
+#  Or Ansible ecrit dans un fichier temporaire puis le renomme sur la cible :
+#  l'inode change a chaque deploiement, et le conteneur continue de lire
+#  l'ancien. Mesure le 2026-09-05 : l'hote avait la nouvelle feuille de style,
+#  `docker exec ... stat` montrait l'inode 917584 la ou l'hote en etait a
+#  917642, et nginx servait tranquillement la version precedente. Aucun
+#  message d'erreur nulle part.
+#
+#  Mailcow monte deja data/conf/nginx en tant que REPERTOIRE sur
+#  /etc/nginx/conf.d. Un montage de repertoire suit les chemins, pas les
+#  inodes : remplacer un fichier a l'interieur est visible immediatement. On y
+#  depose donc les fichiers du theme et on les publie par `alias`.
+#
+#  Consequences, toutes bonnes : plus de modification de la composition
+#  Docker, aucun conteneur a recreer, et une modification du theme est en
+#  ligne des le rechargement de la page.
+#
+#  `location =` : correspondance EXACTE, la priorite la plus haute. C'est la
+#  seule forme utilisable ici, parce que les prefixes
+#  `/SOGo/WebServerResources/` et `/SOGo.woa/WebServerResources/` sont deja
+#  declares par Mailcow et que les redeclarer serait une erreur de
+#  configuration. Le parametre de requete n'intervient pas dans le choix du
+#  `location`, ce qui neutralise le `?lm=` de SOGo.
+#
+#  `Cache-Control: no-cache` : SOGo signe ses ressources d'un `?lm=<date>`
+#  calcule une seule fois au demarrage de sogod, a partir de la date du
+#  repertoire. Notre fichier a beau changer, l'URL reste identique. Sans
+#  en-tete de cache, le navigateur applique sa regle heuristique et resservait
+#  sa copie sans meme revalider (`transferSize: 0` pour 398 octets la ou le
+#  fichier en fait 13 000). Le cout de la revalidation est un « 304 » par
+#  chargement de page.
+
+{% for r in mailcow_theme_routes %}
+{% for url in r.urls %}
+location = {{ url }} {
+    alias /etc/nginx/conf.d/{{ r.file }};
+    default_type {{ r.type }};
+    add_header Cache-Control "no-cache";
+}
+{% endfor %}
+{% endfor %}

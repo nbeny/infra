@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  urbanlink  :  marque seule, utilisee quand la barre laterale est repliee.
+  Depose sur data/conf/sogo/custom-shortlogo.svg (alias .../img/sogo-compact.svg).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="urbanlink">
+  <defs>
+    <linearGradient id="uls-g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#c026a8"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="9.5" fill="url(#uls-g)"/>
+  <path d="M9 12.4h14v10.2H9z" fill="none" stroke="#ffffff" stroke-width="2"
+        stroke-linejoin="round"/>
+  <path d="M9 13.1l7 5.2 7-5.2" fill="none" stroke="#ffffff" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

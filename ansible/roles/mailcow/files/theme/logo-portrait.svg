@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  urbanlink : marque verticale, pour l'emplacement de logo de l'interface
+  Mailcow (page de connexion et console). Servie a la place de
+  /img/cow_mailcow.svg par un bloc `location =`, sans toucher a l'image
+  d'origine, qui reste dans data/web/img/.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 200" width="240" height="200" role="img" aria-label="urbanlink">
+  <defs>
+    <linearGradient id="ulp-g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#c026a8"/>
+    </linearGradient>
+  </defs>
+  <rect x="76" y="24" width="88" height="88" rx="28" fill="url(#ulp-g)"/>
+  <path d="M99 55h42v30H99z" fill="none" stroke="#ffffff" stroke-width="5"
+        stroke-linejoin="round"/>
+  <path d="M99 57l21 15 21-15" fill="none" stroke="#ffffff" stroke-width="5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="120" y="150" fill="#7c5cff" text-anchor="middle"
+        font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="30" font-weight="700" letter-spacing="-0.8">urbanlink</text>
+  <text x="120" y="176" fill="#8b86a3" text-anchor="middle"
+        font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="13" font-weight="500" letter-spacing="2.5">MESSAGERIE</text>
+</svg>

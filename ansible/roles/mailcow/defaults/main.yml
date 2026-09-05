@@ -170,3 +170,52 @@ mailcow_mtasts_id: "20260905140000"
 mailcow_dmarc_content: >-
   v=DMARC1; p=none; rua=mailto:f0377b57202644169e025f479791f760@dmarc-reports.cloudflare.net,mailto:dmarc@urbanlink.fr;
   ruf=mailto:dmarc@urbanlink.fr; fo=1
+
+# --- Theme de l'interface --------------------------------------------------
+# Table de correspondance du theme : quel fichier sert quelles URL, et avec
+# quel type MIME. Elle alimente a la fois le depot des fichiers dans
+# data/conf/nginx/ et la generation des blocs `location =` qui les publient.
+#
+# Les URL en double (`/SOGo/...` et `/SOGo.woa/...`) ne sont pas une precaution
+# gratuite : SOGo construit les siennes avec `.woa`, tandis que notre amorce
+# demande la feuille de style sans. Les deux doivent aboutir au meme fichier.
+#
+# Le suffixe `.custom` des noms de fichiers est deliberé : il les fait entrer
+# dans le motif `data/conf/nginx/*.custom` du .gitignore de Mailcow, donc une
+# mise a jour ne les emporte pas. Il ne les fait PAS entrer dans le motif
+# d'inclusion nginx, qui est `site.*.custom` : ce sont des donnees, pas de la
+# configuration.
+mailcow_theme_routes:
+  - file: proton-theme.css.custom
+    src: sogo-proton.css
+    type: text/css
+    urls:
+      - /SOGo/WebServerResources/css/custom-theme.css
+      - /SOGo.woa/WebServerResources/css/custom-theme.css
+  - file: proton-theme.js.custom
+    src: sogo-proton.js
+    type: application/javascript
+    urls:
+      - /SOGo.woa/WebServerResources/js/theme.js
+      - /SOGo/WebServerResources/js/theme.js
+  - file: proton-logo-full.svg.custom
+    src: logo-full.svg
+    type: image/svg+xml
+    urls:
+      - /SOGo/WebServerResources/img/sogo-full.svg
+      - /SOGo.woa/WebServerResources/img/sogo-full.svg
+  - file: proton-logo-short.svg.custom
+    src: logo-short.svg
+    type: image/svg+xml
+    urls:
+      - /SOGo/WebServerResources/img/sogo-compact.svg
+      - /SOGo.woa/WebServerResources/img/sogo-compact.svg
+  # Emplacement de logo de l'interface Mailcow (page de connexion, console).
+  # L'image d'origine reste intacte dans data/web/img/ : on se contente de
+  # servir la notre a cette URL. Retirer cette entree suffit a revenir a la
+  # vache de Mailcow.
+  - file: proton-logo-portrait.svg.custom
+    src: logo-portrait.svg
+    type: image/svg+xml
+    urls:
+      - /img/cow_mailcow.svg

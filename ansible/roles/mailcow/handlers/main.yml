@@ -33,3 +33,13 @@
 - name: Recharger systemd
   ansible.builtin.systemd_service:
     daemon_reload: true
+
+# `restart` et non `nginx -s reload` : le conteneur nginx de Mailcow regenere
+# son vhost depuis les gabarits Jinja a chaque demarrage. Un simple rechargement
+# relirait la configuration sans la regenerer -- ce qui suffit pour un fichier
+# `.custom`, mais laisserait diverger le reste a la premiere mise a jour.
+- name: Recharger nginx Mailcow
+  ansible.builtin.command:
+    cmd: docker compose restart nginx-mailcow
+    chdir: "{{ mailcow_dir }}"
+  changed_when: true
