@@ -17,6 +17,15 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE SCHEMA IF NOT EXISTS kratos;
 
 -- Grant privileges
+--
+-- ⚠️ Ces GRANT-ci concernent le rôle PROPRIÉTAIRE (`urbanconnect`), celui qui
+-- possède les tables et joue les migrations Prisma. Ils sont volontairement
+-- larges — y compris sur le schéma `kratos`.
+--
+-- Le rôle avec lequel l'APPLICATION se connecte est un autre rôle, créé par
+-- `ensure-app-role.sh` : pas de DDL, aucun accès au schéma `kratos`. Ne pas
+-- élargir les droits ci-dessous en croyant servir le backend — il ne les
+-- utilise pas.
 GRANT ALL PRIVILEGES ON SCHEMA public TO urbanconnect;
 GRANT ALL PRIVILEGES ON SCHEMA kratos TO urbanconnect;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO urbanconnect;

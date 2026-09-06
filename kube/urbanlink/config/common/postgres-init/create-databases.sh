@@ -41,3 +41,21 @@ if [ -n "${TEMPORAL_DB_USER:-}" ]; then
 fi
 
 echo "create-databases.sh: rôles/bases additionnels assurés (nominatim exclu)."
+
+# --- Rôle APPLICATIF (sans droits d'administration) ---
+#
+# Délégué à un fichier séparé, et ce n'est pas un découpage esthétique : le même
+# fichier est rejoué à CHAQUE démarrage par le service one-shot
+# `postgres-app-role` du compose. `docker-entrypoint-initdb.d` ne s'exécute que
+# sur un volume vierge — sans ce second appel, aucun poste déjà installé ne
+# verrait jamais le rôle, et le durcissement ne vaudrait que pour les machines
+# neuves. Une seule source de vérité, deux appelants.
+#
+# Le chemin de montage est HORS de `docker-entrypoint-initdb.d/` : posé dedans,
+# l'entrypoint l'exécuterait une deuxième fois juste après celui-ci.
+if [ -f /urbanconnect/ensure-app-role.sh ]; then
+  bash /urbanconnect/ensure-app-role.sh
+else
+  echo "create-databases.sh: /urbanconnect/ensure-app-role.sh absent — rôle applicatif non créé ici." >&2
+  echo "  (Le service one-shot 'postgres-app-role' le posera au démarrage de la pile.)" >&2
+fi

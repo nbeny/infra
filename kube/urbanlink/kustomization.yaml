@@ -242,6 +242,10 @@ resources:
   # ComparisonError et plus RIEN ne se deploie. `options.labels` est accepte
   # par les deux versions, il n'y a donc aucune raison de prendre le risque.
   # Meme raison que ci-dessus : `options.labels`, pas `labels`.
+# Tableau de bord de la MESSAGERIE, volontairement separe des precedents :
+# ceux-ci viennent du depot APPLICATIF via la CI (rsync de config/), tandis que
+# la messagerie est un objet d'infrastructure. Le poser dans config/ le ferait
+# dependre d'une CI qui ne le concerne pas -- et qui est aujourd'hui rouge.
 configMapGenerator:
 - files:
   - config/common/kratos/identity.schema.json
@@ -276,10 +280,6 @@ configMapGenerator:
   options:
     labels:
       grafana_dashboard: "1"
-# Tableau de bord de la MESSAGERIE, volontairement separe des precedents :
-# ceux-ci viennent du depot APPLICATIF via la CI (rsync de config/), tandis que
-# la messagerie est un objet d'infrastructure. Le poser dans config/ le ferait
-# dependre d'une CI qui ne le concerne pas -- et qui est aujourd'hui rouge.
 - files:
   - observability/dashboards/05-messagerie.json
   name: grafana-dashboard-messagerie
@@ -295,10 +295,10 @@ configMapGenerator:
 images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend
-  newTag: sha-e1f3083d
+  newTag: sha-e3d7e282
 - name: urbanconnect-frontend
   newName: 10.0.0.130:5000/urbanconnect-frontend
-  newTag: sha-e1f3083d
+  newTag: sha-e3d7e282
 - name: urbanconnect-temporal-worker
   newName: 10.0.0.130:5000/urbanconnect-temporal-worker
-  newTag: sha-e1f3083d
+  newTag: sha-e3d7e282

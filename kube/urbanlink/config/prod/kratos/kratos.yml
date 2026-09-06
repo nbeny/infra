@@ -177,6 +177,29 @@ selfservice:
       privileged_session_max_age: 15m
       required_aal: highest_available
 
+# ============================================================================
+# Session — niveau d'assurance exigé pour être « connecté »
+# ----------------------------------------------------------------------------
+# ⚠️ SANS CE BLOC, LE SECOND FACTEUR EST FACULTATIF POUR CELUI QUI L'A ACTIVÉ.
+#
+# `selfservice.flows.settings.required_aal: highest_available` (plus haut) ne
+# gouverne qu'une chose : l'accès à l'écran de RÉGLAGES. Ce qui décide si une
+# session vaut « connecté » pour le reste de l'application, c'est
+# `session.whoami.required_aal` — et son défaut est `aal1`.
+#
+# Conséquence mesurable : un membre qui a pris la peine d'activer le TOTP
+# obtenait quand même une session pleinement valide en donnant SEULEMENT son
+# mot de passe. `/sessions/whoami` répondait 200, le backend le considérait
+# authentifié, il pouvait acheter, écrire, vendre. Le second facteur n'était
+# jamais réclamé nulle part — il ne protégeait rien.
+#
+# `highest_available` signifie : exige le niveau le plus élevé que CE compte
+# a configuré. Un compte sans second facteur reste à `aal1` et n'est donc pas
+# gêné ; un compte qui en a un doit le présenter.
+session:
+  whoami:
+    required_aal: highest_available
+
 log:
   level: info
   format: text
@@ -188,7 +211,18 @@ ciphers:
 hashers:
   algorithm: bcrypt
   bcrypt:
-    cost: 8
+    # ⚠️ 12 et non 8. Le coût bcrypt est un EXPOSANT : chaque unité double le
+    # travail, donc 8 → 12 multiplie par seize l'effort d'un attaquant qui
+    # rejoue un dump de mots de passe. Côté légitime, cela coûte ~250 ms de
+    # calcul par connexion — invisible pour un humain. 12 est le défaut
+    # recommandé par Ory ; 8 relevait d'un réglage de poste de développement
+    # recopié tel quel en production.
+    #
+    # Le changement ne casse AUCUN compte existant : Kratos vérifie avec le
+    # coût inscrit DANS le hachage stocké, puis re-hache au coût courant à la
+    # connexion suivante. La migration se fait compte par compte, toute seule,
+    # sans réinitialisation de mot de passe et sans fenêtre de bascule.
+    cost: 12
 
 identity:
   default_schema_id: default
