@@ -92,6 +92,47 @@ se fait dans la page, sans iframe : la couleur de texte du corps descendait
 jusqu'a la zone de saisie, et en mode sombre on ecrivait en clair sur blanc. Le
 theme rebranche les variables CSS de CKEditor 5 sur nos jetons.
 
+## Le mobile
+
+SOGo est **deja** adaptatif, et le theme ne refait pas ce travail. Ses propres
+feuilles reorganisent la mise en page aux points de rupture d'Angular Material :
+au-dela de 960 px la barre laterale est verrouillee ouverte ; entre 600 et
+959 px elle devient un tiroir a rideau mais liste et lecture restent cote a
+cote ; sous 600 px il ne reste qu'une colonne, et `.view-detail` devient une
+surcouche absolue que SOGo masque tant qu'aucun message n'est ouvert.
+
+Ce que le theme ajoute tient dans la section 18 de la feuille, et se decoupe en
+quatre, dont les deux premiers points ne parlent **pas** de largeur d'ecran :
+
+| Bloc | Ce qu'il corrige |
+|---|---|
+| `@media (hover: none)` | Un survol pose par un doigt ne se retire jamais. L'avatar du message consulte gardait son agrandissement pour le reste de la session. |
+| `@media (pointer: coarse)` | Les cibles passent de 36 a 44 px. Le bouton flottant et le calque `.md-no-style` des lignes de liste en sont exclus : le premier a sa propre geometrie, le second ecarterait le texte des messages. |
+| `< 960 px` | Le tiroir se superpose (surface + ombre) ; `100dvh` au lieu de `height: 100%`, qui laissait le bas de l'application sous la barre d'adresse ; 96 px reserves sous la liste, que le bouton flottant recouvrait ; barre d'actions du message defilante ; `overscroll-behavior` pour qu'un defilement vers le haut ne recharge pas la session. |
+| `< 600 px` | Plein cadre, texte d'un cran plus grand, **champs a 16 px**, et confinement du corps des courriels HTML. |
+
+Deux points meritent leur justification.
+
+**Les 16 px des champs ne sont pas un choix typographique.** Sous cette taille,
+iOS Safari zoome de lui-meme a la mise au point d'un champ et ne dezoome jamais
+ensuite. C'est la contrepartie exigee par l'amorce, qui retire le
+`maximum-scale=1` de la balise viewport de SOGo : cette clause interdisait le
+zoom au pincement sur Android (WCAG 1.4.4), mais elle bloquait aussi le zoom
+automatique d'iOS. La retirer sans passer les champs a 16 px aurait rendu la
+saisie pire qu'avant.
+
+**Un courriel HTML est ecrit pour un ecran large** : tableaux a largeur fixe en
+pixels, images en pleine resolution, URL nues de deux cents caracteres. Sans
+confinement, c'est la page entiere qui se met a defiler lateralement et la liste
+passe hors cadre. Le debordement est donc enferme dans le corps du message.
+
+Ce qui n'est **pas** fait : aucune marge `env(safe-area-inset-*)`. Ces valeurs
+ne sont non nulles que si la page reclame le plein ecran par
+`viewport-fit=cover`, ce que la balise viewport de SOGo ne fait pas et que
+l'amorce ne lui ajoute pas — passer sous l'encoche obligerait a rembourrer a la
+main chaque bord de chaque panneau, alors qu'iOS insere aujourd'hui la page dans
+la zone sure tout seul.
+
 ## Ce qui survit a une mise a jour de Mailcow
 
 Tous les chemins ecrits sont couverts par le `.gitignore` de Mailcow :
@@ -168,3 +209,12 @@ contraste sur le fond clair comme sur le fond sombre de la barre laterale.
 - **Une erreur console prealable subsiste** : `CKEDITOR is not defined`, levee par
   `custom-sogo.js` livre par Mailcow. Elle est anterieure a ce travail et sans
   effet visible.
+- **La section 18 n'a pas ete vue sur un telephone reel.** Les regles ont ete
+  validees par un analyseur CSS (les huit blocs `@media` et le `@supports`
+  imbrique sont bien reconnus, aucune regle silencieusement rejetee) et le
+  reecriture de la balise viewport a ete eprouvee sur la chaine exacte que sert
+  SOGo. Mais l'interface de courrier est derriere l'authentification : un
+  navigateur non connecte est renvoye vers la page de connexion de Mailcow, donc
+  aucune capture de la liste, de la lecture ou de la composition en largeur
+  telephone n'a pu etre prise. Le premier passage sur un vrai appareil reste a
+  faire.

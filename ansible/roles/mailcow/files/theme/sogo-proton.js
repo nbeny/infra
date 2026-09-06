@@ -7,13 +7,14 @@
  *  .../WebServerResources/js/theme.js et que sogo.conf charge via
  *  `SOGoUIAdditionalJSFiles`. Aucun fichier de Mailcow n'est modifie.
  *
- *  Ce fichier fait quatre choses, et rien d'autre :
+ *  Ce fichier fait cinq choses, et rien d'autre :
  *    1. il pose le mode clair/sombre sur <html> AVANT tout rendu ;
- *    2. il injecte la feuille de style du theme ;
- *    3. il donne a Angular Material la palette violette, pour que ce qui est
+ *    2. il rend le zoom au pincement possible, que SOGo interdit ;
+ *    3. il injecte la feuille de style du theme ;
+ *    4. il donne a Angular Material la palette violette, pour que ce qui est
  *       genere a l'execution (encre, cases a cocher, barres de progression)
  *       soit deja de la bonne couleur au lieu d'etre repeint apres coup ;
- *    4. il ajoute les trois elements que le CSS seul ne peut pas creer :
+ *    5. il ajoute les trois elements que le CSS seul ne peut pas creer :
  *       le bandeau de marque, le bouton « Nouveau message » et la bascule
  *       clair/sombre.
  *
@@ -62,7 +63,47 @@
   document.documentElement.setAttribute('data-pm-theme', preferredTheme());
 
   /* ------------------------------------------------------------------ *
-   *  2. Feuille de style
+   *  2. Zoom au pincement
+   * ------------------------------------------------------------------ *
+   *  SOGo declare `maximum-scale=1` dans sa balise viewport, ce qui interdit
+   *  d'agrandir la page au pincement sur Android. C'est un manquement
+   *  d'accessibilite caracterise (WCAG 1.4.4) et, sur un telephone, la seule
+   *  facon de lire une signature de courriel composee en corps 9.
+   *
+   *  On ne retire QUE cette clause. Le service qu'elle rendait sur iOS --
+   *  empecher le zoom automatique a la mise au point d'un champ de moins de
+   *  16 px, zoom dont Safari ne revient jamais tout seul -- est repris par la
+   *  feuille de style, qui passe tous les champs a 16 px sous 600 px de large
+   *  (section 18.3). Sans cette contrepartie, retirer `maximum-scale`
+   *  rendrait la saisie pire qu'avant.
+   *
+   *  La balise est deja dans le DOM : SOGo charge ce script en fin de <body>,
+   *  donc le <head> est entierement analyse.                              */
+
+  function relaxZoom() {
+    var meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+
+    var content = meta.getAttribute('content') || '';
+    if (content.indexOf('maximum-scale') === -1 &&
+        content.indexOf('user-scalable') === -1) {
+      return;
+    }
+
+    meta.setAttribute('content', content
+      .split(',')
+      .map(function (part) { return part.trim(); })
+      .filter(function (part) {
+        return part.indexOf('maximum-scale') !== 0 &&
+               part.indexOf('user-scalable') !== 0;
+      })
+      .join(', '));
+  }
+
+  relaxZoom();
+
+  /* ------------------------------------------------------------------ *
+   *  3. Feuille de style
    * ------------------------------------------------------------------ *
    *  Insertion SYNCHRONE : la balise est ajoutee pendant l'analyse du
    *  document, donc le navigateur la traite comme bloquante au rendu et il
@@ -82,7 +123,7 @@
   document.head.appendChild(link);
 
   /* ------------------------------------------------------------------ *
-   *  3. Palette Angular Material
+   *  4. Palette Angular Material
    * ------------------------------------------------------------------ */
 
   // Une palette Angular Material doit definir toutes ses teintes, sans quoi
@@ -148,7 +189,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  4. Elements que le CSS ne peut pas creer
+   *  5. Elements que le CSS ne peut pas creer
    * ------------------------------------------------------------------ */
 
   var ICONS = {

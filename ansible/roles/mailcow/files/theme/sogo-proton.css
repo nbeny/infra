@@ -1967,8 +1967,133 @@ body.main .pm-theme-toggle:hover svg {
 }
 
 /* ==========================================================================
- *  18. Adaptatif
+ *  18. Adaptatif -- tablette, telephone, pointeur au doigt
+ * --------------------------------------------------------------------------
+ *  SOGo est DEJA adaptatif, et il n'y a aucune raison de refaire son travail.
+ *  Releve dans le styles.css de SOGo 5.12 servi par cette instance :
+ *
+ *    >= 960 px    la barre laterale est verrouillee ouverte (md-locked-open),
+ *                 la liste occupe 30 vw, la lecture prend le reste ;
+ *    600..959 px  la barre laterale devient un tiroir a rideau, mais liste et
+ *                 lecture restent cote a cote (37.5 vw / reste) ;
+ *    < 600 px     UNE seule colonne : `.view-list` passe a 100 %, et
+ *                 `.view-detail` devient une surcouche absolue en z-index 11
+ *                 que SOGo masque (`display: none`) tant qu'aucun message
+ *                 n'est ouvert.
+ *
+ *  Le theme n'a donc pas a deplacer de colonnes. Ce qu'il doit fournir en
+ *  plus tient en quatre points, qui sont le plan de cette section :
+ *
+ *    18.1  ce qui depend du POINTEUR et non de la largeur : un doigt ne
+ *          survole pas, et il lui faut des cibles d'environ 44 px ;
+ *    18.2  < 960 px : le tiroir se SUPERPOSE au lieu de pousser, donc il lui
+ *          faut une surface et une ombre ; le bouton flottant reprend du
+ *          service et doit cesser de recouvrir le dernier message ;
+ *    18.3  < 600 px : plein cadre, texte d'un cran plus grand, champs a
+ *          16 px, et surtout confinement du corps des courriels HTML, qui
+ *          sont ecrits pour un ecran large ;
+ *    18.4  telephone couche : il ne reste que ~350 px de haut, chaque barre
+ *          empilee coute une ligne de liste.
+ *
+ *  CE QUI N'EST PAS FAIT, ET POURQUOI. Aucune marge `env(safe-area-inset-*)`.
+ *  Ces valeurs ne sont non nulles que si la page reclame le plein ecran par
+ *  `viewport-fit=cover`, ce que la balise viewport de SOGo ne fait pas -- et
+ *  que l'amorce ne lui ajoute pas non plus, deliberement : passer sous
+ *  l'encoche obligerait a rembourrer a la main chaque bord de chaque panneau,
+ *  alors qu'iOS insere aujourd'hui la page dans la zone sure tout seul. Les
+ *  regles `env()` vaudraient donc zero partout.
  * ========================================================================== */
+
+/* --- 18.1 Le pointeur, pas la largeur ------------------------------------ *
+ * Ces deux blocs ne parlent pas de taille d'ecran : une tablette de 1024 px
+ * se pilote au doigt, et un ecran etroit peut l'etre a la souris. Les separer
+ * de 18.2 evite d'agrandir les cibles la ou elles n'ont pas a l'etre, et de
+ * les laisser minuscules sur une grande tablette.                          */
+
+/* Un `:hover` pose par un doigt ne se retire jamais : le navigateur le garde
+ * jusqu'au toucher suivant, ailleurs. Les effets qui DEPLACENT restaient donc
+ * figes sur le dernier element touche -- l'avatar du message consulte gardait
+ * son agrandissement pour le reste de la session. Les fonds de survol, eux,
+ * sont sans consequence et font un retour visuel acceptable au doigt : on ne
+ * les touche pas. */
+@media (hover: none) {
+  body.main .sg-avatar-selectable:hover {
+    transform: none;
+  }
+  /* Le `:not()` protege la ligne selectionnee : sans lui, ce selecteur -- plus
+   * specifique que celui de la selection -- repeindrait en surface neutre le
+   * message ouvert. */
+  body.main md-list-item.sg-message-list-item:hover:not(.md-bg):not(.md-accent) {
+    background-color: var(--pm-surface) !important;
+    border-color: transparent;
+  }
+  body.main .pm-compose:hover {
+    background: var(--pm-primary);
+    box-shadow: var(--pm-shadow-primary);
+  }
+}
+
+/* 44 px : la cible tactile confortable, chez Angular Material comme dans les
+ * regles d'accessibilite. Le theme dessine a 36 px, ce qui est juste a la
+ * souris et trop petit au doigt. */
+@media (pointer: coarse) {
+  /* Le doigt n'a pas de curseur a poser : le halo gris de Chrome Android
+   * n'ajoute rien a nos etats :active, et il bave hors des coins arrondis. */
+  body.main {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Les deux `:not()` ne sont pas des precautions de style. `.md-fab` porte sa
+   * propre geometrie de 56 px, et `.md-no-style` est le calque invisible
+   * qu'Angular Material etale sur chaque ligne de liste : lui imposer une
+   * hauteur de ligne de 44 px ecarterait le texte des messages qui n'en
+   * declare pas une. Ni l'un ni l'autre n'a besoin d'etre agrandi -- le
+   * flottant fait deja 56 px, et la ligne de liste 68. */
+  body.main .md-button:not(.md-fab):not(.md-no-style) {
+    min-height: 44px;
+    line-height: 44px;
+  }
+  body.main .md-button.md-icon-button,
+  body.main .sg-icon-button {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    line-height: 44px;
+  }
+  /* Selecteurs repris a l'identique de la section 12 : a specificite egale,
+   * c'est la derniere regle du fichier qui tranche. */
+  body.main md-menu-content md-menu-item {
+    min-height: 44px;
+    height: 44px;
+  }
+  body.main md-menu-content md-menu-item > .md-button {
+    min-height: 44px;
+    height: 44px;
+    line-height: 44px;
+  }
+  body.main md-sidenav.md-sidenav-left md-list-item:not(.sg-mailbox-list-item),
+  body.main md-list-item.sg-mailbox-list-item {
+    min-height: 44px;
+  }
+  body.main .pm-compose {
+    min-height: 46px;
+  }
+  body.main md-chip,
+  body.main md-chips md-chip {
+    height: 32px;
+    line-height: 32px;
+  }
+  /* Le compteur de fil vit DANS une ligne deja cliquable : le grossir
+   * n'ajouterait aucune cible, seulement du bruit. */
+  body.main .sg-message-list-item .sg-tile-btn {
+    min-height: 22px;
+    height: 22px;
+    line-height: 22px;
+  }
+}
+
+/* --- 18.2 Tablette et telephone (< 960 px) ------------------------------- */
 
 @media (max-width: 959px) {
   /* Le tiroir se superpose : il lui faut une vraie surface et une ombre,
@@ -2005,21 +2130,210 @@ body.main .pm-theme-toggle:hover svg {
     width: 100%;
     height: 100%;
   }
+
+  /* Les navigateurs mobiles retractent leur barre d'adresse en cours de
+   * defilement. Le `height: 100%` que pose SOGo se resout contre le GRAND
+   * viewport : le bas de l'application -- donc le bouton flottant -- passait
+   * sous la barre d'adresse tant qu'elle etait deployee. `100dvh` suit la
+   * hauteur reellement visible. */
+  @supports (height: 100dvh) {
+    html,
+    body.main {
+      height: 100dvh;
+    }
+  }
+
+  /* Tirer la liste vers le bas alors qu'elle est deja en haut declenchait le
+   * rechargement de la page -- et un webmail qui se recharge, c'est toute la
+   * session Angular reconstruite pour rien. */
+  body.main {
+    overscroll-behavior-y: contain;
+  }
+
+  /* Le bouton flottant reprend du service a cette largeur (section 4) et se
+   * pose PAR-DESSUS la fin de la liste : le dernier message etait
+   * inatteignable. 96 px = 56 px de bouton, sa marge, et une respiration. */
+  body.main .view-list md-list.sg-section-list {
+    padding-bottom: 96px;
+  }
+
+  /* La barre d'actions d'un message porte jusqu'a huit icones. A 44 px
+   * chacune elle depasse la largeur d'un telephone : plutot que de la laisser
+   * passer a la ligne et manger la moitie de la carte, on la fait defiler. */
+  body.main .view-detail md-card > md-card-actions:first-child {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  body.main .view-detail md-card > md-card-actions:first-child::-webkit-scrollbar {
+    display: none;
+  }
+  body.main .view-detail md-card > md-card-actions:first-child > * {
+    flex: 0 0 auto;
+  }
+
+  /* Les modales de SOGo sont dimensionnees pour un ecran d'ordinateur et
+   * debordaient par les cotes. */
+  body.main md-dialog:not(.sg-mail-editor) {
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
 }
 
+/* --- 18.3 Telephone (< 600 px) : une seule colonne a la fois -------------- */
+
 @media (max-width: 599px) {
+  /* Plus de gouttiere a menager : la liste occupe toute la largeur. */
+  body.main md-list.sg-section-list {
+    padding: 0 4px 96px;
+  }
   body.main md-list-item.sg-message-list-item {
     margin: 2px 0;
     border-radius: var(--pm-radius-sm);
+    min-height: 68px;
   }
-  body.main md-list.sg-section-list {
-    padding: 0 4px 12px;
+  body.main md-list-item.sg-message-list-item .md-button.md-no-style,
+  body.main md-list-item.sg-message-list-item > .md-button {
+    padding: 0 10px;
   }
+  body.main .sg-avatar-selectable {
+    margin-right: 10px;
+  }
+  /* La taille du message est la premiere information sacrifiee : elle sert
+   * rarement, et elle prend la place de l'objet. */
   body.main .sg-message-list-item .sg-tile-size {
     display: none;
   }
   body.main p.sg-date-today.sg-md-display-3 {
     display: none;
+  }
+
+  /* Un telephone se tient a trente centimetres de l'oeil, pas a soixante. */
+  body.main .sg-message-list-item .sg-md-subhead {
+    font-size: 14px;
+  }
+  body.main .sg-message-list-item .sg-md-body {
+    font-size: 13.5px;
+  }
+
+  /* Chaque pixel horizontal des barres revient au nom du dossier. */
+  body.main md-toolbar.toolbar-main .md-toolbar-tools {
+    padding: 0 4px;
+  }
+  body.main .view-list > md-toolbar .md-toolbar-tools {
+    padding: 0 6px;
+  }
+
+  /* SOUS 16 px, iOS Safari zoome de lui-meme a la mise au point d'un champ,
+   * et ne dezoome jamais ensuite : on se retrouve a lire un webmail decale
+   * d'un tiers d'ecran. 16 px est donc ici une contrainte fonctionnelle, pas
+   * un choix typographique. */
+  body.main input,
+  body.main textarea,
+  body.main select,
+  body.main md-input-container > input,
+  body.main md-input-container > textarea,
+  body.main md-input-container .md-input,
+  body.main md-chips input,
+  body.main md-autocomplete input,
+  body.main .view-list > md-toolbar form.md-toolbar-tools input[type="search"],
+  body.main .ck.ck-editor__main > .ck-editor__editable {
+    font-size: 16px;
+  }
+
+  /* La carte de lecture est plein cadre : ses marges internes se resserrent,
+   * et le corps du message gagne le cran de lisibilite. */
+  body.main .view-detail md-card > md-card-actions:first-child {
+    padding: 4px 6px;
+  }
+  body.main .view-detail md-card-header {
+    padding: 12px 14px 6px;
+  }
+  body.main .view-detail .sg-md-headline {
+    font-size: 18px;
+    padding: 2px 0 8px;
+  }
+  body.main .view-detail .mailer_mailcontent,
+  body.main .view-detail .msg-body {
+    padding: 14px;
+    font-size: 15px;
+  }
+
+  /* Un courriel HTML est compose pour un ecran large : tableaux a largeur
+   * fixe en pixels, images en pleine resolution, URL nues de deux cents
+   * caracteres. Sans confinement, c'est la PAGE ENTIERE qui se met a defiler
+   * lateralement et la liste passe hors cadre. Le debordement est donc
+   * enferme dans le corps du message, ou il reste consultable au doigt. */
+  body.main .view-detail,
+  body.main #detailView {
+    overflow-x: hidden;
+  }
+  body.main .view-detail .mailer_mailcontent,
+  body.main .view-detail .msg-body {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overflow-wrap: anywhere;
+  }
+  body.main .view-detail .mailer_mailcontent img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* La fenetre de composition est deja plein ecran : la zone de saisie n'a
+   * plus besoin d'imposer 240 px, qui repoussaient les pieces jointes et le
+   * bouton d'envoi hors de vue. */
+  body.main .ck.ck-editor__main > .ck-editor__editable,
+  body.main .ck.ck-content {
+    min-height: 160px;
+    padding: 14px;
+  }
+  body.main .sg-mail-editor .msg-header-content,
+  body.main .sg-mail-editor .pseudo-input-container {
+    padding: 2px 12px;
+  }
+
+  /* Le tiroir couvre presque l'ecran : la marque peut respirer. */
+  body.main .pm-brand {
+    padding: 14px 16px 2px;
+  }
+
+  /* Onglets des preferences : leurs libelles debordaient. On resserre le
+   * remplissage, PAS la hauteur -- les 48 px d'Angular Material sont deja la
+   * bonne cible tactile, les rogner serait un recul. */
+  body.main md-tabs .md-tab {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+}
+
+/* --- 18.4 Telephone couche ----------------------------------------------- *
+ * En paysage il ne reste qu'environ 350 px de haut, dont deux barres empilees
+ * et le bandeau de marque. Chaque element retire rend une ligne de liste.   */
+
+@media (max-height: 480px) and (orientation: landscape) {
+  body.main .pm-brand {
+    display: none;
+  }
+  body.main md-toolbar.toolbar-main,
+  body.main .view-list > md-toolbar {
+    min-height: 46px;
+    height: 46px;
+  }
+  body.main md-toolbar.toolbar-main .md-toolbar-tools,
+  body.main .view-list > md-toolbar .md-toolbar-tools {
+    height: 46px;
+    max-height: 46px;
+  }
+  body.main md-list-item.sg-message-list-item {
+    min-height: 56px;
+  }
+  body.main .sg-message-list-item .sg-tile-content {
+    padding: 6px 4px 6px 0;
+  }
+  body.main .ck.ck-editor__main > .ck-editor__editable,
+  body.main .ck.ck-content {
+    min-height: 96px;
   }
 }
 
