@@ -1,0 +1,214 @@
+# =============================================================================
+#  ⚠️⚠️⚠️ FICHIER RENOMME EXPRES -- `.MANUAL`, PAS `.yaml`.
+# -----------------------------------------------------------------------------
+#  Même mécanisme de désamorçage que `backend/seed-job.yaml.DANGER-demo-data`
+#  (lire son en-tête si ce n'est pas déjà fait) : kustomize ne résout que des
+#  `*.yaml`/`*.yml` listés dans `resources:`, donc ce fichier ne peut PAS être
+#  pris pour un manifeste par une ligne ajoutée par erreur -- il faudrait le
+#  renommer EN PLUS de le référencer, deux gestes délibérés au lieu d'un seul
+#  oubli. Il n'est PAS dans `kustomization.yaml` et ne doit jamais y entrer :
+#  Argo l'appliquerait au cycle suivant, sur la production. Il s'applique à la
+#  main, sciemment, par un humain qui a lu ce fichier.
+#
+#  ⚠️ CE QUE CE FICHIER DÉTRUIT (les deux Jobs qu'il contient) :
+#   - `backend-reset-app-db`  : VIDE la base applicative `urbanconnect` --
+#     utilisateurs, annonces, posts, messages, conversations, commandes,
+#     paiements, litiges, négociations/devis, réservations, tout -- SAUF
+#     `badges` (1331 définitions de référence), la taxonomie MORTE
+#     (`main_types`/`categories`/`subcategories`/`specialties`, conservée à
+#     la demande du propriétaire bien que rien dans `backTs/src` ne la lise
+#     -- la vraie taxonomie vit dans `front/src/data/categoriesStructure.ts`),
+#     le schéma et `_prisma_migrations`.
+#   - `backend-reset-kratos`  : VIDE les IDENTITÉS Kratos -- identities,
+#     sessions, credentials, adresses de récupération/vérification, flows en
+#     cours -- SAUF ses tables de référence propres (`schema_migration`,
+#     `identity_credential_types`, `networks`).
+#  Après les deux : PLUS UN SEUL compte connectable, PLUS UNE SEULE annonce,
+#  conversation ou commande. C'est l'objectif -- `urbanlink.fr` en production
+#  doit rester une PLATEFORME VIDE (schéma + données de RÉFÉRENCE seulement).
+#
+#  ⚠️ CE QU'IL NE TOUCHE PAS : MinIO. Vider Postgres laisse les images
+#  déjà envoyées (avatars, photos d'annonces, CV) ORPHELINES dans le bucket
+#  -- personne ne les référence plus, mais elles restent. Même angle mort
+#  que `backend-seed` (voir son en-tête, section MinIO) : ce fichier ne fait
+#  AUCUNE purge, et ce n'est pas un oubli à corriger ici -- une purge par
+#  préfixe risquerait d'effacer un objet encore référencé (les préfixes de
+#  demo et de production ne sont PAS séparés). Le corpus légal
+#  (préfixe `legal/`) n'est de toute façon PAS concerné : ni l'un ni l'autre
+#  script ne parle à MinIO, aucun risque d'y toucher par accident.
+#
+#  ⚠️ CHACUN DES DEUX SCRIPTS EST DRY-RUN PAR DÉFAUT, et ce fichier le respecte
+#  : `RESET_CONFIRM` est livré VIDE ci-dessous sur les deux Jobs. Tel quel,
+#  `kubectl apply -f` de ce fichier ne fait qu'IMPRIMER le plan (tables
+#  préservées, tables à vider, décompte de lignes) dans les logs du Job et
+#  ressort en 0, SANS RIEN ÉCRIRE. Pour effacer réellement, voir le
+#  commentaire sur `RESET_CONFIRM` de CHAQUE Job plus bas -- il faut l'ÉDITER
+#  à la main, pas le passer sur une ligne de commande qui traînerait dans un
+#  historique de shell. La séquence complète (ordre, vérifications) est dans
+#  `kube/urbanlink/README.md`, section « Runbook -- remise à plat de la
+#  plateforme ».
+#
+#  ⚠️ IMAGE : `urbanconnect-seed:prod`, comme `backend-badges` et
+#  `backend-seed` -- PAS `urbanconnect-backend:prod`. Les deux scripts
+#  (`backTs/scripts/reset-empty-platform*.ts`) tournent par `ts-node`, une
+#  devDependency retirée de l'image backend par son `npm ci --omit=dev` :
+#  `npx ts-node ...` y échouerait à l'introuvable. Contrairement au seed
+#  complet, aucun des deux scripts n'importe `front/src/` (pas de taxonomie à
+#  charger pour vider une table) -- mais l'image dédiée est déjà là pour
+#  `backend-badges`, la réutiliser évite d'en construire une troisième pour
+#  ce seul besoin de `ts-node`.
+#
+#  ⚠️ Ni PreSync ni Sync : CE NE SONT PAS des hooks Argo (le fichier n'est de
+#  toute façon jamais lu par Argo, cf. plus haut). Ce sont des Jobs ORDINAIRES,
+#  appliqués et supprimés à la main. Un Job est IMMUABLE une fois créé --
+#  pour relancer après un dry-run (ou changer `RESET_CONFIRM`), supprimer puis
+#  réappliquer :
+#      kubectl -n urbanconnect delete job backend-reset-app-db backend-reset-kratos --ignore-not-found
+#      kubectl -n urbanconnect apply -f backend/reset-job.yaml.MANUAL
+#      kubectl -n urbanconnect logs -f job/backend-reset-app-db
+#      kubectl -n urbanconnect logs -f job/backend-reset-kratos
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-reset-app-db
+  namespace: urbanconnect
+  labels:
+    app: backend-reset-app-db
+spec:
+  # Une troncature ratée à moitié ne se répare pas en relançant tout seul --
+  # une seule instruction TRUNCATE est atomique (tout ou rien), mais un échec
+  # avant même d'y arriver (connexion, permissions) doit se lire, pas se
+  # reproduire en boucle.
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: backend-reset-app-db
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres 5432; do
+                echo "Attente de postgres..."; sleep 2
+              done
+      containers:
+        - name: backend-reset-app-db
+          image: urbanconnect-seed:prod
+          imagePullPolicy: IfNotPresent
+          command: ["npx", "ts-node", "scripts/reset-empty-platform.ts"]
+          env:
+            - name: NODE_ENV
+              value: production
+            # ⚠️ PAS DE PGBOUNCER, même raisonnement que `backend-migrate` et
+            # `backend-badges` (voir leurs en-têtes) : ce Job tourne rarement,
+            # ne dure que quelques secondes, et TRUNCATE prend un verrou
+            # ACCESS EXCLUSIVE sur ~76 tables d'un coup -- s'appuyer sur une
+            # connexion directe et courte évite toute question de session vs
+            # pooling par transaction, pour un coût nul (ce Job ne partage sa
+            # connexion avec personne).
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: POSTGRES_DB
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)"
+            # ⚠️⚠️⚠️ LA PORTE DE CE JOB. Vide (défaut ci-dessous) = DRY-RUN :
+            # le script relit le nom réel de la base (`SELECT
+            # current_database()`), l'imprime, imprime le plan complet, et
+            # sort en 0 SANS RIEN TOUCHER tant que cette valeur ne le
+            # rejoint pas au caractère près.
+            #
+            # Pour effacer RÉELLEMENT : ÉDITER cette ligne à la main pour
+            # qu'elle porte le nom EXACT de `POSTGRES_DB` en production
+            # (vérifier avec `kubectl -n urbanconnect get secret
+            # urbanconnect-secrets -o jsonpath='{.data.POSTGRES_DB}' | base64 -d`
+            # -- ne PAS supposer "urbanconnect"), supprimer puis réappliquer
+            # ce Job (voir la commande plus haut). Un écart, même d'un
+            # caractère, fait REFUSER le script (exit 1) plutôt que de
+            # deviner ce que l'opérateur voulait dire.
+            - name: RESET_CONFIRM
+              value: ""
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-reset-kratos
+  namespace: urbanconnect
+  labels:
+    app: backend-reset-kratos
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: backend-reset-kratos
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres 5432; do
+                echo "Attente de postgres..."; sleep 2
+              done
+      containers:
+        - name: backend-reset-kratos
+          image: urbanconnect-seed:prod
+          imagePullPolicy: IfNotPresent
+          command: ["npx", "ts-node", "scripts/reset-empty-platform-kratos.ts"]
+          env:
+            - name: NODE_ENV
+              value: production
+            # Même secret DSN que `kratos/migrate-job.yaml` (clé `KRATOS_DSN`,
+            # déjà pointée sur `postgres:5432` en interne) -- SÉPARÉ de
+            # `DATABASE_URL` ci-dessus : Kratos vit dans SA PROPRE base sur la
+            # même instance Postgres, avec son propre schéma. Voir l'en-tête
+            # de `reset-empty-platform-kratos.ts` pour pourquoi c'est un
+            # script (et donc un conteneur) séparé plutôt qu'un `--kratos` sur
+            # le premier.
+            - name: KRATOS_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_DSN
+            # ⚠️⚠️⚠️ MÊME PORTE QUE CI-DESSUS, sur la base Kratos. Vide =
+            # DRY-RUN. Pour effacer réellement, ÉDITER à la main pour qu'elle
+            # porte le nom exact de la base Kratos (`KRATOS_DB_NAME` --
+            # `kratos` par défaut, vérifier plutôt que supposer), supprimer
+            # puis réappliquer ce Job.
+            - name: RESET_CONFIRM
+              value: ""
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

@@ -379,4 +379,95 @@ Tests fonctionnels :
 - **JWT à l'edge** (optionnel) : Oathkeeper peut minter un JWT signé (mutator
   `id_token`) pour décharger le backend — nécessite JWKS + passage HS256→RS256.
   Laissé désactivé (voir `oathkeeper/configmap.yaml`).
+
+---
+
+## 9. Runbook — remise à plat de la plateforme (prod vide)
+
+`urbanlink.fr` doit rester une **plateforme vide** : schéma + données de
+référence seulement (badges, taxonomie), **zéro** utilisateur, annonce,
+message ou conversation de démonstration, **zéro** identité Kratos. Ce
+runbook est la séquence à suivre pour y ramener un cluster qui porte encore
+des données de démo ou de test — outillage : `backend/reset-job.yaml.MANUAL`
+(désamorcé exprès, voir son en-tête) + `backend/badges-job.yaml`.
+
+⚠️ Manuel de bout en bout — aucune de ces étapes n'est dans `kustomization.yaml`,
+Argo ne les rejoue jamais de lui-même.
+
+### Étape 1 — vider la base applicative
+
+```bash
+kubectl -n urbanconnect delete job backend-reset-app-db --ignore-not-found
+kubectl -n urbanconnect apply -f backend/reset-job.yaml.MANUAL   # les DEUX Jobs — kratos suit à l'étape 2
+kubectl -n urbanconnect logs -f job/backend-reset-app-db
 ```
+
+Livré tel quel (`RESET_CONFIRM` vide), ce Job est un **dry-run** : il imprime
+le plan (tables préservées, tables à vider, décompte de lignes) et ne touche
+rien. Lire ce plan AVANT de continuer — c'est le moment de repérer une table
+qui n'aurait pas dû être vidée, ou une base à laquelle on ne s'attendait pas.
+
+Pour effacer réellement : éditer `RESET_CONFIRM` du Job `backend-reset-app-db`
+dans `reset-job.yaml.MANUAL` (nom exact de `POSTGRES_DB`, vérifié plutôt que
+supposé — voir le commentaire sur place), supprimer puis réappliquer le Job.
+
+**Vérifier après cette étape :**
+```bash
+kubectl -n urbanconnect logs job/backend-reset-app-db | tail -20   # décompte APRÈS à 0, tables préservées inchangées
+```
+`badges` (1331 définitions), la taxonomie (`main_types`/`categories`/
+`subcategories`/`specialties`) et `_prisma_migrations` doivent apparaître
+inchangés dans le rapport ; toutes les autres tables à 0.
+
+### Étape 2 — vider les identités Kratos
+
+Même Job manifeste (`backend-reset-kratos`, déjà appliqué à l'étape 1 —
+même fichier) — mais c'est une base et une porte `RESET_CONFIRM`
+**complètement séparées** de l'étape 1 (voir l'en-tête de
+`reset-job.yaml.MANUAL` : pourquoi deux Jobs plutôt qu'un seul).
+
+```bash
+kubectl -n urbanconnect logs -f job/backend-reset-kratos
+```
+
+Même logique dry-run par défaut ; éditer `RESET_CONFIRM` de CE Job
+(nom exact de la base Kratos — `KRATOS_DB_NAME`, `kratos` par défaut),
+supprimer puis réappliquer pour effacer réellement.
+
+**Vérifier après cette étape :**
+```bash
+kubectl -n urbanconnect exec deploy/kratos -- curl -s http://localhost:4434/admin/identities
+```
+Doit rendre `[]`. Toute réponse non vide signifie que l'étape n'a pas
+(encore) été confirmée, ou a porté sur la mauvaise base.
+
+### Étape 3 — rejouer les badges
+
+Les badges ne sont PAS détruits par l'étape 1 (`badges` est dans sa liste de
+préservation) — cette étape est une vérification de sûreté, pas un
+rattrapage : elle garantit que le catalogue est bien à jour avec le code
+actuellement déployé (upsert idempotent, sans effet si rien n'a changé),
+plutôt que de supposer que « préservé » veut dire « à jour ».
+
+```bash
+kubectl -n urbanconnect delete job backend-badges --ignore-not-found
+kubectl -n urbanconnect apply -f backend/badges-job.yaml
+kubectl -n urbanconnect logs -f job/backend-badges
+```
+
+**Vérifier après cette étape :** le Job se termine en `Completed`, et
+`SELECT count(*) FROM badges;` (via `kubectl exec` sur le pod postgres) rend
+1331 (ou la valeur courante du catalogue si `badges.seed.ts` a changé depuis).
+
+### Après les trois étapes
+
+- Le back-office (`adminSearchUsers`) ne doit plus rendre aucun compte.
+- `POST /graphql` doit continuer à répondre (une base vide n'est pas censée
+  empêcher le boot — vérifié en dev, voir le rapport de livraison de ce
+  chantier) : `curl -s -X POST https://api.urbanlink.fr/graphql -H 'Content-Type: application/json' -d '{"query":"{ __typename }"}'`.
+- **MinIO n'a pas été touché** : les images déjà envoyées (avatars, photos
+  d'annonces, CV) restent dans le bucket, orphelines. Purge hors périmètre de
+  ce runbook — voir l'en-tête de `reset-job.yaml.MANUAL` et celui de
+  `backend-seed` pour la méthode (comparer les clés référencées en base — donc
+  disponibles seulement AVANT l'étape 1 — à `mc ls --recursive`) si une purge
+  est un jour décidée.
