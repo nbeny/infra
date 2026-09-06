@@ -90,6 +90,30 @@ server {
         proxy_ssl_verify off;
 {% endif %}
 
+        # ⚠️ **SANS CECI, UNE PAGE SUR DEUX REND 502.** nginx tamponne les
+        # en-tetes de reponse de l'amont dans UN SEUL buffer, dont le defaut
+        # vaut une page memoire -- 4096 octets ici. Next.js depasse ce seuil
+        # des qu'une page cumule CSP, HSTS, Set-Cookie NEXT_LOCALE, les
+        # en-tetes Vary/Cache-Control et les entetes de routage Istio.
+        #
+        # Mesure du 2026-09-06 sur la production, via la passerelle :
+        #   /fr/          3730 octets -> passait
+        #   /fr/map/      4002 octets -> passait, a 94 octets de la rupture
+        #   /fr/explore/  4102 octets -> 502
+        #
+        # Le symptome ne ressemble PAS a sa cause : Cloudflare affiche « Bad
+        # gateway », le pod Next.js rend 200 en direct, Istio rend 200, et
+        # seul `/var/log/nginx/error.log` dit « upstream sent too big header ».
+        # On soupconne l'application, jamais le proxy.
+        #
+        # 16k, soit quatre fois le maximum observe : la marge doit absorber un
+        # cookie de session, un nonce CSP plus long ou une locale de plus sans
+        # rejouer cette panne. Les buffers de CORPS sont dimensionnes en
+        # consequence, sinon nginx refuse la configuration.
+        proxy_buffer_size       16k;
+        proxy_buffers        8  16k;
+        proxy_busy_buffers_size 32k;
+
         proxy_connect_timeout 10s;
         proxy_read_timeout    {{ svc.read_timeout | default('60s') }};
         proxy_send_timeout    {{ svc.read_timeout | default('60s') }};
