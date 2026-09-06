@@ -86,7 +86,24 @@ data:
         config:
           headers:
             X-User-Id: "{{ print .Subject }}"
-            X-User-Email: "{{ print .Extra.identity.traits.email }}"
+            # ⚠️ **LE GARDE `if` N'EST PAS DÉCORATIF.** L'authenticator
+            # `anonymous` pose `.Subject` (« guest ») mais AUCUN
+            # `.Extra.identity` : sans garde, Go échoue sur
+            # « nil pointer evaluating interface {}.traits », Oathkeeper compte
+            # cette erreur de mutateur comme un refus (`Access request denied`,
+            # journalisé en 500) et Envoy la rend au client en **403**.
+            #
+            # Toutes les requêtes NON AUTHENTIFIÉES de `api.urbanlink.fr`
+            # étaient donc refusées — dont les **webhooks Stripe**, qui
+            # arrivent par définition sans cookie de session : aucun paiement,
+            # aucun abonnement, aucun boost, aucune mise à jour de compte
+            # Connect n'aurait jamais été confirmé.
+            #
+            # Ce défaut était MASQUÉ par le précédent : tant que la règle était
+            # ancrée sur `https://` elle ne matchait rien et Oathkeeper rendait
+            # 404 avant d'atteindre le mutateur. Corriger le schéma a fait
+            # apparaître celui-ci.
+            X-User-Email: '{{ if .Extra.identity }}{{ print .Extra.identity.traits.email }}{{ end }}'
       noop:
         enabled: true
       # UPGRADE (JWT à l'edge) : activer id_token pour minter un JWT signé (RS256)
