@@ -166,6 +166,33 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: STRIPE_SECRET_KEY
+            # ⚠️ **Sans elle, Stripe Connect tourne en MOCK en production.**
+            # `stripe-connect.service.ts` bascule en mode fictif dès que la clé
+            # est vide — avec un simple `logger.warn`, jamais une erreur. Le KYC
+            # vendeur produit alors des comptes `acct_mock_…`, et le balayage de
+            # versement échoue sur « No such destination » sans que rien ne le
+            # signale. Elle manquait ici depuis toujours : le mode test ne la
+            # réclamait pas, le dev la lisant depuis `backTs/.env`.
+            #
+            # Même valeur que `STRIPE_SECRET_KEY` : un seul compte Stripe, avec
+            # Connect activé dessus (vérifié en live le 2026-09-06).
+            - name: STRIPE_CONNECT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_CONNECT_SECRET_KEY
+            # Instant à partir duquel la plateforme ENTIERCE les fonds au lieu
+            # de les router vers le vendeur à la capture. Une vente antérieure
+            # se rembourse par `reverse_transfer`, une postérieure par
+            # `transfers.createReversal` : le mauvais geste échoue en silence.
+            #
+            # Date volontairement ANTÉRIEURE à toute vente live : il n'existe
+            # aucun paiement en mode live avant la bascule, donc aucune vente
+            # ne peut légitimement relever du régime pré-entiercement. Trop
+            # tard aurait produit des fonds orphelins que rien ne signale ;
+            # trop tôt, ici, ne peut rien produire du tout.
+            - name: ESCROW_EPOCH
+              value: "2026-09-06T00:00:00.000Z"
             - name: STRIPE_PUBLISHABLE_KEY
               valueFrom:
                 secretKeyRef:
@@ -181,7 +208,7 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: STRIPE_CONNECT_WEBHOOK_SECRET
-            # Identifiants de prix des trois plans payants (mode TEST).
+            # Identifiants de prix des trois plans payants (mode LIVE).
             #
             # En clair et non dans le Secret : un price ID n'est pas un secret —
             # il part chez le navigateur dans l'URL du Checkout hébergé. C'est de
@@ -197,11 +224,11 @@ spec:
             # table : sans elle, un abonnement réellement payé n'est rattaché à
             # aucun plan. Constaté en production le 2026-08-31.
             - name: STRIPE_PRICE_STARTER_ID
-              value: "price_1TDV5JKqEapb7zc8eV1moGrg"
+              value: "price_1UChBkKqEapb7zc8Ai3KMKl7"
             - name: STRIPE_PRICE_PREMIUM_ID
-              value: "price_1TDV5oKqEapb7zc8S5ZzejG2"
+              value: "price_1UChBkKqEapb7zc8iaNahW4f"
             - name: STRIPE_PRICE_ENTERPRISE_ID
-              value: "price_1TDV64KqEapb7zc8NDoS6Zox"
+              value: "price_1UChBlKqEapb7zc8lzHXgrXb"
             # SMS
             - name: SMSAPI_TOKEN
               valueFrom:
