@@ -158,6 +158,17 @@ spec:
             - name: FRONTEND_URL
               value: "https://urbanlink.fr"
             # Stripe
+            # ⚠️ **TEMPORAIRE — à retirer dès que l'image portant le nouveau
+            # défaut (20000) est déployée.** Le code avait 1500, ce qui refusait
+            # `searchArtefacts` (2 320, et 11 600 à limit=100) et
+            # `userArtefacts` (5 200) : la recherche, la carte et la vitrine
+            # vendeur rendaient « Erreur de chargement » en production.
+            # Posée ici pour rétablir le service en deux minutes au lieu
+            # d'attendre une construction d'image. Une fois l'image livrée,
+            # cette ligne fait doublon avec le défaut du code — la retirer,
+            # sinon deux endroits décideront de la même valeur.
+            - name: GRAPHQL_MAX_COMPLEXITY
+              value: "20000"
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
