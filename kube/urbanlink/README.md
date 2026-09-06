@@ -394,6 +394,40 @@ des données de démo ou de test — outillage : `backend/reset-job.yaml.MANUAL`
 ⚠️ Manuel de bout en bout — aucune de ces étapes n'est dans `kustomization.yaml`,
 Argo ne les rejoue jamais de lui-même.
 
+### ⚠️ Étape 0 — couper les sessions AVANT de vider la base applicative
+
+**Vider Kratos EN PREMIER, ou mettre le backend à zéro réplique.** L'ordre
+inverse laisse une fenêtre pendant laquelle un porteur de session encore
+valide touche le backend, ne trouve plus son utilisateur (la table vient
+d'être vidée) et le fait **recréer** par `AuthService.getOrCreateUser`.
+
+Ce n'est pas théorique : mesuré en production le 2026-09-06. Entre le vidage
+de la base applicative et celui de Kratos — moins d'une minute — un navigateur
+resté ouvert a recréé son propre utilisateur, et les deux répliques du backend
+ont couru pour le faire, laissant dans les journaux un
+`Unique constraint failed on the fields: ("kratosId")` pour seule trace. La
+plateforme n'était donc PAS vide à la fin de la séquence, et rien ne le
+signalait : il a fallu recompter.
+
+Deux façons de fermer la fenêtre, au choix :
+
+```bash
+# a) couper le trafic applicatif le temps de l'opération (le plus sûr)
+kubectl -n urbanconnect scale deploy/backend --replicas=0
+# … étapes 1 et 2 …
+kubectl -n urbanconnect scale deploy/backend --replicas=2
+
+# b) ou simplement inverser : Kratos d'abord (étape 2), base applicative ensuite
+```
+
+Dans les deux cas, **recompter les utilisateurs après la séquence complète**,
+pas seulement après l'étape 1 :
+
+```bash
+kubectl -n urbanconnect exec postgres-0 -- \
+  psql -U urbanconnect -d urbanconnect -tAc "SELECT count(*) FROM users;"
+```
+
 ### Étape 1 — vider la base applicative
 
 ```bash
