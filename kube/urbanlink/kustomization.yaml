@@ -295,10 +295,10 @@ configMapGenerator:
 images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend
-  newTag: sha-bb5e9af0
+  newTag: sha-8928ce90
 - name: urbanconnect-frontend
   newName: 10.0.0.130:5000/urbanconnect-frontend
-  newTag: sha-bb5e9af0
+  newTag: sha-8928ce90
 - name: urbanconnect-temporal-worker
   newName: 10.0.0.130:5000/urbanconnect-temporal-worker
-  newTag: sha-bb5e9af0
+  newTag: sha-8928ce90
