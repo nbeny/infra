@@ -100,6 +100,20 @@ resource "proxmox_virtual_environment_vm" "this" {
     ssd          = true
   }
 
+  # Second disque optionnel (voir var.extra_disk). Bloc dynamique : une VM qui
+  # n'en declare pas n'en recoit aucun, et son plan reste vide.
+  dynamic "disk" {
+    for_each = var.extra_disk == null ? [] : [var.extra_disk]
+    content {
+      datastore_id = coalesce(disk.value.datastore, var.datastore_id)
+      interface    = disk.value.interface
+      size         = disk.value.size
+      iothread     = true
+      discard      = "on"
+      ssd          = true
+    }
+  }
+
   # Attention : activer le pare-feu sur l'interface n'a d'effet que si le
   # pare-feu est active au niveau datacenter. Et le jour ou il l'est, une VM
   # marquee `firewall = true` SANS fichier /etc/pve/firewall/<vmid>.fw herite

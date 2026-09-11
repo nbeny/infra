@@ -51,6 +51,30 @@ variable "disk_size" {
   description = "Taille du disque systeme en Gio. Ne peut qu'augmenter par rapport au template."
 }
 
+variable "extra_disk" {
+  type = object({
+    size      = number
+    datastore = optional(string, null)
+    interface = optional(string, "scsi1")
+  })
+  default     = null
+  description = <<-EOT
+    Second disque, optionnel. Sert a poser une charge sensible a la LATENCE sur
+    un stockage different de celui du disque systeme -- typiquement la base
+    etcd d'un noeud Kubernetes sur un SSD, quand le disque systeme vit sur des
+    plateaux.
+
+    ⚠️ Le declarer ICI plutot que de l'ajouter a la main avec `qm set` n'est pas
+    une coquetterie : le fournisseur relit TOUS les disques de la VM lors du
+    refresh. Un disque present sur la VM mais absent de la configuration est vu
+    comme une derive, et le prochain `apply` le SUPPRIME -- avec la base etcd
+    dessus, donc avec le cluster.
+
+    Le formatage et le montage ne sont PAS faits ici : Terraform ne fait que du
+    materiel. Voir le role Ansible correspondant.
+  EOT
+}
+
 variable "cpu_type" {
   type        = string
   description = "Modele de CPU expose a l'invite."

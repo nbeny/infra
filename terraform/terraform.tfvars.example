@@ -56,42 +56,59 @@ vms = {
 
   # --- Stack applicatif UrbanLink -------------------------------------------
   # Dimensionne pour les manifests de kube/urbanlink : ~54 Gio de requests
-  # memoire et ~548 Gio de volumes une fois tous les composants demarres.
+  # memoire, ~69 Gio de LIMITS (dont 32 pour le seul nominatim) et ~548 Gio de
+  # volumes une fois tous les composants demarres.
   #
   # BUDGET MEMOIRE DU NOEUD -- 110 Go utilisables au total.
-  # Le ballooning est desactive (balloon: 0) : chaque VM prend et garde son
-  # allocation complete, elle ne rend rien a l'hote. Le total des VM DEMARREES
-  # doit donc rester sous ~104 Go pour laisser vivre PVE et l'ARC ZFS.
+  # ATTENTION : le decompte precedent OUBLIAIT les deux VMs qui tournent
+  # reellement a cote, et comptait deux VMs de test qui sont eteintes. Le vrai:
   #
-  #   urbanlink   96 Go
-  #   test-k8s     8 Go
-  #   kali-test    8 Go
-  #   Other        4 Go
+  #   urbanlink   96 Go   balloon 0  -- ne rend RIEN
+  #   ci-runner   12 Go   balloon 4  -- VM MANUELLE, absente de cet etat
+  #   mail         8 Go   balloon 4
+  #   ARC ZFS      4 Go              -- plafonne dans /etc/modprobe.d/zfs.conf
+  #   PVE        ~1,5 Go
   #   -------------------
-  #   total      116 Go  -> deja au-dessus du physique
+  #   plafond   121,5 Go  -> 11 Go AU-DESSUS du physique
+  #   plancher  109,5 Go  -> tient, mais a 500 Mo pres
   #
-  # Ca ne tient que parce qu'UrbanConnect (VM 100, 96 Go) est ARRETEE.
-  # La redemarrer avec urbanlink a 96 Go donnerait 212 Go demandes sur 110 Go
-  # physiques : l'OOM killer tuerait des VM, sans choisir laquelle.
-  # Avant de rallumer la 100 : arreter les deux VM de test (16 Go) et
-  # redescendre urbanlink, ou repartir la charge autrement.
+  # CE DIMENSIONNEMENT NE TIENT QUE PAR LE BALLONNEMENT DE ci-runner ET mail.
+  # Si l'un des deux travaille pendant que l'autre est charge -- un build CI et
+  # une remise de courrier au meme instant -- le noeud depasse le physique et
+  # l'OOM killer choisit LUI-MEME quelle VM tuer. Il ne choisira pas la moins
+  # importante.
+  #
+  # Avant d'allumer test-k8s (8 Go), kali-test (8 Go), UrbanConnect (VM 100,
+  # 96 Go) ou une VM macOS (8 Go, SANS ballonnement) : redescendre urbanlink
+  # d'autant. Il n'y a plus de marge a prendre ailleurs.
   "urbanlink" = {
     profile     = "debian-k8s"
     vm_id       = 111
-    ip          = "10.0.0.111"
-    cores       = 8
-    sockets     = 2          # 16 vCPU
-    memory      = 98304      # 96 Go
-    disk_size   = 700
-    on_boot     = true
-    # Ordre de demarrage au boot du noeud. La RAM est SURENGAGEE (118 Go
-    # promis pour 110 Go physiques) : un demarrage a froid lancerait toutes
-    # les VMs au moment ou chacune demande le plus de memoire. Un rang
-    # transforme la ruee en file d'attente. `up_delay` est le temps d'attente
-    # APRES cette VM, avant la suivante -- ici, le temps que Kubernetes se
-    # pose. Une VM SANS rang demarre apres toutes celles qui en ont un.
+    # Demarre en PREMIER, et laisse 90 s a Kubernetes pour se poser avant que la
+    # VM suivante ne vienne disputer la memoire : c'est la plus grosse, et la
+    # seule sans ballooning.
     startup_order    = 1
     startup_up_delay = 90
+    ip          = "10.0.0.111"
+    cores       = 12
+    sockets     = 2     # 24 vCPU sur les 32 threads du noeud
+    memory      = 98304 # 96 Go
+    disk_size   = 700
+    # etcd SUR SSD. Le disque systeme vit sur pool2 = UN SEUL Hitachi 3 To a
+    # 7200 tr/min, et etcd fsync a chaque ecriture. Mesure sur 12 jours :
+    # 30 859 fsync du WAL au-dela de 8 ms, dont 192 au-dela de 1 s et 7 au-dela
+    # de 8 s. Passe 5 s, le controller-manager et le scheduler perdent leur
+    # bail et sortent en `leaderelection lost` -- 125 et 129 redemarrages. Le
+    # symptome ressemble a une panne memoire ; c'en est une de latence disque.
+    #
+    # `local-lvm` est le thinpool du SSD Intel DC S3610 du noeud : 107 Go
+    # libres, 0 % utilise. La base etcd fait 403 Mo -- 32 Go couvrent sa
+    # croissance et ses instantanes pour des annees.
+    extra_disk = {
+      size      = 32
+      datastore = "local-lvm"
+    }
+    on_boot     = true
     tags        = ["app", "urbanlink"]
     description = "Cluster Kubernetes hebergeant le stack UrbanLink."
   }

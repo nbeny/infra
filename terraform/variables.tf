@@ -91,6 +91,14 @@ variable "vms" {
     # memoire inutilisee de la VM.
     memory_floating = optional(number, 0)
     disk_size       = optional(number, 32)
+    # Second disque, optionnel : { size = 32, datastore = "local-lvm" }.
+    # Declare-le ici plutot que par `qm set` -- un disque non declare est vu
+    # comme une derive et SUPPRIME au prochain apply.
+    extra_disk = optional(object({
+      size      = number
+      datastore = optional(string, null)
+      interface = optional(string, "scsi1")
+    }), null)
     datastore   = optional(string, null)
     on_boot     = optional(bool, true)
     started     = optional(bool, true)

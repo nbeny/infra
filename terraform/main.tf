@@ -65,6 +65,7 @@ module "vm" {
   memory          = each.value.memory
   memory_floating = each.value.memory_floating
   disk_size       = each.value.disk_size
+  extra_disk      = each.value.extra_disk
 
   bridge        = local.bridge
   ip            = each.value.ip
