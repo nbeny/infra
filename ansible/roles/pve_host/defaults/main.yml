@@ -19,6 +19,13 @@ pve_api_token_name: "provider"
 pve_api_role: "TerraformProv"
 pve_base_packages: [curl, git, jq, unzip, rsync]
 
+# --- ZFS -------------------------------------------------------------------
+# 4 Gio. Le noeud surengage sa memoire : voir roles/pve_host/tasks/zfs.yml.
+pve_zfs_arc_max_bytes: 4294967296
+# pool2 porte le disque systeme du cluster Kubernetes et n'a qu'un seul disque
+# a plateaux : `atime=on` y ajoute une ecriture par lecture.
+pve_zfs_noatime_pools: [pool1, pool2]
+
 # Interfaces physiques -- utilisees uniquement par le template interfaces.j2
 # quand pve_manage_network=true.
 pve_uplink_interface: nic3

@@ -29,6 +29,45 @@ spec:
       # Nominatim a besoin de beaucoup de RAM pour l'import initial
       # En prod : utiliser une image pré-construite avec les données déjà importées
       # plutôt que de relancer l'import au démarrage (PBF_URL télécharge ~30Go)
+      # Ce qui rend le demarrage rapide APRES un arret brutal.
+      #
+      # Une base sale fait fsync a PostgreSQL sur CHAQUE fichier du repertoire
+      # de donnees avant de rejouer -- 5161 fichiers ici, sur pool2 qui est un
+      # disque a plateaux : des minutes, pendant que `pg_ctl` renonce a 60 s.
+      # `syncfs` remplace cette marche par UN seul appel systeme. Mesure le
+      # 2026-09-11 : de « did not start in time » repete a « ready to accept
+      # requests » en 15 secondes.
+      #
+      # postgresql.auto.conf est LU AU DEMARRAGE et vit dans le PVC, donc le
+      # reglage survit a la recreation du pod. C'est aussi pour ca qu'il est
+      # pose ici et pas dans postgresql.conf, qui appartient a l'image.
+      #
+      # ⚠️ Sur un PVC VIERGE le fichier n'existe pas encore (initdb ne l'a pas
+      # ecrit) : l'initContainer ne fait rien et le reglage n'arrive qu'a la
+      # premiere recreation du pod apres l'import. C'est voulu -- l'ecrire
+      # avant initdb le ferait ecraser.
+      initContainers:
+        - name: recovery-sync-syncfs
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              F=/var/lib/postgresql/16/main/postgresql.auto.conf
+              if [ ! -f "$F" ]; then
+                echo "postgresql.auto.conf absent (PVC vierge) -- rien a faire"
+                exit 0
+              fi
+              if grep -q '^recovery_init_sync_method' "$F"; then
+                echo "recovery_init_sync_method deja pose"
+                exit 0
+              fi
+              echo "recovery_init_sync_method = 'syncfs'" >> "$F"
+              echo "recovery_init_sync_method = syncfs ajoute"
+          volumeMounts:
+            - name: nominatim-data
+              mountPath: /var/lib/postgresql/16/main
       containers:
         - name: nominatim
           image: mediagis/nominatim:5.2
@@ -47,13 +86,12 @@ spec:
             - configMapRef:
                 name: nominatim-config
           env:
-            # Le filet de securite de l'autre bout : si la base repart quand
-            # meme sale (arret non gracieux, coupure de courant), il lui faut le
-            # temps de rejouer. Lu par `pg_ctl` LUI-MEME, pas par
-            # `pg_ctlcluster` -- inutile de chercher la variable dans son code,
-            # elle n'y est pas. Defaut : 60 s, d'ou l'echec.
-            - name: PGCTLTIMEOUT
-              value: "1800"
+            # ⚠️ NE PAS remettre PGCTLTIMEOUT ici : c'est INERTE, teste le
+            # 2026-09-11. La variable est bien posee dans le conteneur, mais
+            # `/app/start.sh` lance `service postgresql start`, et
+            # /usr/sbin/service execute le script d'init derriere un
+            # `env -i LANG=... PATH=... TERM=...` : une liste BLANCHE, qui la
+            # jette. Le correctif vit dans l'initContainer ci-dessus.
             # Seul le mot de passe reste ici : le reste est versionne.
             - name: POSTGRES_PASSWORD
               valueFrom:

@@ -1,0 +1,56 @@
+---
+# ---------------------------------------------------------------------------
+#  Reglages ZFS du noeud
+#
+#  Deux choses, et elles n'ont pas la meme urgence.
+#
+#  1. LE PLAFOND DE L'ARC. Il n'appartient a personne par defaut : ZFS prend
+#     la moitie de la RAM. Sur ce noeud la memoire est SURENGAGEE -- urbanlink
+#     96 Go sans ballonnement, ci-runner 12, mail 8, pour 110 physiques -- et
+#     chaque Gio laisse a l'ARC est un Gio que l'OOM killer ira prendre a une
+#     VM, sans choisir laquelle.
+#
+#     ⚠️ Le fichier etait deja pose a la main (6,3 Gio) mais n'etait declare
+#     NULLE PART : un rebuild du noeud l'aurait perdu, et le surengagement
+#     serait passe de « tient a 500 Mo pres » a « ne tient pas », sans que rien
+#     ne relie la panne a ce reglage.
+#
+#  2. L'ACCESS TIME. `atime=on` fait une ECRITURE a chaque lecture. Sur pool2,
+#     qui est un SEUL disque a plateaux et qui porte le disque systeme du
+#     cluster Kubernetes, c'est de l'amplification pure sur le chemin le plus
+#     sature du noeud.
+# ---------------------------------------------------------------------------
+
+- name: Plafonner l'ARC ZFS (persistant)
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/zfs.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role pve_host). Voir tasks/zfs.yml pour le pourquoi.
+      options zfs zfs_arc_max={{ pve_zfs_arc_max_bytes }}
+  register: pve_zfs_arc_file
+
+- name: Appliquer le plafond de l'ARC sans attendre le redemarrage
+  ansible.builtin.copy:
+    dest: /sys/module/zfs/parameters/zfs_arc_max
+    content: "{{ pve_zfs_arc_max_bytes }}"
+    unsafe_writes: true
+  changed_when: pve_zfs_arc_file.changed
+  when: pve_zfs_arc_file.changed
+
+# `initramfs` embarque /etc/modprobe.d : sans regeneration, le plafond n'est
+# pas applique au chargement du module au boot, seulement plus tard.
+- name: Regenerer l'initramfs
+  ansible.builtin.command: update-initramfs -u -k all
+  when: pve_zfs_arc_file.changed
+  changed_when: true
+
+- name: Desactiver l'access time sur les pools
+  community.general.zfs:
+    name: "{{ item }}"
+    state: present
+    extra_zfs_properties:
+      atime: "off"
+  loop: "{{ pve_zfs_noatime_pools }}"

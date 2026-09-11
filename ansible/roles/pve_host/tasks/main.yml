@@ -33,6 +33,10 @@
   when: pve_install_iac_tools | bool
   tags: [iac]
 
+- name: Regler l'ARC ZFS et l'access time des pools
+  ansible.builtin.import_tasks: zfs.yml
+  tags: [zfs]
+
 - name: Configurer le routage et le NAT du reseau du lab
   ansible.builtin.import_tasks: network.yml
   tags: [network]

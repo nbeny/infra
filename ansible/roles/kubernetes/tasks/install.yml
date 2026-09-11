@@ -48,6 +48,36 @@
     - { name: net.bridge.bridge-nf-call-ip6tables, value: "1" }
     - { name: net.ipv4.ip_forward, value: "1" }
 
+# Les plafonds inotify sont PAR UID, et la quasi-totalite des conteneurs
+# tournent en root : containerd, kubelet, istio-cni, elasticsearch, kafka et
+# les operateurs se partagent le meme quota de 128 instances.
+#
+# Le 2026-09-11, apres un redemarrage de la VM urbanlink, tout le stack est
+# reparti en meme temps et istio-cni-node est entre en CrashLoopBackOff sur :
+#
+#   installer failed: create CNI config file: watcher create:
+#   couldn t initialize inotify: too many open files
+#
+# Sans istio-cni, les pods neufs ne sont pas enroles dans le maillage ambient.
+# ztunnel a repondu 503, le backend a cesse de joindre redis, kafka et temporal,
+# et le site est tombe. Mesure au moment de la panne : 151 instances inotify
+# ouvertes pour un plafond de 128.
+#
+# ⚠️ Rien dans le symptome n'evoque un plafond de noyau -- ni le message du
+# backend (`getaddrinfo EAI_AGAIN redis`), ni celui de ztunnel (`503`). Seul le
+# journal d'istio-cni le dit, et il faut savoir aller l'y chercher.
+- name: Relever les plafonds inotify (istio-cni, kubelet, operateurs)
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-inotify-kubernetes.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { name: fs.inotify.max_user_instances, value: "8192" }
+    - { name: fs.inotify.max_user_watches, value: "1048576" }
+
 # ---------------------------------------------------------------------------
 #  Depot pkgs.k8s.io
 # ---------------------------------------------------------------------------
