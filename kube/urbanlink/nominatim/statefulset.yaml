@@ -16,6 +16,16 @@ spec:
       labels:
         app: nominatim
     spec:
+      # ⚠️ 30 s (le defaut) NE SUFFISENT PAS a arreter proprement ces 95 Go.
+      # `service postgresql stop` fait un checkpoint d'arret ; passe le delai,
+      # le kubelet envoie SIGKILL et la base repart SALE. Au demarrage suivant,
+      # PostgreSQL fsync alors CHAQUE fichier du repertoire de donnees
+      # (« syncing data directory (fsync) ») -- des minutes sur le disque a
+      # plateaux qui porte pool2 -- pendant que `pg_ctl` renonce au bout de 60 s
+      # sur « server did not start in time ». Le conteneur sort en 1, le kubelet
+      # le relance, et l'arret brutal suivant reconduit la panne : c'est une
+      # BOUCLE, pas un incident. Mesuree 9 fois entre le 04/09 et le 07/09/2026.
+      terminationGracePeriodSeconds: 600
       # Nominatim a besoin de beaucoup de RAM pour l'import initial
       # En prod : utiliser une image pré-construite avec les données déjà importées
       # plutôt que de relancer l'import au démarrage (PBF_URL télécharge ~30Go)
@@ -37,6 +47,13 @@ spec:
             - configMapRef:
                 name: nominatim-config
           env:
+            # Le filet de securite de l'autre bout : si la base repart quand
+            # meme sale (arret non gracieux, coupure de courant), il lui faut le
+            # temps de rejouer. Lu par `pg_ctl` LUI-MEME, pas par
+            # `pg_ctlcluster` -- inutile de chercher la variable dans son code,
+            # elle n'y est pas. Defaut : 60 s, d'ou l'echec.
+            - name: PGCTLTIMEOUT
+              value: "1800"
             # Seul le mot de passe reste ici : le reste est versionne.
             - name: POSTGRES_PASSWORD
               valueFrom:
