@@ -1,0 +1,29 @@
+[Unit]
+# Gere par Ansible (role pve_host, tasks/sauvegarde_urbanlink.yml).
+Description=Sauvegarde des donnees du cluster UrbanLink (Postgres, MinIO, etcd)
+Documentation=file:///root/infra/scripts/urbanlink/sauvegarder.sh
+# Sans reseau, le script echoue au premier SSH. Autant ne pas partir.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ pve_urbanlink_backup_script }}
+Environment=VM_SSH={{ pve_urbanlink_backup_vm_ssh }}
+Environment=RACINE={{ pve_urbanlink_backup_root }}
+Environment=GARDER_QUOTIDIENS={{ pve_urbanlink_backup_keep_daily }}
+Environment=GARDER_HEBDOS={{ pve_urbanlink_backup_keep_weekly }}
+Environment=GARDER_MENSUELS={{ pve_urbanlink_backup_keep_monthly }}
+
+# ⚠️ PAS de Restart= : une sauvegarde qui se relance toute seule masque la
+# panne qu'elle devrait signaler. Un echec doit RESTER un echec, visible dans
+# `systemctl list-units --failed`, jusqu'a ce qu'on le regarde.
+#
+# Le script est deja atomique (repertoire `.partiel` renomme a la fin) : une
+# execution interrompue ne laisse pas de fausse sauvegarde derriere elle.
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

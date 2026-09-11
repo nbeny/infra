@@ -41,6 +41,7 @@ host principal.
 - [Ajouter une VM macOS](#ajouter-une-vm-macos)
 - [Mettre à jour le lab](#mettre-à-jour-le-lab)
 - [Reprendre en main une VM existante](#reprendre-en-main-une-vm-existante)
+- [Sauvegardes et restauration](#sauvegardes-et-restauration)
 - [Reconstruire le host principal](#reconstruire-le-host-principal)
 - [Reconstruire le nœud Proxmox](#reconstruire-le-nœud-proxmox)
 - [Référence](#référence)
@@ -429,6 +430,62 @@ Ensuite `ansible guests -m ping` doit répondre, et `20-debian-k8s.yml`
 s'applique à UrbanConnect comme à n'importe quelle VM neuve.
 
 ---
+
+## Sauvegardes et restauration
+
+Deux couches, parce qu'elles répondent à deux questions différentes.
+
+| | Quoi | Quand | Où | Poids |
+|---|---|---|---|---|
+| **Données** | Postgres (5 bases + rôles), MinIO, instantané etcd | chaque nuit 03:30 | `/pool1/backups/urbanlink/` | ~30 Mo |
+| **Image VM** | `vzdump` de la VM 111 entière | dimanche 02:00 | `pool1-backup` | ~100 Go |
+
+La couche « données » sert 99 fois sur 100 : elle se restaure **base par base**,
+en quelques secondes, et répond à « une table a été effacée » ou « il me faut
+l'état d'avant-hier ». L'image VM répond à « la VM n'existe plus » — elle est
+inutilisable pour récupérer une seule table.
+
+```bash
+# Sauvegarder tout de suite, sans attendre la nuit
+systemctl start urbanlink-sauvegarde.service
+journalctl -u urbanlink-sauvegarde.service -n 20 -o cat
+
+# PROUVER que ça se restaure (~3 min, ne touche pas la production)
+bash scripts/urbanlink/tester-restauration.sh
+```
+
+L'exercice de restauration monte un Postgres jetable, y rejoue les rôles puis
+chaque base, et **compare le nombre de lignes au manifeste** pris le jour de la
+sauvegarde. C'est le seul contrôle qui distingue « des fichiers existent » de
+« on peut repartir » : une restauration qui rend une base vide réussit du point
+de vue de `pg_restore`.
+
+### Ce qui n'est PAS sauvegardé, et pourquoi
+
+Elasticsearch (`npm run search:reindex` le reconstruit depuis Postgres),
+Nominatim (95 Go ré-importables depuis Geofabrik) et Redis (cache, OTP,
+présence). Les sauvegarder coûterait cher pour des données qu'une commande
+régénère.
+
+### ⚠️ Deux limites à connaître
+
+**`pool2-backup` n'était pas une sauvegarde.** C'est un répertoire
+`/pool2/backups` : il vit sur le **même disque** — un seul Hitachi — que les
+disques de VM qu'il protège. Les deux jobs `vzdump` pointent désormais sur
+`pool1-backup` (raidz1, trois disques). Les archives déjà prises sur
+`pool2-backup` n'ont pas été déplacées.
+
+**pool1 est dans le même serveur.** Ça protège d'une panne de disque et d'une
+fausse manœuvre, **pas** d'un incendie ni d'un vol. La copie hors-site reste à
+faire.
+
+### Le piège qui a motivé tout ceci
+
+`roles/pve_hardening` ne sauvegardait que la VM 140, au motif — écrit dans ses
+`defaults` — que « le cluster se redéploie depuis ce dépôt ». C'était vrai
+quand ça a été écrit. Ça ne l'est plus : le dépôt reconstruit
+l'**infrastructure**, pas les **données**. Comptes, annonces, commandes,
+identités Kratos, photos déposées : rien de tout cela n'est dans git.
 
 ## Reconstruire le host principal
 

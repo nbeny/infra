@@ -26,6 +26,34 @@ pve_zfs_arc_max_bytes: 4294967296
 # a plateaux : `atime=on` y ajoute une ecriture par lecture.
 pve_zfs_noatime_pools: [pool1, pool2]
 
+# --- Sauvegarde du cluster UrbanLink ---------------------------------------
+# Deux couches : les DONNEES chaque nuit (~30 Mo, restaurable base par base) et
+# l'IMAGE de la VM chaque semaine. Detail et raisonnement dans
+# roles/pve_host/tasks/sauvegarde_urbanlink.yml.
+pve_urbanlink_backup: false
+pve_urbanlink_vm_id: 111
+pve_urbanlink_backup_vm_ssh: "nbeny@10.0.0.111"
+pve_urbanlink_backup_script: /root/infra/scripts/urbanlink/sauvegarder.sh
+pve_urbanlink_restore_script: /root/infra/scripts/urbanlink/tester-restauration.sh
+pve_urbanlink_backup_pg_image: "postgis/postgis:16-3.5"
+# ⚠️ pool1 (raidz1, 3 disques) et NON pool2 : `pool2-backup` est un repertoire
+# sur pool2, donc sur le MEME disque que les disques de VM qu'il protege.
+pve_urbanlink_backup_pve_storage: pool1-backup
+pve_urbanlink_backup_pve_storage_path: /pool1/backups
+pve_urbanlink_backup_root: /pool1/backups/urbanlink
+# 03:30 : avant le vzdump de 04:30, et loin du cron de reindexation de 03:00.
+pve_urbanlink_backup_schedule: "*-*-* 03:30:00"
+pve_urbanlink_backup_keep_daily: 14
+pve_urbanlink_backup_keep_weekly: 8
+pve_urbanlink_backup_keep_monthly: 12
+# Dimanche 02:00. Hebdomadaire et pas quotidien : un vzdump ecrit une image
+# COMPLETE a chaque passage, sans deduplication.
+pve_urbanlink_vzdump_schedule: "sun 02:00"
+pve_urbanlink_vzdump_retention: "keep-last=3,keep-weekly=2,keep-monthly=1"
+# Repointe aussi le job de messagerie vers pool1. Les sauvegardes deja prises
+# ne bougent pas ; seules les suivantes changent de destination.
+pve_urbanlink_move_mail_backup: true
+
 # Interfaces physiques -- utilisees uniquement par le template interfaces.j2
 # quand pve_manage_network=true.
 pve_uplink_interface: nic3

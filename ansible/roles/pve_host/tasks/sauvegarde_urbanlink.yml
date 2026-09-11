@@ -1,0 +1,190 @@
+---
+# ---------------------------------------------------------------------------
+#  Sauvegarde du cluster UrbanLink -- deux couches, deux questions
+#
+#  COUCHE 1, quotidienne : les DONNEES (Postgres, MinIO, etcd).
+#    Repond a « une table a ete effacee », « une migration a mal tourne »,
+#    « il me faut l'etat d'avant-hier ». ~30 Mo, ~30 secondes, restaurable
+#    base par base. C'est le filet qui sert 99 fois sur 100.
+#
+#  COUCHE 2, hebdomadaire : l'IMAGE de la VM (vzdump).
+#    Repond a « la VM n'existe plus ». Lourde et sans deduplication, donc
+#    hebdomadaire -- et de toute facon inutile pour recuperer UNE table.
+#
+#  ⚠️ LE CONSTAT QUI A MOTIVE TOUT CECI. Le role pve_hardening ne sauvegardait
+#  que la VM 140, au motif -- ecrit dans ses defaults -- que « le cluster se
+#  redeploie depuis ce depot ». C'etait vrai, et ca ne l'est plus : le depot
+#  reconstruit l'INFRASTRUCTURE, pas les DONNEES. Comptes, annonces,
+#  commandes, identites Kratos, photos : rien de tout cela n'est dans git.
+#
+#  ⚠️ ET LA DESTINATION A CHANGE. `pool2-backup` est un repertoire
+#  /pool2/backups : il vit sur le MEME disque -- un seul Hitachi 7200 tr/min --
+#  que les disques de VM qu'il protege. Ce disque meurt, les deux partent
+#  ensemble. `pool1-backup` est sur un raidz1 de trois disques.
+# ---------------------------------------------------------------------------
+
+- name: Declarer le stockage de sauvegarde sur pool1
+  block:
+    - name: Le repertoire de sauvegarde existe
+      ansible.builtin.file:
+        path: "{{ pve_urbanlink_backup_pve_storage_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Lister les stockages connus
+      ansible.builtin.command: pvesm status
+      register: pve_bk_storages
+      changed_when: false
+
+    - name: Ajouter pool1-backup
+      ansible.builtin.command: >-
+        pvesm add dir {{ pve_urbanlink_backup_pve_storage }}
+          --path {{ pve_urbanlink_backup_pve_storage_path }}
+          --content backup
+          --nodes {{ inventory_hostname_short }}
+          --prune-backups keep-all=1
+      when: pve_urbanlink_backup_pve_storage not in pve_bk_storages.stdout
+      changed_when: true
+  tags: [sauvegarde]
+
+# ---------------------------------------------------------------------------
+#  Couche 1 : les donnees
+# ---------------------------------------------------------------------------
+- name: Deposer le script de sauvegarde des donnees
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/urbanlink/sauvegarder.sh"
+    dest: "{{ pve_urbanlink_backup_script }}"
+    owner: root
+    group: root
+    mode: "0750"
+  tags: [sauvegarde]
+
+- name: Deposer l'exercice de restauration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/urbanlink/tester-restauration.sh"
+    dest: "{{ pve_urbanlink_restore_script }}"
+    owner: root
+    group: root
+    mode: "0750"
+  tags: [sauvegarde]
+
+# Le script VERIFIE chaque dump avec `pg_restore --list` juste apres l'avoir
+# ecrit. Sans cette image, il refuse de partir plutot que de produire des
+# sauvegardes non verifiees -- une sauvegarde qu'on n'a pas relue n'en est pas
+# une.
+- name: L'image Postgres de verification est presente
+  community.docker.docker_image_pull:
+    name: "{{ pve_urbanlink_backup_pg_image }}"
+  failed_when: false
+  register: pve_bk_image
+  tags: [sauvegarde]
+
+- name: Repli si le module docker n'est pas disponible
+  ansible.builtin.command: "docker pull {{ pve_urbanlink_backup_pg_image }}"
+  when: pve_bk_image is failed or pve_bk_image is skipped
+  changed_when: false
+  tags: [sauvegarde]
+
+- name: Installer l'unite systemd de sauvegarde
+  ansible.builtin.template:
+    src: urbanlink-sauvegarde.service.j2
+    dest: /etc/systemd/system/urbanlink-sauvegarde.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: recharger systemd
+  tags: [sauvegarde]
+
+- name: Installer le timer de sauvegarde
+  ansible.builtin.template:
+    src: urbanlink-sauvegarde.timer.j2
+    dest: /etc/systemd/system/urbanlink-sauvegarde.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: recharger systemd
+  tags: [sauvegarde]
+
+- name: Appliquer les unites maintenant
+  ansible.builtin.meta: flush_handlers
+  tags: [sauvegarde]
+
+- name: Activer le timer
+  ansible.builtin.systemd_service:
+    name: urbanlink-sauvegarde.timer
+    enabled: true
+    state: started
+  tags: [sauvegarde]
+
+# ---------------------------------------------------------------------------
+#  Couche 2 : l'image de la VM
+# ---------------------------------------------------------------------------
+- name: Lire les jobs de sauvegarde existants
+  ansible.builtin.command: pvesh get /cluster/backup --output-format json
+  register: pve_bk_jobs
+  changed_when: false
+  tags: [sauvegarde]
+
+# La marque du commentaire sert d'identite : c'est elle qui rend la tache
+# idempotente. Elle doit differer de celle du role pve_hardening, sinon l'un
+# des deux jobs ne serait jamais cree.
+- name: Creer le vzdump hebdomadaire de la VM UrbanLink
+  ansible.builtin.command: >-
+    pvesh create /cluster/backup
+      --schedule "{{ pve_urbanlink_vzdump_schedule }}"
+      --vmid {{ pve_urbanlink_vm_id }}
+      --storage {{ pve_urbanlink_backup_pve_storage }}
+      --mode snapshot
+      --compress zstd
+      --prune-backups "{{ pve_urbanlink_vzdump_retention }}"
+      --enabled 1
+      --notes-template "{% raw %}{{guestname}}{% endraw %}"
+      --comment "Gere par Ansible (image VM UrbanLink, hebdomadaire)"
+  when: "'image VM UrbanLink' not in pve_bk_jobs.stdout"
+  changed_when: true
+  tags: [sauvegarde]
+
+# ⚠️ Le job de la VM de messagerie ecrivait sur pool2-backup, donc sur le disque
+# qu'il est cense proteger. On le repointe vers pool1. Les sauvegardes deja
+# prises restent ou elles sont : rien n'est efface, seules les SUIVANTES
+# changent de destination.
+- name: Relire les jobs apres creation
+  ansible.builtin.command: pvesh get /cluster/backup --output-format json
+  register: pve_bk_jobs_apres
+  changed_when: false
+  when: pve_urbanlink_move_mail_backup | bool
+  tags: [sauvegarde]
+
+- name: Repointer le job de messagerie vers pool1
+  ansible.builtin.command: >-
+    pvesh set /cluster/backup/{{ item.id }}
+      --storage {{ pve_urbanlink_backup_pve_storage }}
+  loop: "{{ (pve_bk_jobs_apres.stdout | from_json)
+            | selectattr('comment', 'defined')
+            | selectattr('comment', 'search', 'pve_hardening')
+            | rejectattr('storage', 'equalto', pve_urbanlink_backup_pve_storage)
+            | list }}"
+  loop_control:
+    label: "{{ item.id }} ({{ item.storage }} -> {{ pve_urbanlink_backup_pve_storage }})"
+  changed_when: true
+  when: pve_urbanlink_move_mail_backup | bool
+  tags: [sauvegarde]
+
+- name: Recapitulatif
+  ansible.builtin.debug:
+    msg:
+      - "Donnees   : {{ pve_urbanlink_backup_schedule }} -> {{ pve_urbanlink_backup_root }}"
+      - "Image VM  : {{ pve_urbanlink_vzdump_schedule }} -> {{ pve_urbanlink_backup_pve_storage }}"
+      - ""
+      - "Lancer une sauvegarde tout de suite :"
+      - "  systemctl start urbanlink-sauvegarde.service"
+      - ""
+      - "PROUVER qu'elle se restaure (~3 min, ne touche pas la production) :"
+      - "  bash {{ pve_urbanlink_restore_script }}"
+      - ""
+      - "⚠️ pool1 est dans le MEME serveur : protege d'une panne de disque et"
+      - "   d'une fausse manoeuvre, PAS d'un incendie. La copie hors-site reste"
+      - "   a faire."
+  tags: [sauvegarde]

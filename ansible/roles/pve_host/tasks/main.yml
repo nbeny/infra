@@ -51,6 +51,11 @@
   when: pve_create_api_token | bool
   tags: [token, never]
 
+- name: Sauvegarder le cluster UrbanLink (donnees + image VM)
+  ansible.builtin.import_tasks: sauvegarde_urbanlink.yml
+  when: pve_urbanlink_backup | bool
+  tags: [sauvegarde]
+
 - name: Mettre a jour le noeud
   ansible.builtin.import_tasks: upgrade.yml
   when: pve_do_upgrade | bool

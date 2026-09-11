@@ -11,3 +11,7 @@
   ansible.builtin.systemd_service:
     name: pveproxy
     state: restarted
+
+- name: recharger systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true

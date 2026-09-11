@@ -1,0 +1,18 @@
+[Unit]
+# Gere par Ansible (role pve_host, tasks/sauvegarde_urbanlink.yml).
+Description=Declenche la sauvegarde des donnees UrbanLink
+
+[Timer]
+OnCalendar={{ pve_urbanlink_backup_schedule }}
+# ⚠️ Persistent=true n'est PAS un detail. Sans lui, une execution manquee --
+# noeud eteint, redemarrage pour maintenance -- est simplement SAUTEE, et on
+# decouvre le trou le jour de la restauration. Avec, elle est rattrapee au
+# demarrage suivant.
+Persistent=true
+# Etale le declenchement : la sauvegarde lit la base pendant que d'autres
+# taches nocturnes tournent. Quelques minutes de decalage evitent de les
+# empiler a la seconde pres.
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
