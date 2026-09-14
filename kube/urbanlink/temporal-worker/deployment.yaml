@@ -309,6 +309,25 @@ spec:
             # sans ceci elles designeraient `localhost:9000`.
             - name: MINIO_PUBLIC_URL
               value: https://urbanlink.fr/api/minio
+            # ── Import de CV par agent ─────────────────────────────────
+            #
+            # ⚠️ **REQUISE, sinon le backend ne DÉMARRE PAS.** `cv-import.module`
+            # refuse de se construire sans elle : « CV_AGENT_PROVIDER doit être
+            # définie ». Absente lors de la livraison du module le 2026-09-14,
+            # elle a mis backend et temporal-worker en CrashLoopBackOff — le
+            # site n'est resté debout que parce que le déploiement roulant a
+            # gardé les pods précédents.
+            #
+            # ⚠️ **`opencode` et NON `fake`**, et ce n'est pas un détail : le
+            # module documente que retomber sur `fake` ferait tourner de
+            # l'extraction factice en production, « remplissant les profils de
+            # rien, sans qu'aucune alerte ne se déclenche ». `opencode` valide
+            # sa configuration à l'USAGE (`readConfig` dans `extract`), pas au
+            # démarrage : tant que `CV_AGENT_COMMAND` et `AI_WORKSPACE_DIR` ne
+            # sont pas provisionnés, un import échoue clairement au lieu de
+            # fabriquer du faux.
+            - name: CV_AGENT_PROVIDER
+              value: opencode
           resources:
             requests:
               cpu: 250m
