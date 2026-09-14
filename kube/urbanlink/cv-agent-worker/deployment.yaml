@@ -1,0 +1,400 @@
+# ============================================================================
+#  cv-agent-worker -- l'import de CV par agent
+# ----------------------------------------------------------------------------
+#  Troisieme point d'entree du backend, apres l'API et le worker Temporal :
+#  meme code, meme AppModule, autre `CMD`. Il est SEUL a lancer `opencode`, et
+#  seul a reclamer la file `cv_import_jobs`.
+#
+#  ⚠️ **PAS de NetworkPolicy ici, et ce n'est pas un oubli.**
+#
+#  La specification en prevoyait une, pour interdire a l'agent de joindre
+#  Postgres, Redis, MinIO et Kafka. Elle serait INERTE dans ce cluster :
+#
+#    - le CNI est **flannel** (`ansible/inventory/group_vars/debian_nodes.yml`,
+#      `k8s_cni: flannel`), qui n'implemente PAS `NetworkPolicy` : l'objet est
+#      accepte par l'API server et ignore par le reseau ;
+#    - Istio est en mode ambient, mais le namespace `urbanconnect` ne porte pas
+#      le label `istio.io/dataplane-mode`, donc une `AuthorizationPolicy` L4 ne
+#      s'appliquerait pas non plus a ces pods.
+#
+#  Deployer un manifeste qui ne filtre rien serait pire que de ne rien
+#  deployer : il ferait croire la question reglee.
+#
+#  **Ce qui protege reellement, aujourd'hui :** le process `opencode` recoit un
+#  environnement en LISTE BLANCHE (`agent/opencode.agent.ts`) -- ni
+#  `DATABASE_URL`, ni cle MinIO, ni secret Stripe. Un chemin reseau vers
+#  Postgres ne sert a rien sans accreditation. S'y ajoutent l'utilisateur non
+#  privilegie de l'image et la liste blanche des champs du validateur.
+#
+#  **Pour obtenir le filtrage reseau**, deux chemins, tous deux hors de ce lot
+#  parce qu'ils touchent tout le cluster : passer `k8s_cni` a `cilium` (la
+#  variable l'admet deja), ou labelliser le namespace en ambient puis poser des
+#  `AuthorizationPolicy` sur les services de donnees. Le second a un rayon
+#  d'action non nul sur les chemins de production (une mauvaise selection coupe
+#  le backend de Postgres) : a faire deliberement, pas en passant.
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cv-agent-worker
+  namespace: urbanconnect
+  labels:
+    app: cv-agent-worker
+spec:
+  # Process dedie qui lance `opencode` sur les CV televerses. UN SEUL replica,
+  # et c'est une decision, pas un defaut de dimensionnement : la file est servie
+  # par `FOR UPDATE SKIP LOCKED`, donc plusieurs replicas seraient corrects --
+  # mais chaque agent tient plusieurs centaines de Mo et un coeur pendant une a
+  # trois minutes, sur une machine dont la RAM est deja surengagee. Monter a
+  # deux se decide en regardant `urbanconnect_cv_import_queue_depth`, pas par
+  # precaution.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cv-agent-worker
+  template:
+    metadata:
+      labels:
+        app: cv-agent-worker
+    spec:
+      containers:
+        - name: cv-agent-worker
+          # Image DEDIEE : elle embarque le binaire `opencode` (plusieurs
+          # dizaines de Mo), que l'image de l'API n'a aucune raison de porter.
+          # Construite par la CI du depot applicatif depuis
+          # `backTs/Dockerfile.cv-agent`.
+          image: urbanconnect-cv-agent-worker:prod
+          env:
+            - name: NODE_ENV
+              value: production
+            # Rôle worker : désactive les consumers Kafka (les events restent à l'API)
+            - name: APP_ROLE
+              value: worker
+            # Doit être cohérent avec le backend (sinon double-exécution cron)
+            - name: SCHEDULER_BACKEND
+              value: temporal
+            - name: ASYNC_BACKEND
+              value: kafka
+            # Database
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: DATABASE_URL
+            # Redis
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: REDIS_PASSWORD
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: REDIS_URL
+            # Kafka (le worker ne consomme pas mais AppModule provisionne le producer)
+            - name: KAFKA_BROKERS
+              value: kafka:9092
+            - name: KAFKA_CLIENT_ID
+              value: urbanconnect-cv-agent-worker
+            - name: KAFKAJS_NO_PARTITIONER_WARNING
+              value: "1"
+            # Temporal
+            - name: TEMPORAL_ADDRESS
+              value: temporal:7233
+            - name: TEMPORAL_NAMESPACE
+              value: default
+            # --- Traces et journaux OTLP ---------------------------------
+            # Meme raison que sur le backend (voir le commentaire la-bas), avec
+            # un argument de plus : TOUS les mouvements d'argent pilotes par un
+            # balayage tournent ICI -- rapprochement nocturne, versements,
+            # execution d'un accord de litige. Un cron qui echoue a mi-parcours
+            # ne laisse aujourd'hui qu'une ligne de journal ; une trace dit
+            # laquelle des activites a rompu.
+            #
+            # ⚠️ Cote code, `worker-nest.main.ts` importe `../tracing` en TOUTE
+            # PREMIERE ligne. Sans cet import la variable ne servirait a rien --
+            # et place apres `AppModule`, les instrumentations arriveraient trop
+            # tard pour `pg`, `ioredis` et `kafkajs`.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.urbanconnect.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: urbanconnect-cv-agent-worker
+            - name: TEMPORAL_TASK_QUEUE
+              value: urbanconnect
+            # Kratos (AppModule bootstrap complet)
+            - name: KRATOS_PUBLIC_URL
+              value: http://kratos:4433
+            - name: KRATOS_ADMIN_URL
+              value: http://kratos:4434
+            - name: KRATOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KRATOS_WEBHOOK_SECRET
+            # MinIO / S3
+            - name: S3_ENDPOINT
+              value: http://minio:9000
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_USER
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_BUCKET_NAME
+            - name: S3_REGION
+              value: eu-west-3
+            - name: S3_FORCE_PATH_STYLE
+              value: "true"
+            - name: MINIO_ENDPOINT
+              value: minio
+            - name: MINIO_PORT
+              value: "9000"
+            - name: MINIO_USE_SSL
+              value: "false"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MINIO_ROOT_PASSWORD
+            # Nominatim
+            - name: NOMINATIM_INTERNAL_URL
+              value: http://nominatim:8080
+            # JWT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: JWT_SECRET
+            - name: JWT_EXPIRATION
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: JWT_EXPIRATION
+            - name: FRONTEND_URL
+              value: "https://urbanlink.fr"
+            # Stripe
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_SECRET_KEY
+            # ⚠️ **Sans elle, Stripe Connect tourne en MOCK en production.**
+            # `stripe-connect.service.ts` bascule en mode fictif dès que la clé
+            # est vide — avec un simple `logger.warn`, jamais une erreur. Le KYC
+            # vendeur produit alors des comptes `acct_mock_…`, et le balayage de
+            # versement échoue sur « No such destination » sans que rien ne le
+            # signale. Elle manquait ici depuis toujours : le mode test ne la
+            # réclamait pas, le dev la lisant depuis `backTs/.env`.
+            #
+            # Même valeur que `STRIPE_SECRET_KEY` : un seul compte Stripe, avec
+            # Connect activé dessus (vérifié en live le 2026-09-06).
+            - name: STRIPE_CONNECT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_CONNECT_SECRET_KEY
+            # Instant à partir duquel la plateforme ENTIERCE les fonds au lieu
+            # de les router vers le vendeur à la capture. Une vente antérieure
+            # se rembourse par `reverse_transfer`, une postérieure par
+            # `transfers.createReversal` : le mauvais geste échoue en silence.
+            #
+            # Date volontairement ANTÉRIEURE à toute vente live : il n'existe
+            # aucun paiement en mode live avant la bascule, donc aucune vente
+            # ne peut légitimement relever du régime pré-entiercement. Trop
+            # tard aurait produit des fonds orphelins que rien ne signale ;
+            # trop tôt, ici, ne peut rien produire du tout.
+            - name: ESCROW_EPOCH
+              value: "2026-09-06T00:00:00.000Z"
+            - name: STRIPE_CONNECT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_CONNECT_WEBHOOK_SECRET
+            # Mêmes price IDs que le backend (mode LIVE), et c'est le point : le worker
+            # démarre sur `AppModule` (`temporal:worker:nest`), il instancie donc
+            # `SubscriptionService` lui aussi. Aucune activité ne le sollicite
+            # aujourd'hui — mais la divergence Stripe backend/worker est un défaut
+            # déjà payé ici (le worker a tourné en mode fictif pendant que le
+            # backend parlait au vrai Stripe, sans une erreur). Une activité qui
+            # appellerait `getMySubscription` sans ces IDs ne mapperait `priceId`
+            # sur aucun plan, et `syncFromStripe` remettrait à zéro les boosts
+            # d'un abonné à jour de ses paiements.
+            - name: STRIPE_PRICE_STARTER_ID
+              value: "price_1UChBkKqEapb7zc8Ai3KMKl7"
+            - name: STRIPE_PRICE_PREMIUM_ID
+              value: "price_1UChBkKqEapb7zc8iaNahW4f"
+            - name: STRIPE_PRICE_ENTERPRISE_ID
+              value: "price_1UChBlKqEapb7zc8lzHXgrXb"
+            # Google OAuth
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: GOOGLE_CLIENT_SECRET
+            # Elasticsearch — le worker exécute le cron nocturne de réindexation
+            # (SearchReindexService, anti-drift 03:00 UTC) → accès ES requis.
+            - name: ELASTICSEARCH_URL
+              value: http://elasticsearch:9200
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: ELASTICSEARCH_PASSWORD
+            - name: SEARCH_ENGINE
+              value: elasticsearch
+            # ================================================================
+            #  ⚠️ LE WORKER EST LA MEME APPLICATION QUE LE BACKEND
+            # ----------------------------------------------------------------
+            # Meme image, meme `AppModule`, autre point d'entree. Il instancie
+            # donc les MEMES services, et subit les MEMES gardes de demarrage.
+            # Son environnement comptait 16 variables de moins que celui du
+            # backend, et il mourait sur
+            #   « SENDCLOUD_WEBHOOK_SECRET is required in production.
+            #     Refusing to start. »
+            # -- un garde pose par un module dont le worker n'utilise pourtant
+            # aucune route HTTP, mais qu'il charge quand meme.
+            #
+            # ⚠️ Ce n'est pas qu'une question de demarrage : **tous les
+            # mouvements d'argent pilotes par un balayage tournent ici**
+            # (rapprochement nocturne, execution d'un accord de litige,
+            # versements). Un worker sans identifiants Stripe ou Sendcloud
+            # ecrirait en base des remboursements qui ne partent nulle part,
+            # sans jamais lever d'erreur.
+            #
+            # Regle : toute variable ajoutee au backend et lue par un service
+            # partage doit etre ajoutee ici aussi.
+            # ================================================================
+            - name: SENDCLOUD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_WEBHOOK_SECRET
+            - name: SENDCLOUD_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_PUBLIC_KEY
+            - name: SENDCLOUD_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SENDCLOUD_SECRET_KEY
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_WEBHOOK_SECRET
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: STRIPE_PUBLISHABLE_KEY
+            - name: SMSAPI_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMSAPI_TOKEN
+            - name: SMSAPI_SENDER
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMSAPI_SENDER
+            - name: KLIPY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: KLIPY_API_KEY
+            # Le worker compose des URLs de fichiers dans ses notifications ;
+            # sans ceci elles designeraient `localhost:9000`.
+            - name: MINIO_PUBLIC_URL
+              value: https://urbanlink.fr/api/minio
+            # ================================================================
+            #  L'agent d'import de CV
+            # ----------------------------------------------------------------
+            - name: CV_AGENT_PROVIDER
+              value: opencode
+            - name: CV_AGENT_COMMAND
+              value: opencode
+            - name: CV_AGENT_ARGS
+              value: '["run","-m","{model}"]'
+            # Modele LIBRE : aucune accreditation n'est necessaire pour les
+            # `opencode/*-free` (verifie dans cancerWeb/docs/ai-cli-smoke-test.md,
+            # opencode 1.18.18). C'est ce qui permet de deployer ce worker sans
+            # ajouter un secret au cluster.
+            - name: CV_AGENT_MODEL
+              value: opencode/mimo-v2.5-free
+            # ⚠️ VOLONTAIREMENT VIDE. Aucun modele `*-free` documente ne VOIT les
+            # images ; vide, le processeur refuse png et jpeg par
+            # UNSUPPORTED_TYPE. Renseigner un modele vision sans en verifier les
+            # capacites ferait pire que rien : l'agent inventerait un profil
+            # entier a partir d'une image qu'il ne lit pas.
+            - name: CV_AGENT_VISION_MODEL
+              value: ""
+            # Filet de securite contre un agent muet -- PAS le mode nominal : la
+            # fin est detectee par la stabilite d'`output.json`.
+            - name: CV_AGENT_TIMEOUT_MS
+              value: "300000"
+            - name: CV_AGENT_POLL_INTERVAL_MS
+              value: "250"
+            - name: CV_IMPORT_DAILY_QUOTA
+              value: "5"
+            - name: CV_IMPORT_IDLE_POLL_MS
+              value: "3000"
+            # Repertoires de job, sur l'emptyDir monte plus bas.
+            - name: AI_WORKSPACE_DIR
+              value: /workspace
+            # ⚠️ `opencode` ecrit son etat sous $HOME. L'image cree ce home et
+            # l'attribue a l'utilisateur `agent` ; sans un HOME inscriptible,
+            # l'agent meurt au premier lancement.
+            - name: HOME
+              value: /home/agent
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+          resources:
+            # Bornes OBLIGATOIRES, et serrees : la RAM du T620 est deja
+            # surengagee (114 Go promis pour 110 physiques). Un agent qui fuit
+            # sans limite emporterait des voisins avec lui.
+            #
+            # 1,5 Go : `opencode` tient quelques centaines de Mo, et le process
+            # Node qui l'heberge charge le meme AppModule que l'API. La limite
+            # CPU laisse un coeur entier a l'agent pendant qu'il travaille, sans
+            # lui permettre d'en prendre deux.
+            requests:
+              cpu: 200m
+              memory: 768Mi
+            limits:
+              cpu: 1000m
+              memory: 1536Mi
+      volumes:
+        # ⚠️ emptyDir et JAMAIS un volume persistant : un repertoire de job
+        # contient le CV d'une personne, et n'a aucune raison de survivre au pod.
+        # `sizeLimit` compte : sans lui, des documents de 5 Mo accumules par des
+        # jobs qui echouent rempliraient le disque du noeud -- l'emptyDir puise
+        # dans le systeme de fichiers de l'hote.
+        - name: workspace
+          emptyDir:
+            sizeLimit: 2Gi

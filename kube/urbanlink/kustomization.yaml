@@ -54,6 +54,8 @@
 #      il attend lui-même que le statut passe à `available`)
 #   7. backend (après pgbouncer, redis, kratos, minio, kafka, temporal, elasticsearch)
 #   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
+#      cv-agent-worker (image dédiée portant `opencode` ; consomme la table
+#      `cv_import_jobs`, donc après la migration du backend)
 #   9. frontend (après backend)
 #  10. coturn (DaemonSet hostNetwork sur nœuds publics), geoipupdate, pgadmin
 #  11. ingress Istio — Gateway (les 16 hosts) puis VirtualServices, et
@@ -169,6 +171,7 @@ resources:
 - backend/service.yaml
 - backend/hpa.yaml
 - temporal-worker/deployment.yaml
+- cv-agent-worker/deployment.yaml
 - frontend/deployment.yaml
 - frontend/service.yaml
 - frontend/hpa.yaml
@@ -302,3 +305,20 @@ images:
 - name: urbanconnect-temporal-worker
   newName: 10.0.0.130:5000/urbanconnect-temporal-worker
   newTag: sha-91c78863
+- name: urbanconnect-cv-agent-worker
+  newName: 10.0.0.130:5000/urbanconnect-cv-agent-worker
+  # ⚠️ Tag DIFFERENT des trois autres, et volontairement : cette image n'existe
+  # qu'a partir de `e2ceada8` du depot applicatif, le commit qui l'a ajoutee a la
+  # matrice de construction de la CI. Les tags anterieurs (`sha-91c78863` et
+  # avant) n'ont jamais ete construits pour elle -- les y pointer donnerait un
+  # ImagePullBackOff.
+  #
+  # ⚠️ NON VERIFIE depuis le poste de developpement : le registre `10.0.0.130:5000`
+  # n'est joignable que depuis le lab. Si la CI de `e2ceada8` a echoue, ce pod
+  # restera en ImagePullBackOff -- visible dans Argo, sans effet sur les autres
+  # services (un seul replica, aucun PDB, aucune dependance de l'API a ce worker).
+  # Verification : `curl http://10.0.0.130:5000/v2/urbanconnect-cv-agent-worker/tags/list`
+  #
+  # La prochaine livraison applicative realignera les QUATRE images sur le meme
+  # sha : cette divergence est transitoire par construction.
+  newTag: sha-e2ceada8
