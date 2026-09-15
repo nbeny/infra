@@ -305,6 +305,43 @@ spec:
                 secretKeyRef:
                   name: urbanconnect-secrets
                   key: KLIPY_API_KEY
+            # ── Fournisseurs de dropshipping ─────────────────────────────
+            # ⚠️ **Le NOM vit ici, la valeur dans `secrets.env`** (ignoré par
+            # git) puis dans le Secret `urbanconnect-secrets` que l'amorçage
+            # Ansible pose. Argo CD ne peut PAS créer ce Secret — il n'applique
+            # que la sortie de `kustomize build`.
+            #
+            # ⚠️ **Declarees dans le backend ET dans le worker Temporal.** Le
+            # connecteur travaille des deux cotes : l'API lit le stock, le
+            # worker passe les commandes et balaie le catalogue. Dans un seul
+            # des deux, un cote fonctionne et l'autre se croit non configure —
+            # SANS erreur. C'est le piege vecu avec `STRIPE_SECRET_KEY`, qui
+            # faisait tourner le worker en mode simule pendant que le backend
+            # parlait au vrai Stripe.
+            #
+            # ⚠️ `optional: true` : vide = connecteur inactif, et c'est un etat
+            # de marche legitime (aucun catalogue importe, aucune commande
+            # envoyee). Sans ce drapeau, le pod refuserait de demarrer tant que
+            # la cle n'est pas posee — un arret de service pour une integration
+            # qu'on n'a pas encore branchee.
+            - name: CJ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: CJ_API_KEY
+                  optional: true
+            - name: MATTERHORN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: MATTERHORN_API_KEY
+                  optional: true
+            - name: VIDAXL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: VIDAXL_API_KEY
+                  optional: true
             # Le worker compose des URLs de fichiers dans ses notifications ;
             # sans ceci elles designeraient `localhost:9000`.
             - name: MINIO_PUBLIC_URL
