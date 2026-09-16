@@ -51,6 +51,40 @@ variable "disk_size" {
   description = "Taille du disque systeme en Gio. Ne peut qu'augmenter par rapport au template."
 }
 
+variable "disk_ssd" {
+  type    = bool
+  default = false
+
+  description = <<-EOT
+    Presenter les disques de la VM comme des SSD (`ssd=1` cote QEMU).
+
+    ⚠️ **Ce drapeau est une AFFIRMATION SUR LE MATERIEL, pas une optimisation.**
+    Il se propage jusqu'au noyau invite, qui lit `rotational 0` et applique aux
+    files d'attente la cible de latence des SSD : `wbt_lat_usec = 2000`, soit
+    2 ms. Un plateau a 7200 tr/min ne la tient jamais, alors le noyau etrangle
+    les ecritures en permanence -- les ecrivains sont gares en `rq_qos_wait` et
+    `/proc/pressure/io` s'installe au-dessus de 25 % de stalls complets.
+
+    Il valait `true` en dur jusqu'au 2026-09-16, sur un noeud dont les CINQ
+    disques physiques sont des plateaux (`lsblk -d -o ROTA` rend 1 partout,
+    derriere un PERC H710). Consequence mesuree : les shims containerd ont rate
+    leurs delais, containerd a perdu la tache de conteneurs pourtant vivants,
+    kubelet a boucle sur `KillContainerError: DeadlineExceeded`, et plus aucun
+    pod neuf n'a demarre pendant 25 minutes -- sans qu'aucune etape de la
+    livraison ne soit rouge, le site restant debout sur les anciens replicas.
+
+    Defaut `false` parce que c'est la VERITE de ce noeud aujourd'hui. Le jour ou
+    un vrai SSD arrive, passer `disk_ssd = true` sur les VMs qui vivent dessus
+    -- et seulement sur celles-la : c'est une propriete du stockage, pas une
+    preference.
+
+    ⚠️ Changer cette valeur sur une VM EXISTANTE demande un arret/relance pour
+    que QEMU reconstruise le peripherique. Les VMs deja creees restent donc
+    protegees par la regle udev du role Ansible `common`, qui desarme
+    l'etranglement sans toucher au materiel.
+  EOT
+}
+
 variable "extra_disk" {
   type = object({
     size      = number

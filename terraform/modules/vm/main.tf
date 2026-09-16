@@ -97,7 +97,11 @@ resource "proxmox_virtual_environment_vm" "this" {
     size         = var.disk_size
     iothread     = true
     discard      = "on"
-    ssd          = true
+    # ⚠️ Une AFFIRMATION SUR LE MATERIEL, pas une optimisation -- elle se propage
+    # jusqu'au noyau invite. Voir `variable "disk_ssd"` : ce drapeau valait
+    # `true` en dur sur un noeud 100 % plateaux, et a fige un deploiement de
+    # production 25 minutes le 2026-09-16.
+    ssd          = var.disk_ssd
   }
 
   # Second disque optionnel (voir var.extra_disk). Bloc dynamique : une VM qui
@@ -110,7 +114,8 @@ resource "proxmox_virtual_environment_vm" "this" {
       size         = disk.value.size
       iothread     = true
       discard      = "on"
-      ssd          = true
+      # Meme drapeau, meme raison : voir le disque systeme ci-dessus.
+      ssd          = var.disk_ssd
     }
   }
 

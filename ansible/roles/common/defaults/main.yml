@@ -16,3 +16,18 @@ common_do_upgrade: false
 common_reboot_if_required: false
 # Nom resolu pour verifier que le DNS de la VM fonctionne avant tout apt.
 common_dns_check_host: deb.debian.org
+
+# ---------------------------------------------------------------------------
+#  Etranglement d'ecriture differee (writeback throttling)
+# ---------------------------------------------------------------------------
+# Le stockage du lab est sur PLATEAUX, mais les disques de VM sont presentes
+# comme des SSD (heritage de `ssd = true` dans le module Terraform). Le noyau
+# invite applique alors une cible de latence de 2 ms qu'un 7200 tr/min ne tient
+# jamais, et etrangle en permanence. Voir le commentaire complet dans
+# `templates/99-wbt-plateaux.rules.j2` -- il porte l'incident mesure.
+#
+# `0` desarme l'etranglement (valeur MESUREE sur l'incident du 2026-09-16).
+# `75000` serait le defaut du noyau pour un rotatif, mais n'a pas ete mesure.
+# Mettre `common_manage_wbt: false` pour ne pas toucher au reglage du tout.
+common_manage_wbt: true
+common_wbt_lat_usec: 0
