@@ -524,6 +524,43 @@ spec:
               descripteurs de fichiers ouverts
 
     # =======================================================================
+    #  TEMPORAL -- LES CRONS DURABLES
+    # -----------------------------------------------------------------------
+    #  Depuis le 2026-09-16, `ensureSchedule` n'interrompt plus le demarrage du
+    #  backend quand Temporal est indisponible : dix-huit des dix-neuf
+    #  schedulers l'appellent sans `try`, et une erreur qui remonte tuait le
+    #  processus, figeait le rollout, et le laissait fige derriere des anciens
+    #  replicas qui continuaient de servir -- sans aucune etape rouge.
+    #
+    #  Le prix de ce choix est qu'un cron peut desormais ne PAS etre pose sans
+    #  que rien ne casse : pas d'erreur utilisateur, pas de requete en echec.
+    #  C'est exactement le genre de panne qu'une alerte doit porter, parce que
+    #  rien d'autre ne le fera.
+    #
+    #  ⚠️ La jauge est SANS ETIQUETTE a dessein : une metrique etiquetee
+    #  n'exporte aucune serie tant qu'elle n'a pas ete observee une fois, et
+    #  l'alerte serait muette le jour ou elle devrait tirer. Le detail (quel
+    #  Schedule, quel motif) est dans le journal du pod, qui le nomme.
+    # =======================================================================
+    - name: urbanlink.temporal
+      rules:
+        - alert: TemporalSchedulesNotInstalled
+          # `max` et non `sum` : la jauge est par instance, et les trois
+          # replicas posent les MEMES Schedules. Sommer multiplierait par trois
+          # un seul echec.
+          expr: max(urbanconnect_temporal_schedules_failed) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value }} Schedule(s) Temporal non pose(s) au demarrage du
+              backend -- les balayages correspondants ne tournent pas. Le nom du
+              Schedule et le motif sont dans le journal du pod :
+              `kubectl -n urbanconnect logs -l app=backend | grep "non pose"`.
+              Un redemarrage du pod les repose si Temporal est revenu.
+
+    # =======================================================================
     #  KAFKA / BOITE D'ENVOI
     # -----------------------------------------------------------------------
     #  Kafka n'est PAS bloquant pour la readiness : tous les producteurs
