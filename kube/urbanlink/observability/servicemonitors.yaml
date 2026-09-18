@@ -169,6 +169,27 @@ spec:
 #  C'est exactement la regle que `metrics.registry.ts` s'impose cote applicatif.
 #  Elle vaut pour ce qu'on SCRAPE autant que pour ce qu'on ECRIT.
 #
+#  ⚠️⚠️ **LE CHEMIN SE LIT SOUS `exported_endpoint`, PAS SOUS `endpoint`.**
+#  Verifie sur le cluster le 2026-09-18, apres deploiement :
+#
+#      endpoint          = "admin"                 <- pose par l'operateur,
+#                                                     c'est le NOM DU PORT du
+#                                                     Service. Aucun interet.
+#      exported_endpoint = "/self-service/login"   <- ce que Kratos expose,
+#                                                     et ce qu'on veut lire.
+#
+#  Meme collision que pour `service`, decrite en tete de ce fichier : la cible
+#  gagne, la valeur de l'application survit prefixee. Une requete ecrite
+#  naturellement -- `endpoint="/self-service/login"` -- rend donc LE VIDE, sans
+#  erreur, et le panneau se lit comme un systeme calme.
+#
+#  ⚠️ Aucune relabelisation n'a ete posee pour « reparer » ce nom. Le depot a
+#  deja choisi, pour `service`, d'assumer la collision et de la documenter
+#  plutot que de la contourner : une regle de plus qui reecrit des etiquettes
+#  est une regle de plus qui peut rater en silence. La porte
+#  `check-queries.py` refuse une expression qui rend le vide -- c'est elle qui
+#  attrapera un `exported_` oublie.
+#
 #  ⚠️ `http_requests_total` est un nom GENERIQUE, sans prefixe `kratos_`. Toute
 #  requete portant sur ces series DOIT filtrer sur `job="kratos"` : sans ce
 #  filtre, elle agregerait silencieusement les series homonymes d'un autre
