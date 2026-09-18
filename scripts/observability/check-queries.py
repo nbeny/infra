@@ -91,7 +91,22 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 RACINE = Path(__file__).resolve().parents[2]
-DASHBOARDS = RACINE / "kube/urbanlink/config/prod/observability/grafana-dashboards"
+
+# ⚠️ CE CHEMIN EST UNE COPIE, PAS LA SOURCE.
+#
+# `kube/urbanlink/config/` est ecrit par un `rsync --delete` de la CI du depot
+# applicatif a chaque push sur `main` : la source de verite des tableaux de bord
+# est `config/prod/observability/grafana-dashboards/` d'UrbanConnct.
+#
+# Sans surcharge, cette porte ne peut donc verifier un panneau qu'APRES qu'il
+# soit passe en production -- l'inverse exact de ce a quoi elle sert. D'ou
+# `OBS_DASHBOARDS_DIR`, qui permet de la jouer contre la source :
+#
+#   OBS_DASHBOARDS_DIR=/c/Users/.../UrbanConnct/config/prod/observability/grafana-dashboards #     PROM_URL=http://127.0.0.1:19090 PROM_HOST=prometheus.urbanlink.fr #     python3 scripts/observability/check-queries.py
+DASHBOARDS = Path(
+    os.environ.get("OBS_DASHBOARDS_DIR")
+    or RACINE / "kube/urbanlink/config/prod/observability/grafana-dashboards"
+)
 REGLES = RACINE / "kube/urbanlink/observability/prometheus-alerts.yaml"
 
 # Par defaut on passe par la passerelle Istio en NodePort, avec l'en-tete Host
