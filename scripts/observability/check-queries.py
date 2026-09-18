@@ -156,6 +156,27 @@ TIMEOUT = int(os.environ.get("PROM_TIMEOUT", "30"))
 #  fragment attrape ce qu'il ne devrait pas.
 # ---------------------------------------------------------------------------
 VIDES_ATTENDUS = {
+    # --- Messagerie : vide = tout va bien, ENFIN --------------------------
+    # ⚠️ Ces quatre-la ont ete classees FANTOME jusqu'au 2026-09-18, et c'etait
+    # exact : `node_exporter` lisait `--collector.textfile.directory=
+    # /var/lib/node_exporter/textfile` pendant que la sonde ecrivait dans
+    # `/var/lib/prometheus/node-exporter`. La sonde tournait, sortait en 0, le
+    # service etait actif, `up{job="messagerie"}` valait 1 -- et pas une serie
+    # `mail_*` ne quittait la machine. Trois autres collecteurs (apt, nvme,
+    # smartmon) etaient muets pour la meme raison.
+    #
+    # Le chemin est desormais IMPOSE par le role Ansible `mailcow` au lieu
+    # d'etre suppose. Ces alertes rendent maintenant le vide pour la bonne
+    # raison : il n'y a rien a signaler.
+    "MailIPBlacklisted":
+        "l'IP d'emission n'est sur aucune des quatre listes noires interrogees.",
+    "MailDNSBLProbeUnhealthy":
+        "la sonde a pu interroger toutes les zones (`probe_healthy` vaut 1).",
+    "MailProbeStale":
+        "la sonde a moins d'une heure -- le minuteur passe toutes les 15 min.",
+    "MailQueueNotDraining":
+        "la file Postfix est vide et rien n'est differe.",
+
     # --- Alertes : vide = tout va bien ------------------------------------
     "OOMKillDetected": "personne n'a ete tue faute de memoire.",
     "PodNotReady": "aucun pod non pret (hors Jobs termines, ecartes par le `unless`).",
