@@ -142,3 +142,69 @@ spec:
           replacement: loki
         - sourceLabels: [__meta_kubernetes_pod_name]
           targetLabel: pod
+---
+# ============================================================================
+#  Kratos -- les connexions et les inscriptions, sans une ligne de code
+# ----------------------------------------------------------------------------
+#  Kratos compte DEJA tout ce qu'on voulait mesurer, sur son port ADMIN (4434),
+#  chemin `/metrics/prometheus`. Releve dans le pod le 2026-09-18 :
+#
+#    POST /self-service/login        303  connexion reussie
+#    POST /self-service/login        400  identifiants refuses
+#    POST /self-service/registration 303  inscription
+#    GET  /self-service/methods/oidc/callback/{param}  passage par Google
+#
+#  Il n'etait pas scrape. Aucune de ces series n'existait dans Prometheus, et
+#  aucun tableau de bord ne pouvait dire combien de gens se connectent.
+#
+#  ⚠️ LE PIEGE EST DANS LES ETIQUETTES, PAS DANS LE SCRAPE.
+#  Kratos attache `buildTime`, `hash` et `version` a CHAQUE serie. Elles
+#  changent a chaque montee de version : sans le `metricRelabelings` ci-dessous,
+#  chaque mise a jour de Kratos creerait un jeu de series entierement neuf, les
+#  anciennes resteraient en memoire pour toujours, et un `rate()` sur une
+#  fenetre couvrant la montee de version rendrait n'importe quoi -- l'ancienne
+#  serie s'arrete, la nouvelle repart de zero, et PromQL lit une remise a zero
+#  de compteur sur une serie qui n'a pas redemarre.
+#
+#  C'est exactement la regle que `metrics.registry.ts` s'impose cote applicatif.
+#  Elle vaut pour ce qu'on SCRAPE autant que pour ce qu'on ECRIT.
+#
+#  ⚠️ `http_requests_total` est un nom GENERIQUE, sans prefixe `kratos_`. Toute
+#  requete portant sur ces series DOIT filtrer sur `job="kratos"` : sans ce
+#  filtre, elle agregerait silencieusement les series homonymes d'un autre
+#  exportateur pose plus tard.
+#
+#  ⚠️ Le port 4434 est l'API d'ADMINISTRATION de Kratos, non authentifiee. Ce
+#  ServiceMonitor n'y ouvre RIEN de nouveau : il n'atteint que le chemin
+#  `/metrics/prometheus`, en lecture, depuis l'interieur du cluster. Le Service
+#  `kratos` exposait deja ce port ; c'est sa protection reseau, et non ce
+#  fichier, qui repond de son acces.
+# ============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kratos
+  namespace: urbanconnect
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: kratos
+  namespaceSelector:
+    matchNames: [urbanconnect]
+  endpoints:
+    # Port NOMME `admin` dans le Service (4433 = `public`, qui n'expose aucune
+    # metrique). Verifie le 2026-09-18 : `kubectl get svc kratos` rend bien
+    # `public -> 4433` et `admin -> 4434`.
+    - port: admin
+      path: /metrics/prometheus
+      interval: 30s
+      relabelings:
+        - targetLabel: job
+          replacement: kratos
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+      metricRelabelings:
+        - action: labeldrop
+          regex: (buildTime|hash|version)
