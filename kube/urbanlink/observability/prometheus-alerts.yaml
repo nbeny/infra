@@ -80,6 +80,186 @@ metadata:
 spec:
   groups:
     # =======================================================================
+    #  PRODUIT -- ce qui casse sans rien dire
+    # -----------------------------------------------------------------------
+    #  Groupe NEUF (2026-09-18). Toutes ces regles s'adossent a des metriques
+    #  posees par la meme livraison : elles ne pouvaient pas exister avant.
+    #
+    #  ⚠️ CHAQUE RATIO PORTE UN PLANCHER DE VOLUME. La lecon est ecrite dans ce
+    #  depot au prix d'une fausse alerte : le 2026-09-02, GraphQLErrorRatio a
+    #  tire parce que le trafic s'etait ETEINT -- le denominateur valait
+    #  presque zero et les erreurs residuelles donnaient 100 %. Une alerte qui
+    #  se declenche parce que plus personne n'utilise le produit dit l'inverse
+    #  de ce qu'on lui demande.
+    #
+    #  ⚠️ AUCUNE ALERTE DU TYPE « plus aucune inscription depuis N jours ». La
+    #  production compte UN utilisateur : elle tirerait en permanence, et une
+    #  alerte qui ne s'eteint jamais apprend a ignorer la page des alertes.
+    # =======================================================================
+    - name: urbanlink.produit
+      rules:
+        - alert: SearchFellBackToPostgres
+          # Le disjoncteur ouvert, la recherche CONTINUE DE REPONDRE : pas
+          # d'erreur, pas de 5xx, pas de latence anormale, juste des resultats
+          # moins bons. La seule autre trace est une ligne de journal, et
+          # personne ne lit un journal pour un evenement qui n'arrive jamais --
+          # jusqu'au jour ou il arrive.
+          expr: max(urbanconnect_search_circuit_open) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Disjoncteur Elasticsearch OUVERT depuis 10 min : la recherche est
+              servie par Postgres, en degrade, sans que rien d'autre ne le dise
+
+        - alert: SearchEngineFailingBelowThreshold
+          # ⚠️ LE REPLI LE PLUS SOURNOIS, et celui que la jauge ci-dessus ne
+          # voit PAS. Elasticsearch est retenu, la requete echoue en vol,
+          # l'appelant retombe sur Postgres -- et comme on reste SOUS le seuil
+          # d'ouverture du disjoncteur, ni la jauge ni le compteur de decision
+          # ne bougent. Cela peut durer indefiniment.
+          #
+          # ⚠️ Cette serie peut accuser Elasticsearch d'une panne de POSTGRES :
+          # le `try` des appelants enveloppe aussi les hydratations Prisma. Une
+          # montee ici SANS montee des erreurs Prisma designe bien ES.
+          expr: >-
+            sum(increase(urbanconnect_search_engine_failures_total[30m])) > 5
+            and max(urbanconnect_search_circuit_open) == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value | humanize }} requetes Elasticsearch echouees en 30 min
+              SANS ouverture du disjoncteur -- la recherche degrade en silence
+
+        - alert: StripeWebhooksFailing
+          expr: >-
+            sum(increase(urbanconnect_stripe_webhooks_total{
+              outcome=~"retry|permanent_error"
+            }[30m])) > 3
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              {{ $value | humanize }} webhooks Stripe en echec sur 30 min --
+              paiements, abonnements et litiges ne sont plus projetes en base
+
+        - alert: PaymentsFailingRatio
+          # Plancher a 0,002/s, soit ~7 paiements par heure. Sous ce volume, un
+          # seul refus donnerait un ratio affolant sans rien signifier.
+          expr: >-
+            (
+              sum(rate(urbanconnect_payments_total{outcome="failed"}[30m]))
+              /
+              sum(rate(urbanconnect_payments_total[30m]))
+            ) > 0.3
+            and sum(rate(urbanconnect_payments_total[30m])) > 0.002
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              Plus de 30 % des paiements echouent sur 30 min (volume suffisant
+              pour que le ratio veuille dire quelque chose)
+
+        - alert: SignupsNotProjected
+          # ⚠️ LE DEFAUT QUE `signups_total` EXISTE POUR ATTRAPER : Kratos a
+          # cree une identite, et le webhook n'a pas su l'ecrire en base. Le
+          # compte existe cote authentification et NULLE PART chez nous.
+          # L'utilisateur, lui, croit s'etre inscrit.
+          #
+          # Seuil a 1 : ce n'est pas un taux, c'est un compte perdu. Distinct
+          # de `rejected`, qui accuse le format du corps recu.
+          expr: >-
+            sum(increase(urbanconnect_signups_total{outcome="error"}[1h])) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              {{ $value | humanize }} inscription(s) non projetee(s) en base sur
+              1 h -- Kratos a cree l'identite, nous n'avons pas su l'ecrire
+
+        - alert: NotificationsUndelivered
+          expr: >-
+            sum(increase(urbanconnect_notifications_delivered_total{
+              outcome="failed"
+            }[1h])) > 10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value | humanize }} notifications perdues en 1 h -- elles
+              n'arrivent pas, et personne ne s'en plaint puisque personne ne
+              les attendait
+
+        - alert: SellerPayoutsStuck
+          # `HELD` qui monte sans que `released` ne bouge : plus personne n'est
+          # paye. L'exemple meme de la panne qui ne leve rien -- aucun vendeur
+          # ne signale un virement qu'il n'attendait pas encore.
+          #
+          # ⚠️ Cette alerte etait STRUCTURELLEMENT MUETTE jusqu'au 2026-09-18,
+          # et pas a cause de son expression : la serie s'ecrit dans le worker
+          # Temporal, qui n'exposait aucun /metrics. Elle ne pouvait pas
+          # atteindre Prometheus. Voir servicemonitors.yaml.
+          expr: >-
+            max(urbanconnect_seller_payouts_pending{status="HELD"}) > 5
+            and sum(increase(urbanconnect_seller_payouts_total{outcome="released"}[6h])) == 0
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              {{ $value | humanize }} versements en attente et AUCUN libere
+              depuis 6 h -- le balayage ne paie plus personne
+
+        - alert: KratosLoginFailureRatio
+          # ⚠️ `exported_endpoint`, et NON `endpoint`. L'operateur Prometheus
+          # pose son propre `endpoint` valant le NOM DU PORT du Service, soit
+          # `admin` ; le chemin de Kratos survit prefixe. Une regle ecrite
+          # naturellement rendrait le vide, sans erreur, et ne tirerait jamais.
+          expr: >-
+            (
+              sum(rate(http_requests_total{job="kratos", exported_endpoint="/self-service/login", method="post", code!~"3.."}[30m]))
+              /
+              sum(rate(http_requests_total{job="kratos", exported_endpoint="/self-service/login", method="post"}[30m]))
+            ) > 0.5
+            and sum(rate(http_requests_total{job="kratos", exported_endpoint="/self-service/login", method="post"}[30m])) > 0.005
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              Plus d'une connexion sur deux echoue sur 30 min -- regression du
+              formulaire, ou tentative de bourrage d'identifiants
+
+        - alert: BackendReplicasNotScraped
+          # ⚠️ `scalar()` AU DENOMINATEUR, ET CE N'EST PAS DU STYLE.
+          # `kube_deployment_...` porte `namespace` et `deployment` ;
+          # `count(up{...} == 1)` n'en porte AUCUNE. Un appariement direct ne
+          # trouve aucune paire, rend le vide, et se lit parfaitement -- c'est
+          # le piege n°2 de l'en-tete de ce fichier, qui a deja tue deux regles.
+          #
+          # Le defaut qu'elle attrape, mesure le 2026-09-18 : 3 pods backend en
+          # Running, 2 cibles dans Prometheus. Tous les `sum(rate(...))`
+          # sous-comptaient d'un tiers. La serie `up` ne peut PAS valoir 0 pour
+          # une cible jamais decouverte : rien d'autre ne pouvait le dire.
+          expr: >-
+            kube_deployment_status_replicas_ready{
+              namespace="urbanconnect", deployment="backend"
+            } - scalar(count(up{job="urbanconnect-backend"} == 1)) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              {{ $value }} replica(s) backend pret(s) mais non scrape(s) --
+              tous les taux sur urbanconnect_* sous-comptent en silence
+    # =======================================================================
     #  META -- la surveillance se surveille elle-meme
     # -----------------------------------------------------------------------
     #  Groupe NEUF. Il n'existait pas, et c'est ce qui a permis aux six regles

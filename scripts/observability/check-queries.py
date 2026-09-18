@@ -177,6 +177,19 @@ VIDES_ATTENDUS = {
     "MailQueueNotDraining":
         "la file Postfix est vide et rien n'est differe.",
 
+    # --- Produit : vide = tout va bien ------------------------------------
+    "BackendReplicasNotScraped":
+        "aucun replica pret n'echappe au scrape. ⚠️ VERIFIE PAR LA MESURE, pas "
+        "suppose : l'expression SANS son seuil rend bien UNE serie valant 0 "
+        "(2 replicas prets - 2 cibles scrapees). L'appariement vectoriel "
+        "fonctionne donc, et c'est le `> 0` qui filtre -- pas un `scalar()` "
+        "qui echouerait en silence, comme l'a fait OTelQueueNearFull.",
+    "KratosLoginFailureRatio":
+        "le plancher de volume (0,005 connexion/s sur 30 min) n'est pas "
+        "atteint : la production compte un utilisateur. ⚠️ C'est le plancher "
+        "qui rend le vide, et c'est VOULU -- sans lui, une seule connexion "
+        "ratee sur deux donnerait 50 % et ferait tirer l'alerte sur du bruit.",
+
     # --- Alertes : vide = tout va bien ------------------------------------
     "OOMKillDetected": "personne n'a ete tue faute de memoire.",
     "PodNotReady": "aucun pod non pret (hors Jobs termines, ecartes par le `unless`).",
