@@ -171,7 +171,13 @@ resources:
 - backend/service.yaml
 - backend/hpa.yaml
 - temporal-worker/deployment.yaml
+# ⚠️ Ces deux Services n'existent QUE pour rendre les metriques des workers
+# decouvrables : un ServiceMonitor decouvre les ENDPOINTS d'un Service, jamais
+# les pods d'un Deployment. Sans eux, cinq metriques d'argent et d'import de CV
+# s'ecrivaient dans un processus que personne ne scrapait.
+- temporal-worker/service.yaml
 - cv-agent-worker/deployment.yaml
+- cv-agent-worker/service.yaml
 - frontend/deployment.yaml
 - frontend/service.yaml
 - frontend/hpa.yaml

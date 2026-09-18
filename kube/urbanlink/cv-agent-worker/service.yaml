@@ -1,0 +1,35 @@
+# ============================================================================
+#  Service `cv-agent-worker` -- il n'existe QUE pour rendre les metriques
+#  decouvrables par Prometheus.
+# ----------------------------------------------------------------------------
+#  Ce worker ne sert aucun trafic : personne ne l'appelle, il consomme une file
+#  et execute des balayages. Il n'avait donc pas de Service, et c'est
+#  exactement ce qui le rendait INVISIBLE -- un ServiceMonitor decouvre les
+#  ENDPOINTS d'un Service, pas les pods d'un Deployment.
+#
+#  Consequence mesuree le 2026-09-18 : cinq metriques declarees
+#  (`seller_payouts_total`, `seller_payouts_pending`, les trois
+#  `cv_import_*`) s'incrementaient dans un processus que personne ne scrapait.
+#  Elles n'avaient AUCUNE serie en production -- ce qu'on avait d'abord attribue
+#  a `prom-client`, qui ne cree une serie qu'au premier `.inc()`. La vraie
+#  raison etait plus profonde : meme en tirant, elles n'auraient pas pu etre
+#  lues.
+#
+#  ⚠️ Le port est NOMME, comme celui du backend depuis le 2026-09-02 : le
+#  ServiceMonitor le designe par son nom, et un nom survit a un changement de
+#  numero.
+# ============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: cv-agent-worker
+  namespace: urbanconnect
+  labels:
+    app: cv-agent-worker
+spec:
+  selector:
+    app: cv-agent-worker
+  ports:
+    - name: metrics
+      port: 4002
+      targetPort: 4002

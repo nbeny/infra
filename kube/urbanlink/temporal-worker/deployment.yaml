@@ -31,6 +31,12 @@ spec:
             - sh
             - -c
             - npx prisma generate && npm run temporal:worker:nest
+          ports:
+            # Le seul port de ce processus : `GET /metrics`. Il ne sert
+            # rien d'autre -- le worker n'a aucune raison d'exposer
+            # GraphQL, les televersements ou les webhooks.
+            - name: metrics
+              containerPort: 4001
           env:
             - name: NODE_ENV
               value: production
@@ -87,6 +93,24 @@ spec:
             # PREMIERE ligne. Sans cet import la variable ne servirait a rien --
             # et place apres `AppModule`, les instrumentations arriveraient trop
             # tard pour `pg`, `ioredis` et `kafkajs`.
+            # --- Exposition des metriques ----------------------------------
+            # ⚠️ SANS CE JETON, LA COLLECTE CASSE -- et c'est le comportement
+            # VOULU. `verdictAccesMetriques` (backTs, common/metrics) ferme
+            # l'endpoint en 403 quand NODE_ENV=production et qu'aucun jeton
+            # n'est defini : une variable oubliee doit casser la collecte,
+            # visiblement et reparablement, plutot qu'exposer en silence la
+            # forme interne de l'application.
+            #
+            # `optional: true` comme pour le backend : le Secret peut ne pas
+            # porter la cle sur un environnement de bac a sable.
+            - name: METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: METRICS_TOKEN
+                  optional: true
+            - name: METRICS_PORT
+              value: "4001"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-collector.urbanconnect.svc.cluster.local:4318
             - name: OTEL_SERVICE_NAME

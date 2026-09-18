@@ -229,3 +229,104 @@ spec:
       metricRelabelings:
         - action: labeldrop
           regex: (buildTime|hash|version)
+---
+# ============================================================================
+#  Les deux workers -- cinq metriques qui s'ecrivaient dans le vide
+# ----------------------------------------------------------------------------
+#  `temporal-worker` et `cv-agent-worker` demarrent en
+#  `NestFactory.createApplicationContext` : les modules s'initialisent, mais il
+#  n'y a PAS de serveur HTTP. Aucun `/metrics`, donc rien a scraper -- et ce
+#  n'etait ecrit nulle part.
+#
+#  Or c'est dans le worker Temporal que tourne l'argent pilote par un balayage :
+#  versements, rapprochement nocturne, execution d'un accord de litige,
+#  encaissement d'office des remises en main propre a J+6.
+#
+#  Cinq metriques declarees y etaient aveugles :
+#    urbanconnect_seller_payouts_total        seller-payout.service.ts
+#    urbanconnect_seller_payouts_pending      payout-alerts.service.ts
+#    urbanconnect_cv_import_jobs_total        worker CV
+#    urbanconnect_cv_import_queue_depth       worker CV
+#    urbanconnect_cv_import_duration_seconds  worker CV
+#
+#  ⚠️ L'alerte SellerPayoutsStuck -- « HELD monte et plus personne n'est paye »
+#  -- ne pouvait pas tirer. Pas parce que son expression etait fausse : parce
+#  que la serie n'atteignait jamais Prometheus.
+#
+#  ⚠️ LE WORKER TEMPORAL CHARGE L'AppModule ENTIER. Il exporte donc AUSSI
+#  `urbanconnect_http_requests_total`, `..._graphql_operations_total`,
+#  `..._prisma_queries_total` -- a zero pour les premieres, bien vivantes pour
+#  la derniere. Toute agregation qui ne filtre pas melangerait un compteur
+#  d'API et un compteur de balayage.
+#
+#  Le discriminant est `job`, pose ci-dessous. L'application pose bien de son
+#  cote `service="urbanconnect-worker"` (derive de APP_ROLE, une seule fois,
+#  dans metrics.registry.ts), mais l'operateur Prometheus ECRASE `service` avec
+#  le nom du Service et relegue celui de l'application en `exported_service` --
+#  meme collision que pour `endpoint` sur Kratos, decrite plus haut. Se fier a
+#  `job`, pas a `service`.
+#
+#  ⚠️ Les deux workers posent `APP_ROLE=worker` : l'etiquette `service` ne les
+#  distingue donc PAS l'un de l'autre. C'est `job` qui le fait, et c'est
+#  suffisant -- fabriquer une variable `WORKER_NAME` dupliquerait ce que
+#  Kubernetes porte deja.
+# ============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: temporal-worker
+  namespace: urbanconnect
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: temporal-worker
+  namespaceSelector:
+    matchNames: [urbanconnect]
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      # Meme jeton que le backend, meme mecanique : l'operateur resout la
+      # reference au moment d'ecrire la configuration de scrape. Le Secret doit
+      # vivre dans le MEME namespace que ce ServiceMonitor -- les deux sont
+      # dans `urbanconnect`.
+      authorization:
+        type: Bearer
+        credentials:
+          name: urbanconnect-secrets
+          key: METRICS_TOKEN
+      relabelings:
+        - targetLabel: job
+          replacement: temporal-worker
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cv-agent-worker
+  namespace: urbanconnect
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: cv-agent-worker
+  namespaceSelector:
+    matchNames: [urbanconnect]
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      authorization:
+        type: Bearer
+        credentials:
+          name: urbanconnect-secrets
+          key: METRICS_TOKEN
+      relabelings:
+        - targetLabel: job
+          replacement: cv-agent-worker
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
