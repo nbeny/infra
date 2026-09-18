@@ -41,6 +41,14 @@ grafana:
       check_for_updates: false
       reporting_enabled: false
 
+  # Lu par le provisionnement de la source « Postgres (metier) » (depot
+  # applicatif, config/prod/observability/grafana-datasources.yaml) sous la
+  # forme `$GRAFANA_PG_PASSWORD`. Grafana interpole les variables
+  # d'environnement dans ses fichiers de provisionnement -- c'est ce qui permet
+  # de declarer la source dans un depot SANS y ecrire le mot de passe.
+  env:
+    GRAFANA_PG_PASSWORD: "{{ grafana_pg_password }}"
+
   sidecar:
     datasources:
       enabled: true

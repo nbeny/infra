@@ -108,6 +108,7 @@ fill KIBANA_SYSTEM_PASSWORD "$(rand 32)"
 fill MINIO_ROOT_PASSWORD    "$(rand 32)"
 fill JWT_SECRET             "$(rand 48)"
 fill METRICS_TOKEN          "$(rand 32)"
+fill GRAFANA_PG_PASSWORD    "$(rand 32)"
 fill TURN_SECRET            "$(rand 32)"
 
 # --- Valeurs derivees -------------------------------------------------------

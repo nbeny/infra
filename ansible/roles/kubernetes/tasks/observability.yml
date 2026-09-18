@@ -54,6 +54,7 @@
     grafana_smtp_smarthost: "{{ obs_env | regex_search('^GRAFANA_SMTP_SMARTHOST=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
     grafana_smtp_username: "{{ obs_env | regex_search('^GRAFANA_SMTP_USERNAME=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
     grafana_smtp_password: "{{ obs_env | regex_search('^GRAFANA_SMTP_PASSWORD=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
+    grafana_pg_password: "{{ obs_env | regex_search('^GRAFANA_PG_PASSWORD=(.*)$', '\\1', multiline=True) | default([], true) | first | default('') | trim }}"
   vars:
     obs_env: "{{ obs_env_raw.content | b64decode }}"
   no_log: true
@@ -112,3 +113,83 @@
     hr_version: "{{ k8s_kube_prometheus_stack_chart_version }}"
     hr_values: /root/kube-prometheus-stack-values.yaml
     hr_timeout: 15m
+
+# ============================================================================
+#  Le role Postgres en LECTURE SEULE de Grafana
+# ----------------------------------------------------------------------------
+#  POURQUOI UNE SOURCE SQL A COTE DE PROMETHEUS. Prometheus compte des
+#  EVENEMENTS : il sait combien d'inscriptions cette heure-ci, pas combien
+#  d'inscrits en tout. « La courbe d'inscriptions depuis l'ouverture »,
+#  « l'entonnoir », « les annonces par statut » sont des etats cumules que la
+#  base porte deja -- les porter en serie temporelle demanderait une jauge
+#  remise a jour par un balayage, c'est-a-dire une SECONDE source de verite sur
+#  un chiffre existant. Le depot l'interdit.
+#
+#  ⚠️ NI MIGRATION PRISMA, NI GESTE MANUEL. Une migration Prisma ne peut pas
+#  recevoir de variable psql, le mot de passe s'y retrouverait en clair dans le
+#  depot, et `migrate dev` est inutilisable sur cette base (derive connue : 12
+#  index partiels faits main seraient supprimes). Un geste manuel, lui, ne
+#  survit pas a une restauration.
+#
+#  ⚠️ CE ROLE NE PEUT RIEN ECRIRE, et c'est verifie plus bas par une tentative
+#  reelle. Deux protections qui se recouvrent :
+#    1. GRANT SELECT seul, jamais INSERT/UPDATE/DELETE ;
+#    2. `default_transaction_read_only = on` sur le role -- il survit a un
+#       GRANT trop large pose plus tard par distraction.
+# ============================================================================
+- name: "[obs] Le role Postgres en lecture seule de Grafana"
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      kubectl -n {{ k8s_observability_namespace }} exec -i postgres-0 -- \
+        psql -U urbanconnect -d urbanconnect -v ON_ERROR_STOP=1 <<'SQL'
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_ro') THEN
+          CREATE ROLE grafana_ro LOGIN;
+        END IF;
+      END $$;
+      ALTER ROLE grafana_ro WITH PASSWORD '{{ grafana_pg_password }}';
+
+      GRANT CONNECT ON DATABASE urbanconnect TO grafana_ro;
+      GRANT USAGE  ON SCHEMA public TO grafana_ro;
+      GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_ro;
+
+      -- ⚠️ `FOR ROLE urbanconnect` est OBLIGATOIRE : sans lui, la regle ne
+      -- vaudrait que pour les tables creees par le role qui execute ce bloc.
+      -- Les migrations Prisma tournent en `urbanconnect` -- c'est de SES
+      -- futures tables qu'il s'agit. Sans ca, une table ajoutee dans six mois
+      -- serait invisible a Grafana, et le panneau rendrait « permission
+      -- denied » plutot qu'un vide : honnete, mais remarque six mois trop tard.
+      ALTER DEFAULT PRIVILEGES FOR ROLE urbanconnect IN SCHEMA public
+        GRANT SELECT ON TABLES TO grafana_ro;
+
+      ALTER ROLE grafana_ro SET default_transaction_read_only = on;
+      SQL
+    executable: /bin/bash
+  changed_when: false
+  no_log: true          # le mot de passe transite dans la commande
+
+# ⚠️ CETTE VERIFICATION EST LE CŒUR DE LA TACHE PRECEDENTE, pas son ornement.
+# Un role de tableau de bord qui peut ecrire dans la base du produit est un
+# probleme plus grave que l'absence de tableau de bord. On ne verifie donc pas
+# que le GRANT a ete « applique » : on ESSAIE D'ECRIRE, et on exige l'echec.
+- name: "[obs] Exiger que grafana_ro ne puisse PAS ecrire"
+  ansible.builtin.shell:
+    cmd: |
+      echo "CREATE TABLE zz_grafana_ro_probe(i int);" | \
+        kubectl -n {{ k8s_observability_namespace }} exec -i postgres-0 -- \
+          psql -U grafana_ro -d urbanconnect 2>&1 || true
+    executable: /bin/bash
+  register: grafana_ro_probe
+  changed_when: false
+
+- name: "[obs] Le refus d'ecriture doit etre explicite"
+  ansible.builtin.assert:
+    that:
+      - "'read-only transaction' in grafana_ro_probe.stdout"
+    fail_msg: >-
+      grafana_ro a pu executer un CREATE TABLE, ou a echoue pour une autre
+      raison que le mode lecture seule. Sortie : {{ grafana_ro_probe.stdout }}.
+      NE PAS CONTINUER : un role de tableau de bord qui ecrit dans la base du
+      produit est plus grave que l'absence de tableau de bord.
+    success_msg: "grafana_ro est bien en lecture seule (CREATE TABLE refuse)."

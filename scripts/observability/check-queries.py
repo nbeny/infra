@@ -67,6 +67,19 @@
 #  d'''expression -- c'''est cette confusion qui avait fait justifier a la
 #  premiere version de ce script le defaut qu'''il devait trouver.
 #
+#  ⚠️ CETTE PORTE NE COUVRE QUE PROMQL.
+#
+#  Depuis le 2026-09-18, le tableau « 01 — Produit » porte des panneaux SQL sur
+#  la source `postgres-metier`. Ils sont IGNORES ici : le script extrait les
+#  expressions PromQL, et un `rawSql` n'en est pas une. Un panneau citant une
+#  colonne inexistante passerait donc au vert sans avoir ete verifie.
+#
+#  Les colonnes des cinq panneaux SQL actuels ont ete verifiees a la main
+#  contre `information_schema.columns` de la base de production -- notamment
+#  que `orders` n'a PAS de `sellerId` (il vit sur `order_items`). Toute
+#  requete SQL ajoutee doit l'etre de la meme facon, jusqu'a ce que cette porte
+#  sache les executer.
+#
 #  ⚠️ Sans dependance : `urllib` et `pyyaml` (deja requis par Ansible). Le
 #  depot infra n'a pas de package.json, et ce script ne doit pas en imposer un.
 # ============================================================================
