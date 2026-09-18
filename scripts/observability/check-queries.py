@@ -46,6 +46,27 @@
 #
 #  Code de sortie 0 si tout est vert, 1 sinon -- utilisable en porte de CI.
 #
+#  ─────────────────────────────────────────────────────────────────────────
+#  PORTE REVUE AU ROUGE LE 2026-09-18
+#  ─────────────────────────────────────────────────────────────────────────
+#  Une porte qu'''on n'''a jamais vue refuser ne prouve rien. Deux defauts ont
+#  donc ete injectes dans 00-overview.json, puis retires :
+#
+#    ZZ metrique fantome    sum(urbanconnect_nexistepas_total)
+#                           -> refuse en FANTOME
+#    ZZ appariement casse   kube_deployment_status_replicas_ready{...}
+#                             / count(up{job="urbanconnect-backend"} == 1)
+#                           -> refuse en VIDE
+#
+#  Le second est le piege n°2 de prometheus-alerts.yaml : les DEUX metriques
+#  existent, l'''expression se lit parfaitement, et l'''appariement ne trouve
+#  aucune paire parce que le denominateur ne porte aucune etiquette. Remede :
+#  scalar().
+#
+#  Les deux ont ete nommes PAR LEUR TITRE DE PANNEAU, pas par un fragment
+#  d'''expression -- c'''est cette confusion qui avait fait justifier a la
+#  premiere version de ce script le defaut qu'''il devait trouver.
+#
 #  ⚠️ Sans dependance : `urllib` et `pyyaml` (deja requis par Ansible). Le
 #  depot infra n'a pas de package.json, et ce script ne doit pas en imposer un.
 # ============================================================================
