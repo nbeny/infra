@@ -59,6 +59,33 @@
   when: not mailcow_probe_output.stat.exists
   changed_when: true
 
+# ⚠️ CETTE TACHE EST NEE D'UNE PANNE SILENCIEUSE, le 2026-09-18.
+#
+# `/etc/default/prometheus-node-exporter` portait un
+# `--collector.textfile.directory` pointant AILLEURS que la ou la sonde ecrit.
+# Personne ne l'avait pose ici ; il est apparu apres le dernier passage du
+# role. Resultat : sonde verte, service vert, scrape vert, et pas une seule
+# serie `mail_*` dans Prometheus pendant des semaines.
+#
+# On n'herite plus du defaut du paquet : on ECRIT le repertoire. Le cout est
+# exactement ce que l'ancien commentaire voulait eviter -- un redemarrage du
+# service -- et il est paye une fois, a l'installation, contre une panne qui
+# ne se voit pas.
+- name: Imposer le repertoire textfile a node_exporter
+  ansible.builtin.lineinfile:
+    path: /etc/default/prometheus-node-exporter
+    regexp: '^ARGS='
+    line: 'ARGS="--collector.textfile.directory={{ mailcow_textfile_dir }}"'
+    create: true
+    mode: "0644"
+  notify: Redemarrer node_exporter
+
+# Les handlers ne tournent qu'en fin de play : sans ce vidage, la verification
+# ci-dessous interrogerait un node_exporter qui n'a pas encore relu ses
+# arguments, et passerait au vert sur l'ancienne configuration.
+- name: Appliquer le redemarrage avant de verifier
+  ansible.builtin.meta: flush_handlers
+
 - name: Garantir que node_exporter tourne
   ansible.builtin.systemd_service:
     name: prometheus-node-exporter
