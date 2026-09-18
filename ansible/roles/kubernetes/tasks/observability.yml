@@ -137,6 +137,25 @@
 #    2. `default_transaction_read_only = on` sur le role -- il survit a un
 #       GRANT trop large pose plus tard par distraction.
 # ============================================================================
+# ⚠️ UNE VARIABLE OUBLIEE DOIT CASSER, VISIBLEMENT.
+#
+# Sans cette garde, `ALTER ROLE grafana_ro WITH PASSWORD ''` poserait un mot de
+# passe VIDE : la source Grafana ne se connecterait pas, le panneau afficherait
+# une erreur illisible, et le role Postgres resterait la avec un secret nul.
+# Meme raisonnement que `METRICS_TOKEN`, qui FERME l'endpoint plutot que de
+# l'ouvrir quand il manque.
+- name: "[obs] Exiger le mot de passe Postgres de Grafana"
+  ansible.builtin.assert:
+    that:
+      - grafana_pg_password | length >= 16
+    fail_msg: >
+      GRAFANA_PG_PASSWORD est absent ou trop court dans
+      {{ k8s_observability_secrets_env }}. Le generer avec
+      `scripts/secrets/bootstrap.sh` (il ne touche QUE les valeurs vides,
+      sans --rotate), rejouer playbooks/31-urbanlink-deploy.yml, puis relancer
+      ce role.
+    success_msg: "Grafana : mot de passe Postgres present."
+
 - name: "[obs] Le role Postgres en lecture seule de Grafana"
   ansible.builtin.shell:
     cmd: |
