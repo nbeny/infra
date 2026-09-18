@@ -279,12 +279,21 @@ configMapGenerator:
   - config/common/observability/tempo.yaml
   - config/common/observability/loki.yaml
   name: observability-config
+# ⚠️ RETIRER UN FICHIER D'ICI NE SUFFIT PAS A FAIRE DISPARAITRE LE TABLEAU.
+# Le provisionnement Grafana par sidecar est ADDITIF : il insere et met a jour,
+# il ne supprime pas ce qui a ete pose auparavant. Les quatre entrees
+# renommees ci-dessous (01-backend, 02-platform, 03-mesh, 04-observability)
+# gardent leurs `uid` d'origine, donc Grafana les met a jour au lieu d'en
+# creer de nouvelles -- c'est voulu : un `uid` est ce que portent les liens et
+# les signets. Verifier apres deploiement qu'il y a bien SIX entrees et pas
+# dix.
 - files:
   - config/prod/observability/grafana-dashboards/00-overview.json
-  - config/prod/observability/grafana-dashboards/01-backend.json
-  - config/prod/observability/grafana-dashboards/02-platform.json
-  - config/prod/observability/grafana-dashboards/03-mesh.json
-  - config/prod/observability/grafana-dashboards/04-observability.json
+  - config/prod/observability/grafana-dashboards/01-produit.json
+  - config/prod/observability/grafana-dashboards/02-ce-qui-casse.json
+  - config/prod/observability/grafana-dashboards/03-backend.json
+  - config/prod/observability/grafana-dashboards/04-plateforme.json
+  - config/prod/observability/grafana-dashboards/05-maillage-et-chaine.json
   name: grafana-dashboards
   options:
     labels:
