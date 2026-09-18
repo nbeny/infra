@@ -5,32 +5,449 @@
   "timezone": "browser",
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["urbanlink", "vue-d-ensemble"],
-  "time": { "from": "now-6h", "to": "now" },
+  "tags": [
+    "urbanlink",
+    "vue-d-ensemble"
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "links": [
     {
       "type": "dashboards",
-      "title": "Tableaux de bord UrbanLink",
-      "tags": ["urbanlink"],
-      "asDropdown": true,
+      "title": "Les autres pages",
+      "tags": [
+        "urbanlink"
+      ],
+      "asDropdown": false,
       "includeVars": false,
       "keepTime": true,
+      "targetBlank": false,
       "icon": "external link"
     }
   ],
-  "templating": { "list": [] },
+  "templating": {
+    "list": []
+  },
   "panels": [
+    {
+      "id": 132,
+      "type": "row",
+      "title": "Le produit vit-il ?",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 133,
+      "type": "stat",
+      "title": "Connectés",
+      "description": "Comptes présents à l'instant. ⚠️ `max()`, jamais `sum()` : les trois replicas publient la MÊME valeur globale, elle vient de Redis.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(urbanconnect_sessions_active)",
+          "instant": true,
+          "legendFormat": "connectés"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 134,
+      "type": "stat",
+      "title": "Inscriptions (24 h)",
+      "description": "Comptes réellement écrits en base — pas les tentatives d'authentification.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(urbanconnect_signups_total{outcome=\"created\"}[24h])) or vector(0)",
+          "instant": true,
+          "legendFormat": "inscriptions (24 h)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 135,
+      "type": "stat",
+      "title": "Annonces publiées (24 h)",
+      "description": "Les trois portes confondues : création, remise en ligne, passage à ACTIVE par l'édition.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(urbanconnect_artefacts_published_total[24h])) or vector(0)",
+          "instant": true,
+          "legendFormat": "annonces publiées (24 h)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 136,
+      "type": "stat",
+      "title": "Commandes payées (24 h)",
+      "description": "Toutes voies confondues. Une seule passe par le webhook Stripe ; les six autres capturent la main.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(urbanconnect_orders_total{outcome=\"paid\"}[24h])) or vector(0)",
+          "instant": true,
+          "legendFormat": "commandes payées (24 h)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 137,
+      "type": "stat",
+      "title": "Paiements refusés (24 h)",
+      "description": "Un refus isolé est normal. Une série l'est beaucoup moins.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(urbanconnect_payments_total{outcome=\"failed\"}[24h])) or vector(0)",
+          "instant": true,
+          "legendFormat": "paiements refusés (24 h)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Aucun",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 138,
+      "type": "stat",
+      "title": "Messages (24 h)",
+      "description": "Ce qu'un humain a écrit — les messages d'événement du fil n'y sont pas.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(urbanconnect_messages_sent_total[24h])) or vector(0)",
+          "instant": true,
+          "legendFormat": "messages (24 h)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
     {
       "id": 1,
       "type": "stat",
       "title": "Alertes actives",
       "description": "Alertes en cours, `Watchdog` exclu. Cette alerte-là tire EN PERMANENCE, par conception : elle prouve que la chaîne d'alerte fonctionne. La compter empêchait ce chiffre de valoir zéro, donc de signaler quoi que ce soit.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 5
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "count(ALERTS{alertstate=\"firing\", alertname!=\"Watchdog\"}) or vector(0)",
           "instant": true,
           "legendFormat": "alertes"
@@ -40,13 +457,32 @@
         "defaults": {
           "unit": "short",
           "decimals": 0,
-          "mappings": [{ "type": "value", "options": { "0": { "text": "Aucune", "index": 0 } } }],
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Aucune",
+                  "index": 0
+                }
+              }
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red", "value": 4 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 4
+              }
             ]
           }
         },
@@ -57,39 +493,72 @@
         "graphMode": "none",
         "textMode": "value",
         "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       }
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "Cibles saines",
-      "description": "Part des cibles de collecte qui répondent. Une seule cible muette, et le tableau de bord qui en dépend affiche un plat rassurant plutôt qu'un trou.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "title": "Replicas prêts, non scrapés",
+      "description": "⚠️ **Remplace « Cibles saines », qui affichait 100 % pendant qu'un replica prêt n'était pas scrapé.** `up` ne peut pas valoir 0 pour une cible JAMAIS DÉCOUVERTE : l'ancienne mesure ne pouvait pas voir ce défaut, par construction.\n\nMesuré le 2026-09-18 : 3 pods `backend` en Running, 2 cibles dans Prometheus. Tous les `sum(rate(urbanconnect_*))` sous-comptaient d'un tiers, en silence.\n\n`scalar()` au dénominateur n'est pas du style : `kube_deployment_…` porte `namespace` et `deployment`, `count(up{…})` n'en porte aucune. Un appariement direct rendrait le vide — et se lirait parfaitement.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 5
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * sum(up) / count(up)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "kube_deployment_status_replicas_ready{namespace=\"urbanconnect\", deployment=\"backend\"} - scalar(count(up{job=\"urbanconnect-backend\"} == 1))",
           "instant": true,
-          "legendFormat": "cibles up"
+          "legendFormat": "non scrapés"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
-          "decimals": 1,
+          "unit": "short",
+          "decimals": 0,
           "min": 0,
           "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "orange", "value": 90 },
-              { "color": "green", "value": 100 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Aucun",
+                  "index": 0
+                }
+              }
+            }
+          ]
         },
         "overrides": []
       },
@@ -98,7 +567,13 @@
         "graphMode": "none",
         "textMode": "value",
         "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       }
     },
     {
@@ -106,12 +581,23 @@
       "type": "stat",
       "title": "Requêtes API /s",
       "description": "Débit HTTP du backend, tous replicas confondus. Chiffre fiable depuis que la collecte se fait par pod (ServiceMonitor) : avec le scrape par ClusterIP, les compteurs des deux replicas se mélangeaient dans une seule série et chaque descente était lue comme une remise à zéro.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 5
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(rate(urbanconnect_http_requests_total[5m]))",
           "instant": true,
           "legendFormat": "req/s"
@@ -121,7 +607,15 @@
         "defaults": {
           "unit": "reqps",
           "decimals": 2,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -130,7 +624,13 @@
         "graphMode": "area",
         "textMode": "value",
         "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       }
     },
     {
@@ -138,12 +638,23 @@
       "type": "stat",
       "title": "Taux d'erreur 5xx",
       "description": "Part des réponses 5xx sur l'ensemble du trafic HTTP du backend. Seuils alignés sur l'alerte `BackendHighErrorRate` (1 %).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 5
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "(sum(rate(urbanconnect_http_requests_total{status=~\"5..\"}[5m])) or vector(0)) / sum(rate(urbanconnect_http_requests_total[5m]))",
           "instant": true,
           "legendFormat": "5xx"
@@ -157,9 +668,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 0.01 },
-              { "color": "red", "value": 0.05 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
             ]
           }
         },
@@ -170,7 +690,13 @@
         "graphMode": "area",
         "textMode": "value",
         "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       }
     },
     {
@@ -178,12 +704,23 @@
       "type": "stat",
       "title": "Latence API p99",
       "description": "99e centile du temps de réponse HTTP du backend. Seuil aligné sur l'alerte `BackendHighLatency` (2 s).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 5
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
           "instant": true,
           "legendFormat": "p99"
@@ -196,9 +733,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red", "value": 2 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
             ]
           }
         },
@@ -209,7 +755,13 @@
         "graphMode": "area",
         "textMode": "value",
         "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       }
     },
     {
@@ -217,12 +769,23 @@
       "type": "stat",
       "title": "Saturation du nœud",
       "description": "La plus contrainte des trois ressources du nœud : CPU, mémoire, disque `/`. Un `label_replace` distingue les trois avant le `max` — sans étiquette distincte, l'union `or` en aurait écarté deux.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 5
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "max(\n  label_replace(1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])), \"res\", \"cpu\", \"\", \"\")\n  or label_replace(1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes), \"res\", \"ram\", \"\", \"\")\n  or label_replace(1 - avg(node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}), \"res\", \"disque\", \"\", \"\")\n)",
           "instant": true,
           "legendFormat": "max(cpu, ram, disque)"
@@ -237,9 +800,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 0.75 },
-              { "color": "red", "value": 0.9 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
             ]
           }
         },
@@ -250,21 +822,37 @@
         "graphMode": "none",
         "textMode": "value",
         "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       }
     },
-
     {
       "id": 10,
       "type": "timeseries",
       "title": "Débit HTTP du backend, par code de statut",
       "description": "Une courbe par famille de code. Un 4xx qui grimpe désigne un client ou une intégration ; un 5xx qui grimpe désigne le backend.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (status) (rate(urbanconnect_http_requests_total[5m]))",
           "legendFormat": "{{status}}"
         }
@@ -279,28 +867,83 @@
             "lineWidth": 2,
             "fillOpacity": 15,
             "showPoints": "never",
-            "stacking": { "mode": "normal", "group": "A" }
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
           },
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": [
           {
-            "matcher": { "id": "byRegexp", "options": "5.*" },
-            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+            "matcher": {
+              "id": "byRegexp",
+              "options": "5.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
           },
           {
-            "matcher": { "id": "byRegexp", "options": "4.*" },
-            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+            "matcher": {
+              "id": "byRegexp",
+              "options": "4.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
           },
           {
-            "matcher": { "id": "byRegexp", "options": "2.*" },
-            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+            "matcher": {
+              "id": "byRegexp",
+              "options": "2.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
           }
         ]
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
@@ -308,24 +951,41 @@
       "type": "timeseries",
       "title": "Latence HTTP du backend",
       "description": "Trois centiles sur le même axe. Un p50 stable avec un p99 qui décolle désigne une minorité de requêtes lentes — souvent une route précise, à chercher sur « 01 — Backend ».",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "histogram_quantile(0.50, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "p50"
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "p95"
         },
         {
           "refId": "C",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(urbanconnect_http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "p99"
         }
@@ -335,184 +995,174 @@
           "unit": "s",
           "decimals": 3,
           "min": 0,
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red", "value": 2 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
-
-    {
-      "id": 20,
-      "type": "timeseries",
-      "title": "Nœud — CPU, mémoire, disque",
-      "description": "Les trois ressources du nœud unique, en pourcentage, sur un axe commun. Les 12 PVC du cluster vivent tous sur `/` : cette courbe couvre donc aussi leur remplissage.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 12 },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
-          "legendFormat": "CPU"
-        },
-        {
-          "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * (1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))",
-          "legendFormat": "Mémoire"
-        },
-        {
-          "refId": "C",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * (1 - avg(node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}))",
-          "legendFormat": "Disque /"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "decimals": 1,
-          "min": 0,
-          "max": 100,
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 75 },
-              { "color": "red", "value": 90 }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
-      }
-    },
-    {
-      "id": 21,
-      "type": "timeseries",
-      "title": "Chaîne de télémétrie — ce qui arrive vraiment",
-      "description": "Spans acceptés par Tempo et lignes acceptées par Loki. **À zéro, le pipeline est muet** : les traces et les journaux ne sont pas « vides », ils n'existent pas. C'est l'état dans lequel ce cluster a vécu jusqu'au 2026-09-02, faute de `OTEL_EXPORTER_OTLP_ENDPOINT` sur le backend. Le `or vector(0)` est indispensable : une métrique jamais instanciée rend un vecteur vide, et un panneau vide se lit comme un panneau calme.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 12 },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(tempo_distributor_spans_received_total[5m])) or vector(0)",
-          "legendFormat": "spans/s → Tempo"
-        },
-        {
-          "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(loki_distributor_lines_received_total[5m])) or vector(0)",
-          "legendFormat": "lignes/s → Loki"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "cps",
-          "decimals": 2,
-          "min": 0,
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 0.001 }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
-      }
-    },
-    {
-      "id": 22,
-      "type": "table",
-      "title": "Cibles de collecte muettes",
-      "description": "Vide = tout répond. Chaque ligne est une source de données absente : les panneaux qui en dépendent afficheront un plat, pas une erreur.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 12 },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "up == 0",
-          "instant": true,
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "endpoint": true, "container": true }, "renameByName": { "job": "Job", "instance": "Instance", "namespace": "Namespace", "pod": "Pod", "service": "Service" } } }
-      ],
-      "fieldConfig": { "defaults": { "custom": { "align": "left" } }, "overrides": [] },
-      "options": { "showHeader": true, "footer": { "show": false, "reducer": ["sum"] } }
-    },
-
     {
       "id": 30,
       "type": "table",
       "title": "Alertes en cours",
       "description": "`Watchdog` exclu, pour la raison écrite sur la première tuile. Poser un silence se fait dans Alertmanager (lien à droite) — Prometheus montre l'état des règles, il ne sait pas taire une alerte.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 16, "x": 0, "y": 19 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 0,
+        "y": 24
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "ALERTS{alertstate=\"firing\", alertname!=\"Watchdog\"}",
           "instant": true,
           "format": "table"
         }
       ],
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "alertstate": true, "endpoint": true, "container": true, "prometheus": true }, "renameByName": { "alertname": "Alerte", "severity": "Sévérité", "namespace": "Namespace", "pod": "Pod", "deployment": "Deployment", "job": "Job" } } },
-        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "Sévérité" }] } }
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "alertstate": true,
+              "endpoint": true,
+              "container": true,
+              "prometheus": true
+            },
+            "renameByName": {
+              "alertname": "Alerte",
+              "severity": "Sévérité",
+              "namespace": "Namespace",
+              "pod": "Pod",
+              "deployment": "Deployment",
+              "job": "Job"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Sévérité"
+              }
+            ]
+          }
+        }
       ],
       "fieldConfig": {
-        "defaults": { "custom": { "align": "left" } },
+        "defaults": {
+          "custom": {
+            "align": "left"
+          }
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Sévérité" },
+            "matcher": {
+              "id": "byName",
+              "options": "Sévérité"
+            },
             "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
               {
                 "id": "mappings",
                 "value": [
-                  { "type": "value", "options": { "critical": { "color": "red", "index": 0, "text": "critical" }, "warning": { "color": "orange", "index": 1, "text": "warning" } } }
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "color": "red",
+                        "index": 0,
+                        "text": "critical"
+                      },
+                      "warning": {
+                        "color": "orange",
+                        "index": 1,
+                        "text": "warning"
+                      }
+                    }
+                  }
                 ]
               }
             ]
           }
         ]
       },
-      "options": { "showHeader": true, "footer": { "show": false, "reducer": ["sum"] } }
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ]
+        }
+      }
     },
     {
       "id": 31,
       "type": "text",
       "title": "Consoles",
       "description": "Toutes en tier `internal` (AuthorizationPolicy Istio) et derrière l'authentification du bord pour celles qui n'en ont pas.",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 19 },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
       "options": {
         "mode": "markdown",
         "content": "| Console | À quoi elle sert |\n|---|---|\n| [Alertmanager](https://alertmanager.urbanlink.fr) | voir les alertes **actives**, poser un **silence** |\n| [Prometheus](https://prometheus.urbanlink.fr) | l'état des **règles**, les cibles, un PromQL à la main |\n| [Kiali](https://kiali.urbanlink.fr) | le **graphe** du maillage, service par service |\n| [Argo CD](https://argo.urbanlink.fr) | ce qui est **déployé**, et la dérive avec le dépôt |\n| [Temporal](https://temporal.urbanlink.fr) | les **workflows** et les balayages programmés |\n| [Kibana](https://kibana.urbanlink.fr) | l'index **Elasticsearch** de la recherche |\n\n---\n\n**Traces et journaux** se lisent dans *Explore* (Tempo, Loki) — Grafana a déjà l'outil, ce tableau de bord ne le duplique pas."
