@@ -269,6 +269,32 @@ VIDES_ATTENDUS = {
 #  exception permanente, c'est-a-dire exactement le mecanisme que ce script
 #  combat.
 EN_ATTENTE_DE_DEPLOIEMENT = {
+    'urbanconnect_sessions_active':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_signups_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_artefacts_published_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_searches_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_search_circuit_open':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_search_engine_failures_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_orders_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_payments_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_stripe_webhooks_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_notifications_delivered_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_messages_sent_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_seller_payouts_total':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
+    'urbanconnect_seller_payouts_pending':
+        "branche feat/observabilite-produit-defaillances : declaree et branchee, en attente du deploiement de l'image applicative. A RETIRER une fois l'image en production et la serie verifiee.",
     # VIDE, et c'est l'etat normal. La derniere entree --
     # `urbanconnect_outbox_pending`, absente parce que `drain()` ne posait la
     # jauge que s'il avait publie quelque chose -- a ete retiree le 2026-09-02
