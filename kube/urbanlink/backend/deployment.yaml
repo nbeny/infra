@@ -160,6 +160,36 @@ spec:
               value: "https://urbanlink.fr"
             - name: FRONTEND_URL
               value: "https://urbanlink.fr"
+            # SMTP — e-mails transactionnels du backend (commandes, litiges,
+            # messages…). Les e-mails d'AUTHENTIFICATION partent de Kratos, qui
+            # lit les trois mêmes clés sous ses propres noms `COURIER_SMTP_*`.
+            #
+            # ⚠️ **Une donnée, deux consommateurs.** C'est volontairement la
+            # MÊME `SMTP_CONNECTION_URI` que le déploiement Kratos, et non un
+            # second jeu `SMTP_HOST`/`PORT`/`USER`/`PASSWORD` : deux copies
+            # d'un même identifiant, ce sont deux endroits à faire tourner le
+            # jour d'une rotation, et un seul qui sera oublié.
+            #
+            # ⚠️ Sans ces variables, `smtpConfigFrom` retombe sur
+            # `localhost:1025` — le placeholder MailSlurper. Le backend démarre,
+            # la jauge `urbanconnect_mail_smtp_configured` passe à 0, un `warn`
+            # nomme ce qui manque, et AUCUN e-mail ne part. C'est le défaut qui
+            # avait déjà vidé `courier_messages` côté Kratos.
+            - name: SMTP_CONNECTION_URI
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMTP_CONNECTION_URI
+            - name: SMTP_FROM_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMTP_FROM_ADDRESS
+            - name: SMTP_FROM_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: SMTP_FROM_NAME
             # Stripe
             # ⚠️ **TEMPORAIRE — à retirer dès que l'image portant le nouveau
             # défaut (20000) est déployée.** Le code avait 1500, ce qui refusait
