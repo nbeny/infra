@@ -231,9 +231,13 @@ identity:
       url: file:///etc/config/kratos/identity.schema.json
 
 courier:
+  # ⚠️ Sans cette ligne, TOUT ce dossier est décoratif : Kratos sert ses
+  # gabarits intégrés (anglais, Times) et personne ne le voit — c'est ce qui
+  # a laissé vivre deux dossiers de gabarits morts dans le dépôt.
+  template_override_path: /etc/config/kratos/email-templates
   # connection_uri / from_address / from_name sont surchargés par les variables
   # d'env COURIER_SMTP_* du compose (SMTP Infomaniak). Valeurs par défaut ici.
   smtp:
     connection_uri: smtp://mailslurper:1025/?skip_ssl_verify=true
     from_address: contact@urbanlink.fr
-    from_name: UrbanConnect
+    from_name: UrbanLink
