@@ -127,6 +127,10 @@ namespace: urbanconnect
   #   aupres des pods de la passerelle -- c'est le seul endroit ou l'ext_authz
   #   L7 s'applique en mode ambient (ztunnel ne fait que du L4). Elle est
   #   appliquee separement par playbooks/31-urbanlink-deploy.yml.
+# ⚠️ Ces deux Services n'existent QUE pour rendre les metriques des workers
+# decouvrables : un ServiceMonitor decouvre les ENDPOINTS d'un Service, jamais
+# les pods d'un Deployment. Sans eux, cinq metriques d'argent et d'import de CV
+# s'ecrivaient dans un processus que personne ne scrapait.
 resources:
 - namespace.yaml
 - postgres/statefulset.yaml
@@ -171,10 +175,6 @@ resources:
 - backend/service.yaml
 - backend/hpa.yaml
 - temporal-worker/deployment.yaml
-# ⚠️ Ces deux Services n'existent QUE pour rendre les metriques des workers
-# decouvrables : un ServiceMonitor decouvre les ENDPOINTS d'un Service, jamais
-# les pods d'un Deployment. Sans eux, cinq metriques d'argent et d'import de CV
-# s'ecrivaient dans un processus que personne ne scrapait.
 - temporal-worker/service.yaml
 - cv-agent-worker/deployment.yaml
 - cv-agent-worker/service.yaml
@@ -255,6 +255,14 @@ resources:
 # ceux-ci viennent du depot APPLICATIF via la CI (rsync de config/), tandis que
 # la messagerie est un objet d'infrastructure. Le poser dans config/ le ferait
 # dependre d'une CI qui ne le concerne pas -- et qui est aujourd'hui rouge.
+# ⚠️ RETIRER UN FICHIER D'ICI NE SUFFIT PAS A FAIRE DISPARAITRE LE TABLEAU.
+# Le provisionnement Grafana par sidecar est ADDITIF : il insere et met a jour,
+# il ne supprime pas ce qui a ete pose auparavant. Les quatre entrees
+# renommees ci-dessous (01-backend, 02-platform, 03-mesh, 04-observability)
+# gardent leurs `uid` d'origine, donc Grafana les met a jour au lieu d'en
+# creer de nouvelles -- c'est voulu : un `uid` est ce que portent les liens et
+# les signets. Verifier apres deploiement qu'il y a bien SIX entrees et pas
+# dix.
 configMapGenerator:
 - files:
   - config/common/kratos/identity.schema.json
@@ -279,14 +287,6 @@ configMapGenerator:
   - config/common/observability/tempo.yaml
   - config/common/observability/loki.yaml
   name: observability-config
-# ⚠️ RETIRER UN FICHIER D'ICI NE SUFFIT PAS A FAIRE DISPARAITRE LE TABLEAU.
-# Le provisionnement Grafana par sidecar est ADDITIF : il insere et met a jour,
-# il ne supprime pas ce qui a ete pose auparavant. Les quatre entrees
-# renommees ci-dessous (01-backend, 02-platform, 03-mesh, 04-observability)
-# gardent leurs `uid` d'origine, donc Grafana les met a jour au lieu d'en
-# creer de nouvelles -- c'est voulu : un `uid` est ce que portent les liens et
-# les signets. Verifier apres deploiement qu'il y a bien SIX entrees et pas
-# dix.
 - files:
   - config/prod/observability/grafana-dashboards/00-overview.json
   - config/prod/observability/grafana-dashboards/01-produit.json
@@ -327,13 +327,13 @@ configMapGenerator:
 images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend
-  newTag: sha-de5f2666
+  newTag: sha-2bd8e111
 - name: urbanconnect-cv-agent-worker
   newName: 10.0.0.130:5000/urbanconnect-cv-agent-worker
-  newTag: sha-de5f2666
+  newTag: sha-2bd8e111
 - name: urbanconnect-frontend
   newName: 10.0.0.130:5000/urbanconnect-frontend
-  newTag: sha-de5f2666
+  newTag: sha-2bd8e111
 - name: urbanconnect-temporal-worker
   newName: 10.0.0.130:5000/urbanconnect-temporal-worker
-  newTag: sha-de5f2666
+  newTag: sha-2bd8e111

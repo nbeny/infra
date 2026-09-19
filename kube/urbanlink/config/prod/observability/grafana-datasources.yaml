@@ -88,3 +88,51 @@ datasources:
           matcherRegex: '"trace_id":"(\w+)"'
           url: '${__value.raw}'
           datasourceUid: tempo
+
+  # --- Metier : les STOCKS, que Prometheus ne sait pas porter ---------------
+  #
+  # Prometheus compte des EVENEMENTS : il sait combien d'inscriptions cette
+  # heure-ci, pas combien d'inscrits en tout. « La courbe d'inscriptions depuis
+  # l'ouverture », « l'entonnoir », « les annonces par statut » sont des etats
+  # cumules que la base porte deja -- les porter en serie temporelle
+  # demanderait une jauge remise a jour par un balayage, c'est-a-dire une
+  # SECONDE source de verite sur un chiffre existant. La regle du depot
+  # l'interdit.
+  #
+  # ⚠️ BRANCHEE SUR `postgres:5432`, PAS SUR PGBOUNCER. Le pooler tient sa
+  # propre liste d'utilisateurs, qu'il faudrait modifier en parallele, pour un
+  # gain nul : la charge de Grafana est derisoire. Le Service est *headless*
+  # (`clusterIP: None`), ce qui n'empeche pas la resolution.
+  #
+  # ⚠️ QUE DES AGREGATS DANS LES PANNEAUX. Pas un e-mail, pas un nom, pas un
+  # identifiant. Grafana est derriere une authentification basique partagee
+  # entre consoles internes ; y deverser une table `users` en ferait un second
+  # exposant de donnees personnelles, hors du perimetre tenu par
+  # l'application. Cette regle se verifie a la relecture de chaque SELECT.
+  #
+  # ⚠️ `$GRAFANA_PG_PASSWORD` est une variable d'ENVIRONNEMENT du pod Grafana,
+  # posee par les valeurs Helm depuis secrets.env. Aucun mot de passe en clair
+  # dans ce depot.
+  #
+  # Le role `grafana_ro` ne peut RIEN ecrire : GRANT SELECT seul, plus
+  # `default_transaction_read_only = on` par-dessus -- et le role Ansible qui
+  # le pose ESSAIE d'ecrire pour verifier que ca echoue, plutot que de le
+  # supposer.
+  - name: Postgres (metier)
+    type: postgres
+    uid: postgres-metier
+    access: proxy
+    url: postgres.urbanconnect.svc.cluster.local:5432
+    user: grafana_ro
+    secureJsonData:
+      password: $GRAFANA_PG_PASSWORD
+    jsonData:
+      database: urbanconnect
+      sslmode: disable          # trafic interne au cluster, chiffre par le maillage
+      postgresVersion: 1600
+      timescaledb: false
+      # Un panneau mal ecrit ne doit pas pouvoir assecher les connexions du
+      # produit.
+      maxOpenConns: 4
+      maxIdleConns: 2
+      connMaxLifetime: 14400

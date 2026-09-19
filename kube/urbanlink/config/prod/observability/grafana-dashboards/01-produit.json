@@ -855,6 +855,222 @@
           }
         }
       ]
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Les stocks — ce que Prometheus ne sait pas porter",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Inscrits, cumulés depuis l'ouverture",
+      "description": "Prometheus compte des ÉVÉNEMENTS : il sait combien d'inscriptions cette heure-ci, jamais combien d'inscrits en tout. Ce chiffre-là vit en base, et l'y lire évite d'entretenir une jauge qui serait une seconde source de vérité.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-metier"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-metier"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time,\n       count(*) AS \"inscrits ce jour\"\nFROM users\nGROUP BY 1\nORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "table",
+      "title": "Annonces par statut",
+      "description": "L'état du catalogue. Un `INACTIVE` qui gonfle sans que `SOLD` bouge dit que les vendeurs retirent leurs annonces plutôt que de vendre.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-metier"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-metier"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT status AS metric, count(*) AS value\nFROM artefacts\nGROUP BY status\nORDER BY value DESC;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Commandes par statut",
+      "description": "⚠️ `orders` n'a PAS de colonne `sellerId` — elle vit sur `order_items`. Une requête qui grouperait les ventes par vendeur depuis cette table-ci échouerait.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-metier"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-metier"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT status AS metric, count(*) AS value\nFROM orders\nGROUP BY status\nORDER BY value DESC;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "L'entonnoir",
+      "description": "Où le produit perd les gens. ⚠️ Que des `count` : aucun e-mail, aucun nom, aucun identifiant ne sort de cette requête. Grafana est derrière une authentification partagée entre consoles internes — y déverser une table `users` en ferait un second exposant de données personnelles.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-metier"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-metier"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT 'inscrits' AS etape, count(*) AS n FROM users\nUNION ALL SELECT 'e-mail verifie', count(*) FROM users WHERE \"emailVerified\"\nUNION ALL SELECT 'a publie', count(DISTINCT \"userId\") FROM artefacts\nUNION ALL SELECT 'a achete', count(DISTINCT \"buyerId\") FROM orders\nUNION ALL SELECT 'a vendu', count(DISTINCT \"sellerId\") FROM order_items\nORDER BY n DESC;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 22,
+      "type": "table",
+      "title": "Le catalogue par grand type",
+      "description": "Ce que la place de marché contient vraiment, par opposition à ce qu'elle a publié aujourd'hui (panneau Prometheus plus haut).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "postgres-metier"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "postgres-metier"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT \"mainType\" AS metric, count(*) AS value\nFROM artefacts\nWHERE status = 'ACTIVE'\nGROUP BY \"mainType\"\nORDER BY value DESC;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
     }
   ]
 }
