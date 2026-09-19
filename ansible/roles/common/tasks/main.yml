@@ -141,6 +141,61 @@
     validate: "visudo -cf %s"
 
 # ---------------------------------------------------------------------------
+#  Stockage : desarmer l'etranglement d'ecriture herite du faux drapeau SSD
+# ---------------------------------------------------------------------------
+# Incident mesure le 2026-09-16 : containerd perdait la tache de conteneurs
+# vivants et plus aucun pod neuf ne demarrait. Le detail complet est dans le
+# gabarit de la regle udev -- il ne se resume pas en trois lignes.
+
+- name: Deposer la regle udev qui desarme l'etranglement d'ecriture
+  ansible.builtin.template:
+    src: 99-wbt-plateaux.rules.j2
+    dest: /etc/udev/rules.d/99-wbt-plateaux.rules
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_manage_wbt | bool
+  register: common_wbt_rule
+
+# ⚠️ `udevadm trigger` seul ne suffit PAS a appliquer la regle a un disque deja
+# enumere dans certains noyaux : la valeur n'est relue qu'au prochain evenement
+# `change`. On ecrit donc AUSSI la valeur en direct, pour que la correction
+# prenne effet sans redemarrage -- c'est tout l'interet d'une correction
+# d'incident.
+- name: Recharger udev et appliquer la regle immediatement
+  when: common_wbt_rule.changed
+  block:
+
+    - name: Recharger les regles udev
+      ansible.builtin.command: udevadm control --reload-rules
+      changed_when: true
+
+    - name: Rejouer les evenements des peripheriques bloc
+      ansible.builtin.command: udevadm trigger --subsystem-match=block --action=change
+      changed_when: true
+
+    - name: Lister les files d'attente de bloc qui portent le reglage
+      ansible.builtin.find:
+        paths: /sys/block
+        patterns: "sd*,vd*"
+        file_type: any
+        recurse: false
+      register: common_block_devices
+
+    - name: Ecrire la valeur en direct (sans attendre un redemarrage)
+      ansible.builtin.copy:
+        dest: "{{ item.path }}/queue/wbt_lat_usec"
+        content: "{{ common_wbt_lat_usec }}"
+        unsafe_writes: true
+      loop: "{{ common_block_devices.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      # Un peripherique sans file `wbt_lat_usec` (certains virtio, les
+      # peripheriques de boucle) n'est pas une erreur : il n'a rien a etrangler.
+      failed_when: false
+      changed_when: true
+
+# ---------------------------------------------------------------------------
 #  Durcissement SSH
 # ---------------------------------------------------------------------------
 # Les VMs ne sont joignables que via le noeud Proxmox (ProxyJump) : pas

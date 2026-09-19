@@ -1,0 +1,58 @@
+# {{ ansible_managed }}
+#
+# Desarme l'etranglement d'ecriture differee (writeback throttling) sur les
+# disques virtio/SCSI de la VM.
+#
+# ===========================================================================
+#  Pourquoi cette regle existe -- incident du 2026-09-16, mesure
+# ===========================================================================
+# Le module Terraform posait `ssd = true` sur chaque disque de VM, alors que
+# TOUS les disques physiques du noeud Proxmox sont des plateaux (`lsblk -d -o
+# ROTA` rend 1 sur sda..sde, derriere un PERC H710). Le drapeau se propage
+# jusqu'au noyau invite, qui voit un peripherique `rotational 0` et lui
+# applique la cible de latence des SSD : `wbt_lat_usec = 2000`, soit 2 ms.
+#
+# Un 7200 tr/min ne tient jamais 2 ms. Le noyau etrangle donc en permanence :
+# les ecrivains sont gares en `rq_qos_wait` (postgres, les kworkers
+# `flush-8:0`), et `/proc/pressure/io` monte a `full avg300 = 27,9 %` -- un
+# quart du temps, AUCUNE tache ne progresse.
+#
+# Consequence mesuree ce jour-la : les shims containerd ont rate leurs delais,
+# containerd a perdu la tache de conteneurs pourtant vivants
+# (`failed to get task for container`), et kubelet s'est mis a boucler sur
+# `KillContainerError: DeadlineExceeded` -- 129 occurrences en deux minutes.
+# Plus aucun pod neuf ne demarrait : le deploiement est reste fige 25 minutes,
+# pendant que le site restait debout sur les anciens replicas et masquait la
+# panne.
+#
+# Apres desarmement : `io full` 27,9 % -> 3,1 %, charge 15 -> 9,
+# `DeadlineExceeded` -> 0, et le rollout s'est termine.
+#
+# ===========================================================================
+#  Pourquoi 0 et pas 75000
+# ===========================================================================
+# 75000 (75 ms) est la valeur que le noyau choisit lui-meme pour un
+# peripherique rotatif : la poser reviendrait a corriger le mensonge plutot
+# qu'a desactiver la protection. C'est defendable, et c'est pourquoi la valeur
+# est une variable (`common_wbt_lat_usec`).
+#
+# Mais 0 est la valeur qui a ETE MESUREE sur l'incident, et 75000 ne l'a pas
+# ete. On ne met pas en production un nombre qu'on n'a pas vu marcher.
+#
+# ===========================================================================
+#  Ceci reste un PANSEMENT
+# ===========================================================================
+# La correction de fond est en amont : `terraform/modules/vm/main.tf` ne pose
+# plus `ssd = true` sans le demander (variable `disk_ssd`, defaut `false`).
+# Cette regle protege les VMs DEJA creees, dont la configuration porte encore
+# `ssd=1` et qu'un `qm set` seul ne suffirait pas a corriger sans redemarrage.
+#
+# Et rien de tout cela ne rend le disque plus rapide : `pool2` est UN SEUL
+# plateau qui sert le cluster, le runner CI et le serveur mail, a qui l'on
+# demandait 410 IOPS en ecriture quand il en tient 75 a 150. `pool1` (raidz1,
+# 3 disques, 5,12 To libres) est a cote, inutilise -- mais un raidz1 rend les
+# IOPS d'UN SEUL disque : l'y deplacer donnerait de la place, pas de la
+# vitesse. La vraie reponse est un SSD.
+
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd[a-z]", ATTR{queue/wbt_lat_usec}="{{ common_wbt_lat_usec }}"
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="vd[a-z]", ATTR{queue/wbt_lat_usec}="{{ common_wbt_lat_usec }}"
