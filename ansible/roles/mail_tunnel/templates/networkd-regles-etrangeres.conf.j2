@@ -1,0 +1,25 @@
+# Genere par Ansible (role mail_tunnel). Toute edition manuelle sera ecrasee.
+#
+# ============================================================================
+#  Interdire a systemd-networkd de balayer le routage du tunnel
+# ----------------------------------------------------------------------------
+#  C'EST LA CORRECTION DE FOND de l'incident du 2026-09-13. networkd tourne sur
+#  cette VM sans aucun fichier `.network` dans /etc/systemd/network/ : il ne
+#  possede donc AUCUNE regle ni route. Or ses deux reglages
+#  `ManageForeignRoutingPolicyRules` et `ManageForeignRoutes` valent `yes` par
+#  defaut, ce qui signifie exactement ceci : a chaque demarrage, il efface les
+#  regles et les routes qu'il ne possede pas.
+#
+#  Les `ip rule ... lookup 100` et les routes `throw` posees par les `PostUp`
+#  de wg-quick sont precisement de celles-la. Un simple redemarrage de networkd
+#  -- declenche par `unattended-upgrade` a chaque mise a jour de systemd --
+#  suffisait a faire sortir toute la messagerie par l'IP de la maison, sans
+#  couper le tunnel ni remplir la file d'attente, donc sans rien alerter.
+#
+#  ⚠️ Ce fichier ne prend effet qu'apres `systemctl restart systemd-networkd`.
+#  Le deposer sans redemarrer laisse la VM exposee jusqu'au prochain reboot.
+# ============================================================================
+
+[Network]
+ManageForeignRoutingPolicyRules=no
+ManageForeignRoutes=no

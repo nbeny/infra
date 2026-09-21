@@ -106,6 +106,16 @@ mailcow_spf_content: "v=spf1 ip4:147.79.102.17 include:spf.infomaniak.ch -all"
 
 # --- Observabilite ---------------------------------------------------------
 mailcow_sending_ip: "{{ mail_tunnel_public_ip | default('147.79.102.17') }}"
+
+# --- Sonde de l'IP d'emission ----------------------------------------------
+# Interroge la decision de routage du noyau pour un paquet venant du reseau
+# Docker. Le pont est celui que Mailcow cree pour IPV4_NETWORK ; `iif` est
+# OBLIGATOIRE, le trafic des conteneurs etant forwarde et non emis localement.
+# L'adresse source n'a qu'a tomber dans le /24 vise par la regle de routage,
+# et la destination n'est jamais contactee -- c'est une question au noyau.
+mailcow_egress_bridge: br-mailcow
+mailcow_egress_probe_src: "{{ mailcow_ipv4_network }}.2"
+mailcow_egress_probe_dst: 8.8.8.8
 # Repertoire textfile du paquet Debian.
 #
 # ⚠️ IL EST DESORMAIS IMPOSE, ET CE N'EST PAS UN REVIREMENT GRATUIT.

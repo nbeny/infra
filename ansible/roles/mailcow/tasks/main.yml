@@ -117,7 +117,17 @@
   tags: [dns]
 
 - name: Poser l'observabilite
-  ansible.builtin.include_tasks: monitoring.yml
+  ansible.builtin.include_tasks:
+    file: monitoring.yml
+    # Meme piege que pour `theme` plus bas : sans `apply`, le tag ne porte que
+    # sur l'include et chaque tache serait sautee -- succes affiche, rien fait.
+    #
+    # Ce tag existe pour pouvoir corriger la SONDE sans rejouer le clonage, le
+    # `compose up -d`, la creation des boites et la publication DNS sur une
+    # messagerie en production.
+    apply:
+      tags: [monitoring]
+  tags: [monitoring]
 
 - name: Poser les sauvegardes
   ansible.builtin.include_tasks: backup.yml

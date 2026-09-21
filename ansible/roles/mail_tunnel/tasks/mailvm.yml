@@ -33,3 +33,69 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# ---------------------------------------------------------------------------
+#  Survie du routage a un redemarrage de systemd-networkd
+# ---------------------------------------------------------------------------
+#  Les `PostUp` de wg-quick ne s'executent qu'au demarrage du TUNNEL. Or c'est
+#  networkd qui efface leurs regles, sans que le tunnel bouge : les PostUp ne
+#  rejouent donc jamais et personne ne s'en apercoit. Voir l'en-tete de
+#  templates/networkd-regles-etrangeres.conf.j2 pour l'incident complet.
+#
+#  Deux protections independantes : le reglage qui empeche l'effacement, et
+#  l'unite qui repose tout si networkd redemarre malgre tout.
+
+- name: Creer le repertoire des reglages networkd
+  ansible.builtin.file:
+    path: /etc/systemd/networkd.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Interdire a networkd d'effacer le routage du tunnel
+  ansible.builtin.template:
+    src: networkd-regles-etrangeres.conf.j2
+    dest: /etc/systemd/networkd.conf.d/10-regles-etrangeres.conf
+    mode: "0644"
+  notify: Redemarrer networkd
+
+- name: Deposer le script de rearmement du routage
+  ansible.builtin.template:
+    src: mail-tunnel-rules.sh.j2
+    dest: "{{ mail_tunnel_rules_script }}"
+    mode: "0755"
+  notify: Rearmer le routage de la messagerie
+
+- name: Deposer l'unite de rearmement du routage
+  ansible.builtin.template:
+    src: mail-tunnel-rules.service.j2
+    dest: /etc/systemd/system/mail-tunnel-rules.service
+    mode: "0644"
+  notify: Rearmer le routage de la messagerie
+
+- name: Activer le rearmement du routage
+  ansible.builtin.systemd_service:
+    name: mail-tunnel-rules
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Controle d'EFFET, pas de presence de fichier : c'est le seul qui aurait
+# attrape l'incident. Si les regles ne sont pas la, tout le reste du role peut
+# etre vert alors que la messagerie emet depuis la mauvaise IP.
+- name: Relever les regles de routage effectivement posees
+  ansible.builtin.command: ip rule show
+  register: mail_tunnel_rules_effectives
+  changed_when: false
+
+- name: Exiger que le courrier sorte bien par le tunnel
+  ansible.builtin.assert:
+    that:
+      - mail_tunnel_rules_effectives.stdout is search(mail_tunnel_docker_net + ' lookup 100')
+    fail_msg: >-
+      La regle « from {{ mail_tunnel_docker_net }} lookup 100 » est ABSENTE.
+      Les conteneurs Mailcow sortent donc par la route par defaut du lab,
+      c'est-a-dire par l'IP de la maison, qui est en liste noire Spamhaus :
+      Outlook rejette et Gmail classe en indesirables. Lancer
+      `systemctl start mail-tunnel-rules` et chercher qui a efface la regle.
+    success_msg: >-
+      Le reseau Docker de Mailcow est bien route par le tunnel.

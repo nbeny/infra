@@ -4,3 +4,22 @@
     name: wg-quick@wg0
     state: restarted
     daemon_reload: true
+
+# Le reglage `ManageForeignRoutingPolicyRules=no` ne prend effet qu'ici : le
+# deposer sans redemarrer laisserait la VM exposee jusqu'au prochain reboot.
+#
+# Ce redemarrage est desormais SANS DANGER, et c'est tout l'interet de l'ordre
+# des taches : le drop-in est en place, et `mail-tunnel-rules.service` est
+# `PartOf=systemd-networkd.service`, donc relance dans la foulee. C'est meme la
+# meilleure preuve que le filet fonctionne.
+- name: Redemarrer networkd
+  ansible.builtin.systemd_service:
+    name: systemd-networkd
+    state: restarted
+    daemon_reload: true
+
+- name: Rearmer le routage de la messagerie
+  ansible.builtin.systemd_service:
+    name: mail-tunnel-rules
+    state: restarted
+    daemon_reload: true
