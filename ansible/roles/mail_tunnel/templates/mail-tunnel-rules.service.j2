@@ -1,0 +1,29 @@
+# Genere par Ansible (role mail_tunnel). Toute edition manuelle sera ecrasee.
+
+[Unit]
+Description=Rearmer le routage par politique de la messagerie
+Documentation=file://{{ mail_tunnel_rules_script }}
+
+# L'ordre compte : le script a besoin de wg0, et il doit passer APRES networkd
+# pour reposer ce que celui-ci vient eventuellement d'effacer.
+After=wg-quick@wg0.service systemd-networkd.service
+Wants=wg-quick@wg0.service
+
+# ⚠️ C'EST LA LIGNE QUI PORTE TOUT LE FICHIER. `PartOf` propage l'arret ET LE
+# REDEMARRAGE de networkd a cette unite : si networkd redemarre -- ce que fait
+# `unattended-upgrade` a chaque mise a jour de systemd -- cette unite est
+# relancee dans la foulee et repose les regles que networkd vient de balayer.
+#
+# `PartOf` ne propage PAS le demarrage. D'ou le `WantedBy=` sur networkd
+# ci-dessous, qui couvre le cas d'un networkd demarre seul.
+PartOf=systemd-networkd.service
+
+[Service]
+Type=oneshot
+# Sans `RemainAfterExit`, l'unite serait « inactive » sitot finie et `PartOf`
+# n'aurait plus rien a redemarrer.
+RemainAfterExit=yes
+ExecStart={{ mail_tunnel_rules_script }}
+
+[Install]
+WantedBy=multi-user.target systemd-networkd.service

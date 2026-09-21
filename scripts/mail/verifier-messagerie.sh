@@ -107,8 +107,34 @@ fi
 
 # LE controle central du design : les conteneurs doivent sortir par le VPS.
 # S'ils sortaient par la maison, le courrier partirait d'une IP en Spamhaus PBL.
+#
+# ⚠️ Ce controle a ete le SEUL a voir la panne du 2026-09-13 au 2026-09-20 --
+# et il n'a rien dit, parce qu'il faut le lancer a la main. D'ou les deux
+# controles suivants, et surtout l'alerte MailEgressIPWrong cote Prometheus.
 sortie=$(vm "sudo docker run --rm --network mailcowdockerized_mailcow-network curlimages/curl:latest -s -4 --max-time 20 https://ifconfig.me")
 attendu "IP d'emission des conteneurs" "${sortie:-inconnue}" "$VPS"
+
+# La regle elle-meme. La chercher explicitement donne un diagnostic immediat :
+# si elle manque, on sait quoi relancer sans avoir a fouiller.
+if vm "ip rule show" | grep -q "172.22.1.0/24 lookup 100"; then
+  ok "regle de routage du reseau Docker presente"
+else
+  ko "regle « from 172.22.1.0/24 lookup 100 » ABSENTE -- lancer « systemctl start mail-tunnel-rules » sur la VM"
+fi
+
+# Les deux protections contre l'effacement par systemd-networkd. Sans elles, la
+# panne du 2026-09-13 se reproduira a la prochaine mise a jour de systemd.
+if vm "grep -q 'ManageForeignRoutingPolicyRules=no' /etc/systemd/networkd.conf.d/10-regles-etrangeres.conf 2>/dev/null"; then
+  ok "networkd a interdiction d'effacer le routage du tunnel"
+else
+  ko "networkd peut effacer le routage du tunnel -- rejouer le role mail_tunnel"
+fi
+
+if vm "systemctl is-enabled --quiet mail-tunnel-rules 2>/dev/null"; then
+  ok "unite de rearmement du routage active"
+else
+  ko "mail-tunnel-rules inactive : un redemarrage de networkd couperait l'emission en silence"
+fi
 
 # La VM, elle, doit garder sa route par defaut vers le lab : c'est ce qui la
 # rend administrable tunnel coupe.

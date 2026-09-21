@@ -48,6 +48,12 @@ mail_tunnel_mail_host: mail
 
 mail_tunnel_keys_dir: /etc/wireguard
 
+# Script de rearmement du routage par politique, appele par l'unite
+# `mail-tunnel-rules.service`. Il pose EXACTEMENT les memes regles que les
+# `PostUp` de wg0.conf, a partir des memes variables de ce fichier : les deux
+# ne peuvent pas diverger sans qu'on le fasse expres.
+mail_tunnel_rules_script: /usr/local/sbin/mail-tunnel-rules
+
 # --- Acces nomade ----------------------------------------------------------
 # Le VPS sert de CONCENTRATEUR : les appareils s'y connectent, et atteignent la
 # VM de messagerie par le tunnel deja en place. Aucun port supplementaire n'est

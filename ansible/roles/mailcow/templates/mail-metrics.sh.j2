@@ -51,6 +51,83 @@ healthy=1
   echo "# TYPE mail_dnsbl_last_check_timestamp_seconds gauge"
   echo "mail_dnsbl_last_check_timestamp_seconds $(date +%s)"
 
+  # --- IP d'emission REELLE -------------------------------------------------
+  # ⚠️ CETTE METRIQUE EXISTE PARCE QUE TOUT LE RESTE DE CE FICHIER A MENTI
+  # PENDANT SEPT JOURS.
+  #
+  # Le 2026-09-13, un redemarrage de systemd-networkd a efface les `ip rule`
+  # du tunnel. Les conteneurs sont retombes sur la route par defaut du lab et
+  # ont emis depuis l'IP de la maison, en liste noire Spamhaus. Outlook a
+  # rejete sec, Gmail a classe en indesirables.
+  #
+  # Rien n'a bronche : le tunnel est reste UP, la file d'attente est restee
+  # VIDE (Gmail acceptait), et les metriques `mail_dnsbl_*` ci-dessus sont
+  # restees vertes -- parce qu'elles interrogent {{ mailcow_sending_ip }},
+  # l'IP qu'on ESPERE utiliser, jamais celle qu'on utilise vraiment.
+  #
+  # Surveiller une intention ne surveille rien. On mesure donc l'EFFET.
+  #
+  # Deux mesures, parce qu'elles n'attrapent pas les memes pannes.
+  #
+  # --- a) La DECISION DE ROUTAGE du noyau -----------------------------------
+  # `ip route get ... iif` demande au noyau ce qu'il ferait d'un paquet arrivant
+  # du pont Docker : c'est exactement le chemin du trafic de Postfix, qui est
+  # FORWARDE et non emis localement. Sans `iif`, le noyau repond « Network is
+  # unreachable » et la mesure ne veut rien dire.
+  #
+  # Exact, instantane, sans acces reseau, SANS CACHE -- et surtout TESTABLE :
+  # retirer la regle fait passer la reponse de « via 10.88.0.1 dev wg0 » a
+  # « via 10.0.0.1 dev eth0 » dans la seconde. C'est ce qui permet de verifier
+  # que l'alarme sonne vraiment, au lieu de l'esperer.
+  route=$(ip route get {{ mailcow_egress_probe_dst }} \
+            from {{ mailcow_egress_probe_src }} \
+            iif {{ mailcow_egress_bridge }} 2>/dev/null | head -1)
+
+  echo "# HELP mail_egress_route_ok 1 si le noyau route bien le reseau Docker par le tunnel."
+  echo "# TYPE mail_egress_route_ok gauge"
+  case "$route" in
+    *"dev wg0"*) echo "mail_egress_route_ok 1" ;;
+    "")          echo "mail_egress_route_ok 0" ;;
+    *)           echo "mail_egress_route_ok 0" ;;
+  esac
+
+  # --- b) L'IP reellement vue par le monde ----------------------------------
+  # Complementaire, et non redondante : la mesure (a) ne verrait pas un SNAT
+  # casse sur le VPS, ni un changement d'IP publique du VPS.
+  #
+  # ⚠️ Elle passe par l'unbound de Mailcow, qui MET EN CACHE. Le TTL de
+  # `o-o.myaddr.l.google.com` est de 60 s et la sonde tourne toutes les
+  # {{ mailcow_probe_interval }} : en regime normal le cache a toujours expire.
+  # Mais deux executions rapprochees rendent la MEME valeur, meme si le routage
+  # a change entre-temps. Constate le 2026-09-20 en testant cette sonde.
+  #
+  # C'est pour cela que l'alerte s'appuie d'abord sur (a) : une mesure qu'on ne
+  # peut pas tester est une mesure en qui on ne peut pas avoir confiance.
+  observee=$(dig +short +time=3 +tries=1 "@${RESOLVER}" TXT o-o.myaddr.l.google.com 2>/dev/null \
+             | tr -d '"' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+  echo "# HELP mail_egress_probe_healthy 1 si la sonde a pu determiner l'IP d'emission reelle."
+  echo "# TYPE mail_egress_probe_healthy gauge"
+  echo "# HELP mail_egress_ip_correct 1 si le courrier part bien par l'IP attendue."
+  echo "# TYPE mail_egress_ip_correct gauge"
+  echo "# HELP mail_egress_ip_info Adresse observee et adresse attendue, en etiquettes."
+  echo "# TYPE mail_egress_ip_info gauge"
+
+  if [ -z "${observee:-}" ]; then
+    # Une sonde qui n'a pas pu mesurer ne doit SURTOUT pas repondre « 0 » :
+    # elle declencherait une alerte critique sur un alea DNS. Elle se declare
+    # aveugle, et c'est une autre alerte, en avertissement, qui s'en charge.
+    echo "mail_egress_probe_healthy 0"
+  else
+    echo "mail_egress_probe_healthy 1"
+    if [ "$observee" = "{{ mailcow_sending_ip }}" ]; then
+      echo "mail_egress_ip_correct 1"
+    else
+      echo "mail_egress_ip_correct 0"
+    fi
+    echo "mail_egress_ip_info{observee=\"${observee}\",attendue=\"{{ mailcow_sending_ip }}\"} 1"
+  fi
+
   # --- File d'attente -------------------------------------------------------
   # Une file qui gonfle est le premier symptome d'un tunnel coupe ou d'un
   # grand fournisseur qui refuse les remises.

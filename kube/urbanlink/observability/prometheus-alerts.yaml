@@ -1020,8 +1020,13 @@ spec:
     #  mail_* viennent d'une sonde locale posee par le role Ansible `mailcow`,
     #  qui tourne toutes les 15 minutes.
     #
-    #  Ces quatre regles repondent a l'exigence qui a fait naitre ce chantier :
+    #  Ces six regles repondent a l'exigence qui a fait naitre ce chantier :
     #  ne pas se faire blacklister, et le SAVOIR immediatement si ca arrive.
+    #
+    #  ⚠️ Les deux dernieres ont ete ajoutees le 2026-09-20, APRES sept jours de
+    #  panne que les quatre premieres n'ont pas vues. La lecon tient en une
+    #  ligne : elles surveillaient toutes l'IP qu'on ESPERE utiliser, aucune
+    #  l'IP qu'on utilise VRAIMENT.
     # =======================================================================
     - name: urbanlink.messagerie
       rules:
@@ -1068,6 +1073,59 @@ spec:
             summary: >-
               La sonde de la messagerie ne rend plus de resultat depuis plus
               d'une heure (minuteur mail-metrics.timer sur la VM 140)
+
+        - alert: MailEgressIPWrong
+          # ⚠️ L'ALERTE QUI MANQUAIT. Le 2026-09-13 a 06h54, un redemarrage de
+          # systemd-networkd a efface les `ip rule` du tunnel : les conteneurs
+          # Mailcow sont retombes sur la route par defaut du lab et ont emis
+          # depuis l'IP de la maison, en liste noire Spamhaus.
+          #
+          # Les quatre regles ci-dessus sont TOUTES restees vertes pendant sept
+          # jours. Le tunnel etait UP. La file etait vide -- Gmail acceptait les
+          # messages, il les classait simplement en indesirables. Et
+          # `mail_dnsbl_listed` interrogeait l'IP du VPS, restee propre, alors
+          # que plus un seul courrier n'en partait.
+          #
+          # La panne a ete decouverte a la main, en lisant les en-têtes d'un
+          # message recu. C'est exactement ce qu'une supervision doit eviter.
+          # DEUX signaux, et l'ordre compte. `mail_egress_route_ok` interroge la
+          # decision de routage du noyau : exact, sans cache, et TESTABLE --
+          # retirer la regle le fait basculer dans la seconde. C'est lui qui
+          # porte l'alerte. `mail_egress_ip_correct` mesure l'IP vue par le
+          # monde : il attrape en plus un SNAT casse sur le VPS, mais il passe
+          # par un resolveur qui met en cache, donc il peut retarder.
+          expr: mail_egress_route_ok == 0 or mail_egress_ip_correct == 0
+          # Court, et c'est delibere : chaque minute passee dans cet etat est du
+          # courrier rejete par Outlook et classe en indesirables par Gmail. La
+          # sonde tourne toutes les 15 min, donc `for` ne lisse rien de plus.
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: >-
+              La messagerie n'emet PLUS par le VPS -- Outlook rejette et Gmail
+              classe en indesirables des maintenant
+            description: >-
+              Voir mail_egress_ip_info pour l'adresse reellement utilisee.
+              Cause la plus probable : les regles de routage par politique ont
+              ete effacees sur la VM 140. Remede immediat
+              `systemctl start mail-tunnel-rules`, puis verifier que
+              /etc/systemd/networkd.conf.d/10-regles-etrangeres.conf est bien
+              en place et que networkd a ete redemarre depuis son depot.
+
+        - alert: MailEgressProbeUnhealthy
+          # Meme raisonnement que MailDNSBLProbeUnhealthy : une sonde qui ne
+          # mesure plus ne doit pas se taire. Sans cette regle,
+          # `mail_egress_ip_correct` disparaitrait des series et l'alerte
+          # ci-dessus cesserait simplement de se declencher -- en silence.
+          expr: mail_egress_probe_healthy == 0
+          for: 45m
+          labels:
+            severity: warning
+          annotations:
+            summary: >-
+              La sonde ne peut plus determiner l'IP d'emission reelle de la
+              messagerie -- la surveillance de la fuite de routage est AVEUGLE
 
         - alert: MailQueueNotDraining
           # Le premier symptome d'un tunnel WireGuard coupe, ou d'un grand

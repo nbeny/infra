@@ -33,8 +33,42 @@ LAN, publiées par l'openresty du nœud comme les dix consoles existantes.
 | **5** Kratos + résiliation | ⏸️ | Après plusieurs semaines de fonctionnement prouvé |
 
 **Vérification automatisée :** `scripts/mail/verifier-messagerie.sh`, à jouer depuis le nœud.
-36 contrôles, du DNS aux sauvegardes en passant par les ports qui doivent rester
+39 contrôles, du DNS aux sauvegardes en passant par les ports qui doivent rester
 **fermés**. Il ne modifie rien et sort en erreur au premier échec.
+
+---
+
+## Incident du 2026-09-13 → 2026-09-20 — émission par l'IP de la maison
+
+**Sept jours d'émission depuis `82.65.87.60` au lieu de `147.79.102.17`.** Outlook
+rejetait sec (`550 5.7.1 ... blocked using Spamhaus`), Gmail acceptait en `spf=fail` et
+classait en indésirables.
+
+**Cause.** `systemd-networkd` tourne sur la VM 140 sans aucun fichier `.network`, donc
+avec `ManageForeignRoutingPolicyRules=yes` par défaut : il efface au démarrage les règles
+de routage qu'il ne possède pas. Le 13/09 à 06h54, `unattended-upgrade` a mis à jour
+systemd et redémarré networkd, qui a balayé les deux `ip rule ... lookup 100` et les
+routes `throw` posées par les `PostUp` de wg-quick. **`wg-quick@wg0` n'a pas été
+redémarré** (`NRestarts=0`) : ses `PostUp` n'ont jamais rejoué.
+
+**Pourquoi personne ne l'a vu.** C'est le point à retenir. Le tunnel est resté UP, le
+courrier entrant a continué d'arriver (DNAT depuis le VPS), la file Postfix est restée
+**vide** — Gmail acceptait les messages — et les quatre alertes `mail_*` sont restées
+vertes : `mail_dnsbl_listed` interroge `147.79.102.17`, l'IP qu'on *espère* utiliser,
+restée propre puisque plus rien n'en partait. **Toute la supervision surveillait une
+intention, aucune ne mesurait l'effet.**
+
+**Corrections apportées le 2026-09-20 :**
+
+| | |
+|---|---|
+| Fond | `ManageForeignRoutingPolicyRules=no` + `ManageForeignRoutes=no` dans `/etc/systemd/networkd.conf.d/10-regles-etrangeres.conf` |
+| Filet | `mail-tunnel-rules.service`, `PartOf=systemd-networkd.service` : repose les règles si networkd redémarre quand même |
+| Détection | `mail_egress_ip_correct` — mesure l'IP d'émission **réelle** via l'unbound de Mailcow — et les alertes `MailEgressIPWrong` (critique, `for: 0m`) et `MailEgressProbeUnhealthy` |
+| Vérification | trois contrôles ajoutés à `verifier-messagerie.sh` : la règle, le réglage networkd, l'unité |
+
+**Ce que l'incident ne dit pas, mais qui reste vrai :** le PTR n'était toujours pas
+corrigé, et il ne l'est toujours pas. Voir ci-dessous.
 
 **Actions qui n'appartiennent qu'à l'utilisateur :**
 

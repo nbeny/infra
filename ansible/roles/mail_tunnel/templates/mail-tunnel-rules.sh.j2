@@ -1,0 +1,73 @@
+#!/bin/bash
+# Genere par Ansible (role mail_tunnel). Toute edition manuelle sera ecrasee.
+#
+# ============================================================================
+#  Rearmement du routage par politique de la messagerie
+# ----------------------------------------------------------------------------
+#  POURQUOI CE FICHIER EXISTE. Les memes regles sont posees par les `PostUp` de
+#  /etc/wireguard/wg0.conf, au demarrage du tunnel. Elles ne suffisent PAS.
+#
+#  Incident du 2026-09-13, 06h54 : `unattended-upgrade` a mis a jour systemd et
+#  redemarre `systemd-networkd`. networkd tourne ici sans aucun fichier
+#  `.network`, donc avec `ManageForeignRoutingPolicyRules=yes` par defaut : il
+#  EFFACE au demarrage les regles de routage qu'il ne possede pas. Les deux
+#  `ip rule` et les routes `throw` de la table 100 ont disparu.
+#
+#  `wg-quick@wg0` n'a pas ete redemarre pour autant -- ses `PostUp` n'ont donc
+#  jamais rejoue. Le tunnel est reste UP, le courrier ENTRANT a continue
+#  d'arriver, la file Postfix est restee vide et la sonde des listes noires est
+#  restee verte : elle interroge l'IP du VPS, pas celle reellement utilisee.
+#
+#  Resultat : pendant SEPT JOURS, les conteneurs sont retombes sur la route par
+#  defaut du lab et le courrier est parti de l'IP de la maison. Outlook a
+#  rejete sec (« 550 5.7.1 ... blocked using Spamhaus »), Gmail a accepte en
+#  `spf=fail`. Aucune alerte ne s'est declenchee.
+#
+#  Deux protections, parce qu'une seule est un pari :
+#    1. le reglage `ManageForeignRoutingPolicyRules=no` empeche networkd d'y
+#       toucher -- c'est la vraie correction ;
+#    2. ce script, lance par une unite `PartOf=systemd-networkd.service`,
+#       repose tout si networkd redemarre quand meme. C'est la ceinture.
+#
+#  ⚠️ Ces commandes DOIVENT rester identiques a celles des `PostUp` de
+#  templates/wg0-mail.conf.j2. Les deux fichiers tirent leurs valeurs des
+#  MEMES variables du role : elles ne peuvent pas diverger silencieusement.
+# ============================================================================
+set -euo pipefail
+
+# Sans le tunnel, `ip route ... dev wg0` echouerait et l'unite tomberait en
+# erreur. Ce n'est pas le bon moment pour hurler : wg-quick posera lui-meme
+# tout ce qu'il faut quand il montera. On sort proprement.
+if ! ip link show wg0 >/dev/null 2>&1; then
+  echo "wg0 absent -- rien a rearmer, wg-quick s'en chargera a la montee."
+  exit 0
+fi
+
+# Un `del` prealable avant chaque `add` : `ip rule add` ne verifie rien et
+# creerait un doublon silencieux a chaque passage. Le `|| true` est
+# indispensable sous `set -e` -- au premier passage la regle n'existe pas.
+ip rule del from {{ mail_tunnel_docker_net }} lookup 100 pref 100 2>/dev/null || true
+ip rule add from {{ mail_tunnel_docker_net }} lookup 100 pref 100
+
+ip rule del from {{ mail_tunnel_mail_ip }} lookup 100 pref 101 2>/dev/null || true
+ip rule add from {{ mail_tunnel_mail_ip }} lookup 100 pref 101
+
+# `replace` plutot que `add` : rejouable sans « File exists ».
+ip route replace default via {{ mail_tunnel_vps_ip }} dev wg0 table 100
+
+# Les routes `throw` rendent la main a la table principale pour les reseaux
+# prives : sans elles, l'administration de la VM depuis le lab passerait par le
+# tunnel et n'aboutirait pas.
+ip route replace throw 10.0.0.0/8 table 100
+ip route replace throw 172.16.0.0/12 table 100
+ip route replace throw 192.168.0.0/16 table 100
+
+# Retour vers les appareils nomades, dans la table PRINCIPALE.
+ip route replace {{ mail_tunnel_peer_subnet }} via {{ mail_tunnel_vps_ip }} dev wg0
+
+# networkd ne touche pas a iptables, mais la regle est reposee ici pour que ce
+# script suffise a lui seul a remettre la chaine d'emission d'aplomb.
+iptables -t nat -C POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }} 2>/dev/null \
+  || iptables -t nat -A POSTROUTING -s {{ mail_tunnel_docker_net }} -o wg0 -j SNAT --to-source {{ mail_tunnel_mail_ip }}
+
+echo "Routage par politique de la messagerie rearme."
