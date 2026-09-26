@@ -368,8 +368,19 @@ spec:
             # `opencode/*-free` (verifie dans cancerWeb/docs/ai-cli-smoke-test.md,
             # opencode 1.18.18). C'est ce qui permet de deployer ce worker sans
             # ajouter un secret au cluster.
+            # ⚠️ `mimo-v2.5-free` a DISPARU du catalogue opencode : l'import de CV
+            # echouait avec lui. `mimo-v2.6-flash-free` verifie DEPUIS CE POD
+            # (opencode 1.18.25) le 2026-09-27.
             - name: CV_AGENT_MODEL
-              value: opencode/mimo-v2.5-free
+              value: opencode/mimo-v2.6-flash-free
+            # Traduction en francais des fiches fournisseurs du dropshipping
+            # (CJdropshipping n'a pas de francais). Sans elle, les articles CJ
+            # restent hors ligne (`TRADUCTION_EN_ATTENTE`, loi Toubon) — aucune
+            # erreur ailleurs : surveiller `urbanconnect_supplier_translation_queue_depth`.
+            # Pas d'agent factice possible : une fausse traduction mettrait en
+            # ligne un texte non francais.
+            - name: SUPPLIER_TRANSLATION_MODEL
+              value: opencode/mimo-v2.6-flash-free
             # ⚠️ VOLONTAIREMENT VIDE. Aucun modele `*-free` documente ne VOIT les
             # images ; vide, le processeur refuse png et jpeg par
             # UNSUPPORTED_TYPE. Renseigner un modele vision sans en verifier les
