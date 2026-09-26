@@ -261,12 +261,38 @@
     return_content: true
   register: mailcow_ratelimit
   changed_when: false
+  # 'error' est inclus a dessein, pas seulement 'danger' : la taxonomie des
+  # types de reponse de Mailcow varie d'un endpoint a l'autre, et rater une
+  # erreur ici laisserait croire que la limite est posee alors qu'elle ne l'est
+  # pas.
   failed_when: >-
     mailcow_ratelimit.status != 200
     or (mailcow_ratelimit.json | default([]) | selectattr('type', 'in', ['danger', 'error']) | list | length > 0)
   loop: "{{ mailcow_mailboxes | selectattr('ratelimit', 'defined') | list }}"
   loop_control:
     label: "{{ item.local_part }}@{{ item.domain }} {{ item.ratelimit }}"
+
+# Verification a la premiere application d'un contrat d'API qu'on n'a pas pu
+# tester hors ligne : /api/v1/get/rl-mbox/ n'est documente nulle part avec
+# certitude. A garder ; ca coute un GET de plus par boite.
+- name: Relire les limites d'envoi posees
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/rl-mbox/{{ item.local_part }}@{{ item.domain }}"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  register: mailcow_ratelimit_check
+  changed_when: false
+  loop: "{{ mailcow_mailboxes | selectattr('ratelimit', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.local_part }}@{{ item.domain }} {{ item.ratelimit }}"
+
+- name: Afficher les limites d'envoi relues
+  ansible.builtin.debug:
+    msg: "{{ item.item.local_part }}@{{ item.item.domain }} -> {{ item.json | default(item.content) }}"
+  loop: "{{ mailcow_ratelimit_check.results }}"
+  loop_control:
+    label: "{{ item.item.local_part }}@{{ item.item.domain }}"
 
 - name: Relever les alias existants
   ansible.builtin.uri:

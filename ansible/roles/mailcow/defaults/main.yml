@@ -75,7 +75,9 @@ mailcow_domains_wanted:
 # Champs optionnels par boite :
 #   password_env : nom de la variable de {{ mailcow_secrets_env }} qui porte le
 #                  mot de passe de CETTE boite (12 caracteres minimum). Absent :
-#                  mot de passe des consoles (CONSOLE_ADMIN_PASSWORD).
+#                  mot de passe des consoles (CONSOLE_ADMIN_PASSWORD). N'est lu
+#                  qu'a la CREATION de la boite : changer la variable ensuite
+#                  ne fait rien tant que la boite existe deja.
 #   ratelimit    : "<nombre>/<s|m|h|d>", limite d'envoi appliquee par Mailcow.
 mailcow_mailboxes:
   # La boite principale. C'est deja l'identite de l'utilisateur dans le lab
@@ -84,11 +86,15 @@ mailcow_mailboxes:
   # Adresse publique, celle que Kratos utilise deja chez Infomaniak : la
   # recreer ici evite de perdre l'adresse que les utilisateurs connaissent.
   - { local_part: contact, domain: urbanlink.fr, name: "Contact UrbanConnect",   quota: 2048 }
-  # Prospection de Nicolas (nbeny-sales). Mot de passe PROPRE, pas celui des
-  # consoles : nbeny-sales en garde une copie sur le poste Windows, et on doit
-  # pouvoir la revoquer sans toucher au reste. Limite d'envoi posee cote
-  # serveur : un bug de boucle dans la CLI ne peut pas depasser 20 messages par
-  # heure, ni abimer la reputation de l'IP.
+  # Prospection de Nicolas (nbeny-sales). Mot de passe SEPARE de celui des
+  # consoles : la revoquer ne touche donc pas Grafana, pgAdmin ni les autres
+  # boites. Ce role ne pose ce mot de passe qu'A LA CREATION de la boite : pour
+  # le changer ensuite, editer dans l'UI Mailcow (Mailboxes -> editer la boite)
+  # ou via POST /api/v1/edit/mailbox, PUIS reporter la meme valeur dans
+  # %USERPROFILE%\.nbeny-sales\smtp.env sur le poste Windows -- le playbook ne
+  # le fait pas pour vous. Limite d'envoi posee cote serveur : un bug de boucle
+  # dans la CLI ne peut pas depasser 20 messages par heure, ni abimer la
+  # reputation de l'IP.
   - { local_part: nicolas, domain: urbanlink.fr, name: "Nicolas BENY",          quota: 2048, password_env: PROSPECTION_MAIL_PASSWORD, ratelimit: "20/h" }
   # Boites techniques. Sans elles, les rapports agreges DMARC et les rapports
   # d'echec TLS n'ont nulle part ou arriver -- et on passerait en p=reject sans
