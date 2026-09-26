@@ -31,6 +31,30 @@
       {{ mailcow_secrets_env }}. Ce fichier n'est pas versionne : il doit
       exister sur le noeud de controle.
 
+- name: Extraire les mots de passe propres a certaines boites
+  ansible.builtin.set_fact:
+    mailcow_box_passwords: >-
+      {{ mailcow_box_passwords | default({}) | combine({
+           item.password_env: ((mailcow_secrets_raw.content | b64decode
+             | regex_search('^' ~ item.password_env ~ '=(.*)$', '\1', multiline=True)) or [''])[0] | trim
+         }) }}
+  loop: "{{ mailcow_mailboxes | selectattr('password_env', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.password_env }}"
+  no_log: true
+
+- name: Exiger les mots de passe propres
+  ansible.builtin.assert:
+    that:
+      - mailcow_box_passwords[item.password_env] | length >= 12
+    fail_msg: >-
+      {{ item.password_env }} est absent ou trop court (12 caracteres minimum)
+      dans {{ mailcow_secrets_env }}. Ce fichier n'est pas versionne : il doit
+      exister sur le noeud de controle.
+  loop: "{{ mailcow_mailboxes | selectattr('password_env', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.local_part }}@{{ item.domain }}"
+
 # ---------------------------------------------------------------------------
 #  Compte d'administration
 # ---------------------------------------------------------------------------
@@ -204,8 +228,8 @@
       domain: "{{ item.domain }}"
       name: "{{ item.name }}"
       quota: "{{ item.quota }}"
-      password: "{{ mailcow_admin_password }}"
-      password2: "{{ mailcow_admin_password }}"
+      password: "{{ mailcow_box_passwords[item.password_env] if item.password_env is defined else mailcow_admin_password }}"
+      password2: "{{ mailcow_box_passwords[item.password_env] if item.password_env is defined else mailcow_admin_password }}"
       active: 1
       force_pw_update: 0
       tls_enforce_in: 0
@@ -217,6 +241,58 @@
     (item.local_part ~ '@' ~ item.domain)
     not in (mailcow_boxes.json | default([]) | map(attribute='username') | list)
   no_log: true
+
+# La limite est un etat, pas une creation : on la repose a chaque passage, ce
+# qui corrige aussi une valeur changee a la main dans l'interface.
+- name: Poser les limites d'envoi par boite
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/edit/rl-mbox/"
+    method: POST
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      items:
+        - "{{ item.local_part }}@{{ item.domain }}"
+      attr:
+        rl_value: "{{ item.ratelimit.split('/')[0] }}"
+        rl_frame: "{{ item.ratelimit.split('/')[1] }}"
+    return_content: true
+  register: mailcow_ratelimit
+  changed_when: false
+  # 'error' est inclus a dessein, pas seulement 'danger' : la taxonomie des
+  # types de reponse de Mailcow varie d'un endpoint a l'autre, et rater une
+  # erreur ici laisserait croire que la limite est posee alors qu'elle ne l'est
+  # pas.
+  failed_when: >-
+    mailcow_ratelimit.status != 200
+    or (mailcow_ratelimit.json | default([]) | selectattr('type', 'in', ['danger', 'error']) | list | length > 0)
+  loop: "{{ mailcow_mailboxes | selectattr('ratelimit', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.local_part }}@{{ item.domain }} {{ item.ratelimit }}"
+
+# Verification a la premiere application d'un contrat d'API qu'on n'a pas pu
+# tester hors ligne : /api/v1/get/rl-mbox/ n'est documente nulle part avec
+# certitude. A garder ; ca coute un GET de plus par boite.
+- name: Relire les limites d'envoi posees
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/rl-mbox/{{ item.local_part }}@{{ item.domain }}"
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+    return_content: true
+  register: mailcow_ratelimit_check
+  changed_when: false
+  loop: "{{ mailcow_mailboxes | selectattr('ratelimit', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.local_part }}@{{ item.domain }} {{ item.ratelimit }}"
+
+- name: Afficher les limites d'envoi relues
+  ansible.builtin.debug:
+    msg: "{{ item.item.local_part }}@{{ item.item.domain }} -> {{ item.json | default(item.content) }}"
+  loop: "{{ mailcow_ratelimit_check.results }}"
+  loop_control:
+    label: "{{ item.item.local_part }}@{{ item.item.domain }}"
 
 - name: Relever les alias existants
   ansible.builtin.uri:
