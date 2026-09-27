@@ -95,7 +95,9 @@ mailcow_mailboxes:
   # le fait pas pour vous. Limite d'envoi posee cote serveur : un bug de boucle
   # dans la CLI ne peut pas depasser 20 messages par heure, ni abimer la
   # reputation de l'IP.
-  - { local_part: nicolas, domain: urbanlink.fr, name: "Nicolas BENY",          quota: 2048, password_env: PROSPECTION_MAIL_PASSWORD, ratelimit: "20/h" }
+  # Quota 1024 : le domaine plafonne a 10240 Mo au total et les quatre autres
+  # boites en prennent deja 9216. A 2048, Mailcow refusait la creation.
+  - { local_part: nicolas, domain: urbanlink.fr, name: "Nicolas BENY",          quota: 1024, password_env: PROSPECTION_MAIL_PASSWORD, ratelimit: "20/h" }
   # Boites techniques. Sans elles, les rapports agreges DMARC et les rapports
   # d'echec TLS n'ont nulle part ou arriver -- et on passerait en p=reject sans
   # savoir qui usurpe le domaine.

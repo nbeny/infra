@@ -240,59 +240,47 @@
   when: >-
     (item.local_part ~ '@' ~ item.domain)
     not in (mailcow_boxes.json | default([]) | map(attribute='username') | list)
+  register: mailcow_box_created
+  # Mailcow repond 200 meme quand il refuse (quota du domaine depasse,
+  # politique de mot de passe...) : le refus est dans le corps. Constate le
+  # 2026-09-27 : une boite refusee pour quota passait en silence. no_log masque
+  # le detail (le corps de la requete porte le mot de passe) ; pour le lire,
+  # creer la boite a la main dans l'interface, qui affiche le motif.
+  failed_when: >-
+    mailcow_box_created.status | default(200) != 200
+    or (mailcow_box_created.json | default([]) | selectattr('type', 'in', ['danger', 'error']) | list | length > 0)
   no_log: true
 
-# La limite est un etat, pas une creation : on la repose a chaque passage, ce
-# qui corrige aussi une valeur changee a la main dans l'interface.
+# La limite ne passe PAS par l'API : avec une cle d'API, hasACLAccess('ratelimit')
+# lit $_SESSION['acl'], que la session API ne renseigne jamais -> "access_denied"
+# a tous les coups (constate le 2026-09-27). On ecrit donc exactement ce
+# qu'ecrit l'interface : le hash Redis RL_VALUE, que Rspamd lit a chaque message.
+# C'est un etat : on le repose a chaque passage, puis on le relit pour prouver
+# qu'il est en place. Le mot de passe Redis passe par REDISCLI_AUTH, jamais en
+# argument.
 - name: Poser les limites d'envoi par boite
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/edit/rl-mbox/"
-    method: POST
-    headers:
-      X-API-Key: "{{ mailcow_api_key }}"
-      Content-Type: application/json
-    body_format: json
-    body:
-      items:
-        - "{{ item.local_part }}@{{ item.domain }}"
-      attr:
-        rl_value: "{{ item.ratelimit.split('/')[0] }}"
-        rl_frame: "{{ item.ratelimit.split('/')[1] }}"
-    return_content: true
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      cd {{ mailcow_dir }}
+      source mailcow.conf
+      box='{{ item.local_part }}@{{ item.domain }}'
+      value='{{ item.ratelimit.split("/")[0] | int }}'
+      frame='{{ item.ratelimit.split("/")[1] }}'
+      case "$frame" in s|m|h|d) ;; *) echo "unite invalide : $frame (s, m, h ou d)"; exit 1;; esac
+      want="$value / 1$frame"
+      rcli() { docker compose exec -T -e REDISCLI_AUTH="$REDISPASS" redis-mailcow redis-cli --no-auth-warning "$@" </dev/null; }
+      if [ "$(rcli HGET RL_VALUE "$box")" = "$want" ]; then echo "inchange : $box -> $want"; exit 0; fi
+      rcli HSET RL_VALUE "$box" "$want" >/dev/null
+      have="$(rcli HGET RL_VALUE "$box")"
+      [ "$have" = "$want" ] || { echo "relu \"$have\" au lieu de \"$want\""; exit 1; }
+      echo "pose : $box -> $want"
+    executable: /bin/bash
   register: mailcow_ratelimit
-  changed_when: false
-  # 'error' est inclus a dessein, pas seulement 'danger' : la taxonomie des
-  # types de reponse de Mailcow varie d'un endpoint a l'autre, et rater une
-  # erreur ici laisserait croire que la limite est posee alors qu'elle ne l'est
-  # pas.
-  failed_when: >-
-    mailcow_ratelimit.status != 200
-    or (mailcow_ratelimit.json | default([]) | selectattr('type', 'in', ['danger', 'error']) | list | length > 0)
+  changed_when: mailcow_ratelimit.stdout is search('^pose')
   loop: "{{ mailcow_mailboxes | selectattr('ratelimit', 'defined') | list }}"
   loop_control:
     label: "{{ item.local_part }}@{{ item.domain }} {{ item.ratelimit }}"
-
-# Verification a la premiere application d'un contrat d'API qu'on n'a pas pu
-# tester hors ligne : /api/v1/get/rl-mbox/ n'est documente nulle part avec
-# certitude. A garder ; ca coute un GET de plus par boite.
-- name: Relire les limites d'envoi posees
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/get/rl-mbox/{{ item.local_part }}@{{ item.domain }}"
-    headers:
-      X-API-Key: "{{ mailcow_api_key }}"
-    return_content: true
-  register: mailcow_ratelimit_check
-  changed_when: false
-  loop: "{{ mailcow_mailboxes | selectattr('ratelimit', 'defined') | list }}"
-  loop_control:
-    label: "{{ item.local_part }}@{{ item.domain }} {{ item.ratelimit }}"
-
-- name: Afficher les limites d'envoi relues
-  ansible.builtin.debug:
-    msg: "{{ item.item.local_part }}@{{ item.item.domain }} -> {{ item.json | default(item.content) }}"
-  loop: "{{ mailcow_ratelimit_check.results }}"
-  loop_control:
-    label: "{{ item.item.local_part }}@{{ item.item.domain }}"
 
 - name: Relever les alias existants
   ansible.builtin.uri:
