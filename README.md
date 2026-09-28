@@ -125,10 +125,13 @@ VMs préexistantes, **non gérées par Terraform** :
 | 101 | Alesio | — | arrêtée | |
 | 102 | Other | 10.0.0.102 | démarrée | Accessible depuis le LAN sur `192.168.100.50:4242` (DNAT) |
 | 103 | Kali | 10.0.0.103 | arrêtée | |
+| 130 | ci-runner | 10.0.0.130 | démarrée | Montée à la main avant ce dépôt — 3 runners GitHub Actions + registre d'images du lab (`ansible/roles/registry`). L'éteindre annule toute CI en cours |
 
 > **Terraform ne touche jamais à ces VMs.** Elles ne sont pas dans son état.
 > Ansible peut les configurer une fois « adoptées » (voir plus bas), ce qui est
-> purement additif.
+> purement additif. Exception : `ci-runner`, déjà joignable en SSH, n'a pas
+> besoin d'adoption — elle a son propre groupe d'inventaire `ci_nodes` pour ne
+> **pas** recevoir le rôle `kubernetes` que `debian_nodes` reçoit.
 
 Le nouveau matériel va sur **`pool2`** : `pool1` est rempli à 76 %.
 
@@ -558,6 +561,15 @@ infra/
 │   │   ├── 22-macos-ci.yml          VMs macOS → Xcode CLT + runner
 │   │   ├── 30-urbanlink-images.yml  build des images applicatives
 │   │   ├── 31-urbanlink-deploy.yml  déploiement du stack UrbanLink
+│   │   ├── 32-argocd.yml            Argo CD → réconciliation continue de kube/urbanlink
+│   │   ├── 32-tls-certificates.yml  certificats TLS du nœud (DNS-01 Cloudflare)
+│   │   ├── 33-urbanlink-edge.yml    vhosts *.urbanlink.fr (publics + internes)
+│   │   ├── 34-console-accounts.yml  compte humain commun sur les consoles internes
+│   │   ├── 35-ci-registry.yml       registre d'images du lab, sur ci-runner
+│   │   ├── 40-mail-vm.yml           socle de la VM de messagerie (compte, Docker)
+│   │   ├── 41-mail-tunnel.yml       tunnel WireGuard VPS ↔ VM de messagerie
+│   │   ├── 42-mailcow.yml           Mailcow — boîtes urbanlink.fr
+│   │   ├── 43-mail-antiabus.yml     CrowdSec messagerie (VPS + VM)
 │   │   ├── 90-update.yml            mises à jour système
 │   │   ├── 91-k8s-upgrade.yml       montée de version Kubernetes
 │   │   ├── 95-hardening.yml         correctifs de l'audit sécurité
@@ -566,9 +578,13 @@ infra/
 │                                    common · docker · kubernetes
 │                                    kali_tools · image_cleanup
 │                                    pve_macos · macos_ci
+│                                    edge_urbanlink · tls_certificates · registry
+│                                    mailcow · mail_tunnel · mail_antiabus
 ├── kube/
 │   ├── README.md                    provenance, déploiement, résultats
 │   └── urbanlink/                   manifests du stack UrbanConnect
+├── mikrotik/
+│   └── README.md                    config versionnée du routeur du lab
 ├── docs/
 │   ├── audit-securite.md            audit DevOps & sécurité du nœud
 │   └── macos-ci.md                  runbook macOS — plafond AVX2, install manuelle
@@ -599,6 +615,45 @@ dans le registre du lab (`ansible/roles/registry`, sur la VM `ci-runner`), et
 suffit donc à mettre le cluster à jour. Partage des rôles détaillé dans
 [`kube/README.md`](kube/README.md).
 
+**L'accès depuis Internet** passe par `edge_urbanlink` (vhosts nginx sur le
+nœud, `playbooks/33-urbanlink-edge.yml`) et par `tls_certificates`
+(`playbooks/32-tls-certificates.yml`, challenge DNS-01 Cloudflare — remplace
+l'ancien montage HTTP-01, qui échouait depuis des mois). Six noms sont
+publics (`urbanlink.fr`, `www`, `api`, `auth`, `nominatim`, `s3`), le reste
+reste sur le LAN. Détail des dix-sept noms et de leur isolement dans
+[`roles/edge_urbanlink/README.md`](ansible/roles/edge_urbanlink/README.md).
+Le compte humain commun aux consoles internes (Grafana, Kiali, Argo…) est posé
+par `playbooks/34-console-accounts.yml`, à partir du secret déjà versionné
+côté cluster — pas de mot de passe dans ce dépôt.
+
+### Messagerie urbanlink.fr
+
+Boîtes mail sur Mailcow, hébergé sur une VM dédiée du nœud (profil
+`debian-base`, voir le bloc commenté `mail` de
+[`terraform.tfvars.example`](terraform/terraform.tfvars.example)) — **pas**
+dans le cluster Kubernetes. Trois playbooks, dans l'ordre :
+
+```bash
+ansible-playbook playbooks/40-mail-vm.yml      # compte, durcissement, Docker
+ansible-playbook playbooks/41-mail-tunnel.yml  # tunnel WireGuard vers le VPS
+ansible-playbook playbooks/42-mailcow.yml      # Mailcow lui-même
+```
+
+**Pourquoi un VPS.** L'IP de la maison est sur liste noire Spamhaus (PBL) et ne
+peut pas émettre de courrier. Un VPS Hostinger (`edge_nodes` /
+`vps-mail` dans l'inventaire) sert de relais : un tunnel WireGuard transporte
+le trafic tel quel — DNAT sans masquerade en entrée, SNAT en sortie — de sorte
+que la messagerie émette et reçoive sous l'IP propre du VPS. Ce même VPS porte
+aussi trois sites en production (Traefik) : aucun rôle de messagerie ne touche
+aux ports 80/443 ni aux chaînes `DOCKER-USER`. Détail dans les en-têtes de
+`playbooks/40-*.yml` à `43-*.yml` et dans les commentaires de
+[`ansible/inventory/00-static.yml`](ansible/inventory/00-static.yml).
+
+`playbooks/43-mail-antiabus.yml` ajoute CrowdSec des deux côtés du tunnel
+(hook `input` uniquement — il ne voit pas le trafic forwardé). Ni la VM de
+messagerie ni le VPS ne sont dans le groupe `guests` : `90-update.yml` et
+`95-hardening.yml` ne les redémarrent jamais tout seuls.
+
 ### Sécurité
 
 [`docs/audit-securite.md`](docs/audit-securite.md) est l'audit du nœud, réalisé
@@ -615,9 +670,13 @@ ansible-playbook playbooks/95-hardening.yml --check --diff   # voir sans rien ch
 |---|---|
 | 10.0.0.1 | Passerelle (le nœud Proxmox) |
 | 10.0.0.100-103 | VMs préexistantes |
-| 10.0.0.110-189 | VMs Terraform (dont 10.0.0.140 macOS, **saisie à la main**) |
+| 10.0.0.110-189 | VMs Terraform (dont macOS et la VM de messagerie, **IP saisie à la main**) |
+| 10.0.0.130 | `ci-runner` — **hors Terraform**, montée à la main avant ce dépôt : runners GitHub Actions + registre d'images du lab |
 | 10.0.0.190 | VM de test |
 | 10.0.0.240-241 | IP temporaires des builds Packer |
+
+Le VPS de messagerie (Hostinger, `vps-mail` dans l'inventaire) est hors de ce
+plan : il est routable depuis Internet, pas depuis `vmbr1`.
 
 | VMID | Usage |
 |---|---|
