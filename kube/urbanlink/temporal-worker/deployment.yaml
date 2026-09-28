@@ -384,7 +384,7 @@ spec:
             # l'extraction factice en production, « remplissant les profils de
             # rien, sans qu'aucune alerte ne se déclenche ». `opencode` valide
             # sa configuration à l'USAGE (`readConfig` dans `extract`), pas au
-            # démarrage : tant que `CV_AGENT_COMMAND` et `AI_WORKSPACE_DIR` ne
+            # démarrage : tant que `OPENCODE_COMMAND` et `AI_WORKSPACE_DIR` ne
             # sont pas provisionnés, un import échoue clairement au lieu de
             # fabriquer du faux.
             - name: CV_AGENT_PROVIDER

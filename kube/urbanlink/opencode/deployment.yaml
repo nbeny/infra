@@ -1,5 +1,6 @@
 # ============================================================================
-#  cv-agent-worker -- l'import de CV par agent
+#  opencode -- les instances opencode (import de document, annonce par IA,
+#  traduction des fiches fournisseurs)
 # ----------------------------------------------------------------------------
 #  Troisieme point d'entree du backend, apres l'API et le worker Temporal :
 #  meme code, meme AppModule, autre `CMD`. Il est SEUL a lancer `opencode`, et
@@ -36,10 +37,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cv-agent-worker
+  name: opencode
   namespace: urbanconnect
   labels:
-    app: cv-agent-worker
+    app: opencode
 spec:
   # Process dedie qui lance `opencode` sur les CV televerses. UN SEUL replica,
   # et c'est une decision, pas un defaut de dimensionnement : la file est servie
@@ -51,19 +52,19 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: cv-agent-worker
+      app: opencode
   template:
     metadata:
       labels:
-        app: cv-agent-worker
+        app: opencode
     spec:
       containers:
-        - name: cv-agent-worker
+        - name: opencode
           # Image DEDIEE : elle embarque le binaire `opencode` (plusieurs
           # dizaines de Mo), que l'image de l'API n'a aucune raison de porter.
           # Construite par la CI du depot applicatif depuis
-          # `backTs/Dockerfile.cv-agent`.
-          image: urbanconnect-cv-agent-worker:prod
+          # `backTs/Dockerfile.opencode`.
+          image: urbanconnect-opencode:prod
           ports:
             # Le seul port de ce processus : `GET /metrics`. Il ne sert
             # rien d'autre -- le worker n'a aucune raison d'exposer
@@ -106,7 +107,7 @@ spec:
             - name: KAFKA_BROKERS
               value: kafka:9092
             - name: KAFKA_CLIENT_ID
-              value: urbanconnect-cv-agent-worker
+              value: urbanconnect-opencode
             - name: KAFKAJS_NO_PARTITIONER_WARNING
               value: "1"
             # Temporal
@@ -147,7 +148,7 @@ spec:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-collector.urbanconnect.svc.cluster.local:4318
             - name: OTEL_SERVICE_NAME
-              value: urbanconnect-cv-agent-worker
+              value: urbanconnect-opencode
             - name: TEMPORAL_TASK_QUEUE
               value: urbanconnect
             # Kratos (AppModule bootstrap complet)
@@ -360,9 +361,9 @@ spec:
             # ----------------------------------------------------------------
             - name: CV_AGENT_PROVIDER
               value: opencode
-            - name: CV_AGENT_COMMAND
+            - name: OPENCODE_COMMAND
               value: opencode
-            - name: CV_AGENT_ARGS
+            - name: OPENCODE_ARGS
               value: '["run","-m","{model}"]'
             # Modele LIBRE : aucune accreditation n'est necessaire pour les
             # `opencode/*-free` (verifie dans cancerWeb/docs/ai-cli-smoke-test.md,
@@ -392,7 +393,7 @@ spec:
             # fin est detectee par la stabilite d'`output.json`.
             - name: CV_AGENT_TIMEOUT_MS
               value: "300000"
-            - name: CV_AGENT_POLL_INTERVAL_MS
+            - name: OPENCODE_POLL_INTERVAL_MS
               value: "250"
             - name: CV_IMPORT_DAILY_QUOTA
               value: "5"

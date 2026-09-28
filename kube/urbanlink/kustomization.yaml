@@ -54,7 +54,7 @@
 #      il attend lui-même que le statut passe à `available`)
 #   7. backend (après pgbouncer, redis, kratos, minio, kafka, temporal, elasticsearch)
 #   8. temporal-worker (image glibc dédiée, cohérent SCHEDULER_BACKEND avec backend)
-#      cv-agent-worker (image dédiée portant `opencode` ; consomme la table
+#      opencode (image dédiée portant `opencode` ; consomme la table
 #      `cv_import_jobs`, donc après la migration du backend)
 #   9. frontend (après backend)
 #  10. coturn (DaemonSet hostNetwork sur nœuds publics), geoipupdate, pgadmin
@@ -176,8 +176,8 @@ resources:
 - backend/hpa.yaml
 - temporal-worker/deployment.yaml
 - temporal-worker/service.yaml
-- cv-agent-worker/deployment.yaml
-- cv-agent-worker/service.yaml
+- opencode/deployment.yaml
+- opencode/service.yaml
 - frontend/deployment.yaml
 - frontend/service.yaml
 - frontend/hpa.yaml
@@ -320,7 +320,7 @@ configMapGenerator:
   # n'est joignable que depuis le lab. Si la CI de `e2ceada8` a echoue, ce pod
   # restera en ImagePullBackOff -- visible dans Argo, sans effet sur les autres
   # services (un seul replica, aucun PDB, aucune dependance de l'API a ce worker).
-  # Verification : `curl http://10.0.0.130:5000/v2/urbanconnect-cv-agent-worker/tags/list`
+  # Verification : `curl http://10.0.0.130:5000/v2/urbanconnect-opencode/tags/list`
   #
   # La prochaine livraison applicative realignera les QUATRE images sur le meme
   # sha : cette divergence est transitoire par construction.
@@ -328,9 +328,6 @@ images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend
   newTag: sha-561e6011
-- name: urbanconnect-cv-agent-worker
-  newName: 10.0.0.130:5000/urbanconnect-cv-agent-worker
-  newTag: sha-79266a89
 - name: urbanconnect-frontend
   newName: 10.0.0.130:5000/urbanconnect-frontend
   newTag: sha-561e6011

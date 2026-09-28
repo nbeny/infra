@@ -233,7 +233,7 @@ spec:
 # ============================================================================
 #  Les deux workers -- cinq metriques qui s'ecrivaient dans le vide
 # ----------------------------------------------------------------------------
-#  `temporal-worker` et `cv-agent-worker` demarrent en
+#  `temporal-worker` et `opencode` demarrent en
 #  `NestFactory.createApplicationContext` : les modules s'initialisent, mais il
 #  n'y a PAS de serveur HTTP. Aucun `/metrics`, donc rien a scraper -- et ce
 #  n'etait ecrit nulle part.
@@ -306,14 +306,14 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: cv-agent-worker
+  name: opencode
   namespace: urbanconnect
   labels:
     release: kube-prometheus-stack
 spec:
   selector:
     matchLabels:
-      app: cv-agent-worker
+      app: opencode
   namespaceSelector:
     matchNames: [urbanconnect]
   endpoints:
@@ -327,6 +327,6 @@ spec:
           key: METRICS_TOKEN
       relabelings:
         - targetLabel: job
-          replacement: cv-agent-worker
+          replacement: opencode
         - sourceLabels: [__meta_kubernetes_pod_name]
           targetLabel: pod
