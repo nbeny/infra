@@ -382,6 +382,15 @@ spec:
             # ligne un texte non francais.
             - name: SUPPLIER_TRANSLATION_MODEL
               value: opencode/mimo-v2.6-flash-free
+            # Releve des tarifs « A decouvrir » sur les pages officielles
+            # (file `discover_price_jobs`, deposee par l'enrichissement du worker
+            # Temporal). Le modele doit avoir recherche + lecture web : mesure le
+            # 2026-10-01, mimo-v2.6-flash-free (gratuit) les a. Surveiller
+            # `urbanconnect_discover_price_queue_depth`.
+            - name: DISCOVER_PRICE_MODEL
+              value: opencode/mimo-v2.6-flash-free
+            - name: DISCOVER_PRICE_TIMEOUT_MS
+              value: "300000"
             # ⚠️ VOLONTAIREMENT VIDE. Aucun modele `*-free` documente ne VOIT les
             # images ; vide, le processeur refuse png et jpeg par
             # UNSUPPORTED_TYPE. Renseigner un modele vision sans en verifier les

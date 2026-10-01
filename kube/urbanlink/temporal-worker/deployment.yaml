@@ -117,6 +117,22 @@ spec:
               value: urbanconnect-temporal-worker
             - name: TEMPORAL_TASK_QUEUE
               value: urbanconnect
+            # « A decouvrir » : imports Basilic + Museofile (Schedules
+            # `discover-import-*`), enrichissement (`discover-enrich`) et
+            # revérification annuelle par Kafka (`discover-renew`, topic
+            # `discover.enrichment`). L'ORDRE des departements est la priorite :
+            # Lille et Paris d'abord, puis Lyon. Les autres grandes villes
+            # s'ajoutent EN QUEUE une fois ces trois-la enrichis (la file des
+            # tarifs se traite dans l'ordre d'arrivee, ~1 lieu/min).
+            # ⚠️ Seul ce Deployment porte DISCOVER_IMPORT_ENABLED : le
+            # consommateur `discover.enrichment` ne s'abonne que la ou il vaut
+            # `true` — le poser sur l'API ferait partager les partitions.
+            - name: DISCOVER_IMPORT_ENABLED
+              value: "true"
+            - name: DISCOVER_SOURCES
+              value: basilic,museofile
+            - name: DISCOVER_DEPARTMENTS
+              value: "59,75,69"
             # Kratos (AppModule bootstrap complet)
             - name: KRATOS_PUBLIC_URL
               value: http://kratos:4433
