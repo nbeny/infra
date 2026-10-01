@@ -348,6 +348,10 @@ spec:
             # sur le worker Temporal.
             - name: DISCOVER_IMPORT_ENABLED
               value: "true"
+            # Meme liste, meme ordre que le worker Temporal : l'ordre est la
+            # priorite des releves de tarif que ce consommateur met en file.
+            - name: DISCOVER_DEPARTMENTS
+              value: "59,75,69,13,31,06,44,34,67,33,35,83,51,42,76,21,38,49,30,63,72,29,37,80,87,74,66,57,25,45,68,14,54,92,93,94,95"
             # Kafka (événementiel / fanout / logs métier)
             - name: KAFKA_BROKERS
               value: kafka:9092

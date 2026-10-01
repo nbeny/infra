@@ -120,10 +120,10 @@ spec:
             # « A decouvrir » : imports Basilic + Museofile (Schedules
             # `discover-import-*`), enrichissement (`discover-enrich`) et
             # revérification annuelle par Kafka (`discover-renew`, topic
-            # `discover.enrichment`). L'ORDRE des departements est la priorite :
-            # Lille et Paris d'abord, puis Lyon. Les autres grandes villes
-            # s'ajoutent EN QUEUE une fois ces trois-la enrichis (la file des
-            # tarifs se traite dans l'ordre d'arrivee, ~1 lieu/min).
+            # `discover.enrichment`). L'ORDRE des departements est la priorite
+            # de l'enrichissement ET des releves de tarif (colonne `priority`) :
+            # Lille, Paris, Lyon, puis les grandes villes par taille, puis la
+            # petite couronne. Ajouter une ville = l'ajouter EN QUEUE.
             # ⚠️ DISCOVER_IMPORT_ENABLED est AUSSI pose sur le backend : c'est lui
             # qui consomme `discover.enrichment` (ce worker, APP_ROLE=worker,
             # ne consomme pas Kafka). Les deux valeurs bougent ensemble.
@@ -132,7 +132,7 @@ spec:
             - name: DISCOVER_SOURCES
               value: basilic,museofile
             - name: DISCOVER_DEPARTMENTS
-              value: "59,75,69"
+              value: "59,75,69,13,31,06,44,34,67,33,35,83,51,42,76,21,38,49,30,63,72,29,37,80,87,74,66,57,25,45,68,14,54,92,93,94,95"
             # Kratos (AppModule bootstrap complet)
             - name: KRATOS_PUBLIC_URL
               value: http://kratos:4433
