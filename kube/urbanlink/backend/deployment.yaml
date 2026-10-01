@@ -341,6 +341,13 @@ spec:
                   key: ELASTICSEARCH_PASSWORD
             - name: SEARCH_ENGINE
               value: elasticsearch
+            # « A decouvrir » : c'est le BACKEND qui consomme Kafka (les workers
+            # APP_ROLE=worker ne consomment rien). Le consommateur
+            # `discover.enrichment` (reverification annuelle des lieux) ne
+            # s'abonne que si cet interrupteur vaut `true` — meme valeur que
+            # sur le worker Temporal.
+            - name: DISCOVER_IMPORT_ENABLED
+              value: "true"
             # Kafka (événementiel / fanout / logs métier)
             - name: KAFKA_BROKERS
               value: kafka:9092

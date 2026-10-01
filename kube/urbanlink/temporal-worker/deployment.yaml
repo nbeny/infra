@@ -124,9 +124,9 @@ spec:
             # Lille et Paris d'abord, puis Lyon. Les autres grandes villes
             # s'ajoutent EN QUEUE une fois ces trois-la enrichis (la file des
             # tarifs se traite dans l'ordre d'arrivee, ~1 lieu/min).
-            # ⚠️ Seul ce Deployment porte DISCOVER_IMPORT_ENABLED : le
-            # consommateur `discover.enrichment` ne s'abonne que la ou il vaut
-            # `true` — le poser sur l'API ferait partager les partitions.
+            # ⚠️ DISCOVER_IMPORT_ENABLED est AUSSI pose sur le backend : c'est lui
+            # qui consomme `discover.enrichment` (ce worker, APP_ROLE=worker,
+            # ne consomme pas Kafka). Les deux valeurs bougent ensemble.
             - name: DISCOVER_IMPORT_ENABLED
               value: "true"
             - name: DISCOVER_SOURCES
