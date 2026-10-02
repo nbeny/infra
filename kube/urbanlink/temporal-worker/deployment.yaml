@@ -130,7 +130,7 @@ spec:
             - name: DISCOVER_IMPORT_ENABLED
               value: "true"
             - name: DISCOVER_SOURCES
-              value: basilic,museofile
+              value: basilic,museofile,osm
             - name: DISCOVER_DEPARTMENTS
               value: "59,62,75,69,13,31,06,44,34,67,33,35,83,51,42,76,21,38,49,30,63,72,29,37,80,87,74,66,57,25,45,68,14,54,92,93,94,95"
             # Kratos (AppModule bootstrap complet)
