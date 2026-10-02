@@ -389,8 +389,11 @@ spec:
             # `urbanconnect_discover_price_queue_depth`.
             - name: DISCOVER_PRICE_MODEL
               value: opencode/mimo-v2.6-flash-free
+            # 8 min : mesure le 2026-10-02, 100 des 205 premiers releves
+            # depassaient 300 s (AGENT_TIMEOUT) : 5 min ne suffisent pas pour
+            # lire deux ou trois pages officielles.
             - name: DISCOVER_PRICE_TIMEOUT_MS
-              value: "300000"
+              value: "480000"
             # ⚠️ VOLONTAIREMENT VIDE. Aucun modele `*-free` documente ne VOIT les
             # images ; vide, le processeur refuse png et jpeg par
             # UNSUPPORTED_TYPE. Renseigner un modele vision sans en verifier les
