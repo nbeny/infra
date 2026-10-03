@@ -158,6 +158,8 @@ resources:
 - minio/statefulset.yaml
 - minio/service.yaml
 - minio/init-job.yaml
+- imgproxy/deployment.yaml
+- imgproxy/service.yaml
 - kratos/migrate-job.yaml
 - kratos/deployment.yaml
 - kratos/service.yaml
@@ -279,6 +281,9 @@ configMapGenerator:
 - envs:
   - config/prod/nominatim/nominatim.env
   name: nominatim-config
+- envs:
+  - config/common/imgproxy/imgproxy.env
+  name: imgproxy-config
 - files:
   - config/common/kibana/dashboards.ndjson
   name: kibana-dashboards

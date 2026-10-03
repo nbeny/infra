@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imgproxy
+  namespace: urbanconnect
+  labels:
+    app: imgproxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: imgproxy
+  template:
+    metadata:
+      labels:
+        app: imgproxy
+    spec:
+      containers:
+        - name: imgproxy
+          # Redimensionnement / WebP des images publiques de MinIO. Joint
+          # SEULEMENT par le frontend (route /api/img, URL signees) : aucun
+          # VirtualService ne le publie, et il ne doit pas en avoir -- c'est
+          # la route Next qui borne les largeurs permises.
+          image: ghcr.io/imgproxy/imgproxy:v4.0.17
+          ports:
+            - containerPort: 8080
+          # Reglages : ConfigMap `imgproxy-config`, generee depuis
+          # config/common/imgproxy/imgproxy.env du depot APPLICATIF -- le meme
+          # fichier que monte docker compose en dev. Lire son en-tete avant de
+          # toucher a la source (HTTP anonyme vers MinIO, JAMAIS S3 : des
+          # identifiants liraient aussi les prefixes prives du seau).
+          envFrom:
+            - configMapRef:
+                name: imgproxy-config
+          env:
+            # Cle et sel de signature, en hexa. Le frontend lit les MEMES
+            # entrees du Secret : une divergence fait repondre 403 « Forbidden »
+            # a imgproxy, et la route /api/img le journalise en 502.
+            - name: IMGPROXY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: IMGPROXY_KEY
+            - name: IMGPROXY_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: IMGPROXY_SALT
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10

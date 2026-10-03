@@ -110,6 +110,10 @@ fill JWT_SECRET             "$(rand 48)"
 fill METRICS_TOKEN          "$(rand 32)"
 fill GRAFANA_PG_PASSWORD    "$(rand 32)"
 fill TURN_SECRET            "$(rand 32)"
+# Signature des URL imgproxy : imgproxy les DECODE en hexadecimal, `rand` (base
+# 62) le ferait refuser au demarrage. 32 octets chacun.
+fill IMGPROXY_KEY           "$(openssl rand -hex 32)"
+fill IMGPROXY_SALT          "$(openssl rand -hex 32)"
 
 # --- Valeurs derivees -------------------------------------------------------
 # Toujours recalculees : elles doivent suivre les mots de passe ci-dessus,

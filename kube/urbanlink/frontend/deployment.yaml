@@ -126,6 +126,22 @@ spec:
             # `/api/geocode`, non.
             - name: NOMINATIM_INTERNAL_URL
               value: http://nominatim:8080
+            # Images redimensionnees : la route /api/img (handler, donc relu a
+            # chaque requete) signe la demande et la passe a imgproxy. Aucune
+            # des trois n'a de repli : absente, la route repond 500 en la
+            # nommant. Cle et sel = les memes entrees que le Deployment imgproxy.
+            - name: IMGPROXY_URL
+              value: http://imgproxy:8080
+            - name: IMGPROXY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: IMGPROXY_KEY
+            - name: IMGPROXY_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: IMGPROXY_SALT
             # MaxMind GeoIP
             - name: GEOIP_DB_PATH
               value: /usr/share/GeoIP/GeoLite2-Country.mmdb
