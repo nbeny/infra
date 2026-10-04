@@ -131,3 +131,39 @@ La Freebox fait la boucle NAT : depuis le LAN, l'IP publique fonctionne aussi.
   Cloudflare gratuit ne relaie que HTTP(S) ; en orange, le jeu ne se connecte
   pas. Comme pour les noms publics de `edge_urbanlink`, l'enregistrement est
   à rejouer si l'IP de la Freebox change.
+
+## Talents 1.18 côté serveur (2026-10-04)
+
+Le client est en 1.18.x, le serveur en 1.17.2 : leurs arbres de talents n'ont
+que 161 identifiants en commun, tous différents. Le client envoyait donc des
+talents inconnus et le serveur les ignorait sans rien dire (`Player::LearnTalent`).
+
+Choix : **le serveur adopte les talents du client**.
+
+- `data/dbc/Talent.dbc` et `TalentTab.dbc` remplacés par ceux du client
+  (`patch-9.mpq`, chiffré : clé = HashString du nom de fichier). Originaux :
+  `*.dbc.orig-1172`.
+- `tw_world.spell_template` : les sorts des talents viennent de la base, pas
+  du `Spell.dbc`. Import depuis le `Spell.dbc` du client :
+  - 331 sorts **nouveaux** (aucun mob, objet ni script ne les utilise) ;
+  - 681 sorts **mis à jour** : rangs de talents et sorts qu'ils déclenchent,
+    modifiés en 1.18 et utilisés par aucun mob, objet ni script ;
+  - **4 sorts laissés en 1.17.2** car aussi utilisés par un mob, un objet ou
+    un script : on ne change pas le comportement du monde.
+  Les colonnes propres au serveur (`effectBonusCoefficient*`, `customFlags`)
+  ne sont pas touchées. Correspondance colonnes ↔ champs DBC validée par
+  aller-retour sur 1 998 sorts (seuls écarts : textes et 5 réglages serveur).
+- Les talents qui modifient d'autres sorts marchent sans `spell_affect` : le
+  serveur prend alors le masque `EffectItemType` du sort (`LoadSpellAffects`).
+- Exige un redémarrage de mangosd (DBC et `spell_template` chargés au démarrage).
+
+**Revenir en arrière**, mangosd arrêté :
+
+```bash
+B=/opt/turtle/backup-talents-118
+sudo mariadb < $B/retour-1-supprimer-nouveaux.sql          # retire les 331 nouveaux
+sudo mariadb tw_world < $B/spell_template_avant.sql        # rétablit les 681
+for f in Talent TalentTab; do sudo cp -p /opt/turtle/server/data/dbc/$f.dbc.orig-1172 /opt/turtle/server/data/dbc/$f.dbc; done
+```
+
+Puis réinitialiser les talents des personnages qui en ont posé.
