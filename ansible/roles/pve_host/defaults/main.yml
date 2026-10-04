@@ -22,9 +22,9 @@ pve_base_packages: [curl, git, jq, unzip, rsync]
 # --- ZFS -------------------------------------------------------------------
 # 4 Gio. Le noeud surengage sa memoire : voir roles/pve_host/tasks/zfs.yml.
 pve_zfs_arc_max_bytes: 4294967296
-# pool2 porte le disque systeme du cluster Kubernetes et n'a qu'un seul disque
-# a plateaux : `atime=on` y ajoute une ecriture par lecture.
-pve_zfs_noatime_pools: [pool1, pool2]
+# `atime=on` ajoute une ecriture par lecture sur des disques a plateaux.
+# pool2 est retire : inimportable depuis le 2026-10-04, la tache echouerait.
+pve_zfs_noatime_pools: [pool1]
 
 # --- Sauvegarde du cluster UrbanLink ---------------------------------------
 # Deux couches : les DONNEES chaque nuit (~30 Mo, restaurable base par base) et

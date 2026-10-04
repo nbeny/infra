@@ -12,7 +12,9 @@ pve_hardening_all: false
 
 # --- Constat 1 : aucune sauvegarde (CRITIQUE) ------------------------------
 pve_hardening_backup: false
-pve_hardening_backup_storage: pool2-backup
+# pool1 : pool2-backup vivait sur le meme disque unique que les VMs qu'il
+# protegeait, et ce disque a ete perdu le 2026-10-04.
+pve_hardening_backup_storage: pool1-backup
 pve_hardening_backup_schedule: "04:30"
 # VM 100 n'a JAMAIS ete sauvegardee : c'est elle qui compte en premier.
 # "all" est possible, mais lire l'avertissement de volumetrie dans le role.
@@ -28,7 +30,11 @@ pve_hardening_backup_schedule: "04:30"
 # fichiers le temps de l'instantane. Sans agent, la sauvegarde reste coherente
 # au niveau bloc mais pas au niveau applicatif -- d'ou l'insistance a l'activer
 # sur cette VM.
-pve_hardening_backup_vmids: "140"
+# 130 (ci-runner) ajoutee apres la perte de pool2 le 2026-10-04 : elle n'avait
+# aucune sauvegarde, runners et registre ont du etre remontes a la main.
+# ⚠️ La tache ne cree le job que s'il n'existe pas : sur un noeud ou il existe
+# deja, appliquer avec `pvesh set /cluster/backup/<id> --vmid 140,130`.
+pve_hardening_backup_vmids: "140,130"
 pve_hardening_backup_mode: snapshot
 pve_hardening_backup_compress: zstd
 # Retention volontairement courte : un vzdump est une image COMPLETE a chaque

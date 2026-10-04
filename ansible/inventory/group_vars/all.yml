@@ -34,10 +34,13 @@ lab_search_domain: lab.nbeny.fr
 mail_docker_net_prefix: "172.22.1"
 
 # --- Stockage -------------------------------------------------------------
-# pool1 : 861 Go libres, heberge les VMs historiques 100-103
-# pool2 : 2,5 To libres -> cible pour les templates et les nouvelles VMs
-pve_vm_storage: pool2
-pve_template_storage: pool2
+# pool1 : raidz1 de 3 disques, ~4,4 To libres -> cible des VMs et des templates
+# ⚠️ pool2 : UN SEUL disque, sans redondance. Devenu inimportable apres la
+# coupure de courant du 2026-10-04 (`can't open objset ..., error 5`), il a
+# emporte urbanlink, mail, ci-runner et les templates 9000/9100. Desactive
+# dans storage.cfg ; ne plus rien y poser.
+pve_vm_storage: pool1
+pve_template_storage: pool1
 pve_iso_storage: local
 
 # --- Compte administrateur cree sur toutes les VMs ------------------------

@@ -195,7 +195,9 @@ else
   ko "aucune sauvegarde applicative"
 fi
 
-if pvesm list pool2-backup 2>/dev/null | grep -q 'vzdump-qemu-140'; then
+# pool1-backup : le job vzdump y ecrit depuis que pool2 (disque unique) a ete
+# perdu le 2026-10-04.
+if pvesm list pool1-backup 2>/dev/null | grep -q 'vzdump-qemu-140'; then
   ok "instantane vzdump de la VM present"
 else
   ko "aucun vzdump de la VM 140"
