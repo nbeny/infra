@@ -19,6 +19,12 @@ spec:
       containers:
         - name: minio
           image: minio/minio:latest
+          # ⚠️ `:latest` implique `Always` : sans cette ligne, chaque redemarrage
+          # du pod retire l'image de Docker Hub. Or Docker Hub refuse
+          # desormais `minio/minio` (« pull access denied ... insufficient_scope »,
+          # constate le 2026-10-04 apres restauration de la VM) : le pod restait
+          # en ErrImagePull alors que l'image etait dans le cache du noeud.
+          imagePullPolicy: IfNotPresent
           # `command` REMPLACE l'entrypoint de l'image. Y mettre "server"
           # revenait a chercher un executable nomme `server`, qui n'existe
           # pas : "exec: \"server\": executable file not found in $PATH".
