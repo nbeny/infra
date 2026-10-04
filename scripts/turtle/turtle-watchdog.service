@@ -1,0 +1,6 @@
+[Unit]
+Description=Relance mangosd s'il est fige sans ecouter sur 8091
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/turtle-watchdog

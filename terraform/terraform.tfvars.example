@@ -132,6 +132,25 @@ vms = {
   #   tags        = ["prod"]
   #   description = "Host principal reconstruit depuis le template golden."
   # }
+
+  # --- Serveur de jeu Turtle WoW 1.17.2 -------------------------------------
+  # Clone du socle 9000 ; tout le reste est decrit dans docs/turtle-wow.md.
+  # `agent = false` pour la meme raison que la VM mail (voir plus bas).
+  #
+  # "wow-turtle" = {
+  #   profile         = "debian-base"
+  #   vm_id           = 150
+  #   ip              = "10.0.0.150"
+  #   cores           = 8
+  #   memory          = 32768
+  #   memory_floating = 8192
+  #   disk_size       = 40
+  #   datastore       = "pool1"
+  #   agent           = false
+  #   on_boot         = true
+  #   tags            = ["game"]
+  #   description     = "Turtle WoW 1.17.2 (mangosd/realmd natifs). turtle.urbanlink.fr"
+  # }
 }
 
 # ---------------------------------------------------------------------------

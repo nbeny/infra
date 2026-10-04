@@ -133,7 +133,8 @@
 ==============================================================================
 ## /ip/dhcp-server/lease/print
 ==============================================================================
-  (vide)
+  address=192.168.100.200 mac-address=0E:09:FB:84:4B:66 client-id=1:e:9:fb:84:4b:66 address-lists= server=dhcp-lan dhcp-option= last-seen=3m28s active-address=192.168.100.200 active-mac-address=0E:09:FB:84:4B:66 active-client-id=1:e:9:fb:84:4b:66 radius=false dynamic=true blocked=false disabled=false
+  address=192.168.100.199 mac-address=82:CC:7E:5B:91:04 client-id=1:82:cc:7e:5b:91:4 address-lists= server=dhcp-lan dhcp-option= last-seen=5m19s active-address=192.168.100.199 active-mac-address=82:CC:7E:5B:91:04 active-client-id=1:82:cc:7e:5b:91:4 radius=false dynamic=true blocked=false disabled=false
 
 ==============================================================================
 ## /ip/dhcp-client/print
@@ -175,13 +176,13 @@
 ==============================================================================
 ## /ip/firewall/nat/print
 ==============================================================================
-  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=41641 protocol=udp dst-address=192.168.1.50 in-interface=ether1 dst-port=52534 invalid=false dynamic=true disabled=false comment=upnp 192.168.100.50: tailscale-portmap
-  chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=41641 protocol=udp dst-address=192.168.1.50 in-interface=ether1 dst-port=32872 invalid=false dynamic=true disabled=false comment=upnp 192.168.100.50: tailscale-portmap
   chain=srcnat action=masquerade out-interface-list=WAN invalid=false dynamic=false comment=sortie Internet du lab
   chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=80 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=80 invalid=false dynamic=false comment=HTTP -> openresty du noeud
   chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=443 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=443 invalid=false dynamic=false comment=HTTPS -> openresty du noeud
   chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=22 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=22 invalid=false dynamic=false comment=SSH -> noeud
   chain=dstnat action=dst-nat to-addresses=192.168.100.50 to-ports=4242 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=4242 invalid=false dynamic=false comment=SSH VM 102
+  chain=dstnat action=dst-nat to-addresses=10.0.0.150 to-ports=3724 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=3724 invalid=false dynamic=false comment=Turtle WoW realmd -> VM 150
+  chain=dstnat action=dst-nat to-addresses=10.0.0.150 to-ports=8091 protocol=tcp dst-address=192.168.1.50 in-interface=ether1 dst-port=8091 invalid=false dynamic=false comment=Turtle WoW monde -> VM 150
 
 ==============================================================================
 ## /ip/firewall/mangle/print

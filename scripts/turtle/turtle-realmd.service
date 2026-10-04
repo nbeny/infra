@@ -1,0 +1,23 @@
+# /etc/systemd/system/turtle-realmd.service -- authentification (port 3724)
+[Unit]
+Description=Turtle WoW realmd (authentification)
+After=network-online.target mariadb.service
+Wants=network-online.target
+Requires=mariadb.service
+
+[Service]
+User=turtle
+Group=turtle
+WorkingDirectory=/opt/turtle/server/bin
+ExecStart=/opt/turtle/server/bin/realmd -c /opt/turtle/server/etc/realmd.conf
+Restart=always
+RestartSec=10
+# Durcissement : le code vient d'une fuite, il n'ecrit que dans ses logs.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/turtle/server/logs /opt/turtle/server/bin
+
+[Install]
+WantedBy=multi-user.target

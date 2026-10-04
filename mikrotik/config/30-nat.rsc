@@ -36,3 +36,16 @@ add chain=dstnat action=dst-nat protocol=tcp in-interface=ether1 \
 add chain=dstnat action=dst-nat protocol=tcp in-interface=ether1 \
     dst-address=192.168.1.50 dst-port=4242 to-addresses=192.168.100.50 to-ports=4242 \
     comment="SSH VM 102"
+
+# --- Turtle WoW (VM 150 wow-turtle) ------------------------------------------
+# TCP brut, que le proxy Cloudflare ne relaie pas : turtle.urbanlink.fr est en
+# DNS-only et designe directement l'IP de la maison. Cible = la VM, pas le
+# noeud -- la route statique 10.0.0.0/24 -> 192.168.100.50 fait le reste.
+#   3724 : realmd (authentification, liste des royaumes)
+#   8091 : mangosd (le monde ; c'est le port annonce dans tw_logon.realmlist)
+add chain=dstnat action=dst-nat protocol=tcp in-interface=ether1 \
+    dst-address=192.168.1.50 dst-port=3724 to-addresses=10.0.0.150 to-ports=3724 \
+    comment="Turtle WoW realmd -> VM 150"
+add chain=dstnat action=dst-nat protocol=tcp in-interface=ether1 \
+    dst-address=192.168.1.50 dst-port=8091 to-addresses=10.0.0.150 to-ports=8091 \
+    comment="Turtle WoW monde -> VM 150"

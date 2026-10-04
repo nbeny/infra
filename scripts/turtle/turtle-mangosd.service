@@ -1,0 +1,34 @@
+# /etc/systemd/system/turtle-mangosd.service -- le monde (port 8091)
+#
+# Restart=always et non on-failure : le redemarrage HEBDOMADAIRE du calcul
+# d honneur (AutoHonorRestart) sort en code 0. Sous Windows, la boucle du .bat
+# relancait ; ici c est systemd. Voir aussi turtle-watchdog.
+#
+# Console.Enable = 0 dans mangosd.conf est OBLIGATOIRE sous systemd : stdin y
+# est /dev/null, et le thread console de mangosd appelle World::StopNow des
+# qu'il lit une fin de fichier -- le serveur s'arreterait aussitot demarre.
+[Unit]
+Description=Turtle WoW mangosd (monde)
+After=network-online.target mariadb.service turtle-realmd.service
+Wants=network-online.target
+Requires=mariadb.service
+
+[Service]
+User=turtle
+Group=turtle
+WorkingDirectory=/opt/turtle/server/bin
+ExecStart=/opt/turtle/server/bin/mangosd -c /opt/turtle/server/etc/mangosd.conf
+Restart=always
+RestartSec=15
+# Chargement des grilles et des mmaps : le premier demarrage est long.
+TimeoutStartSec=300
+TimeoutStopSec=120
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/turtle/server/logs /opt/turtle/server/honor /opt/turtle/server/bin /opt/turtle/server/sql
+
+[Install]
+WantedBy=multi-user.target
