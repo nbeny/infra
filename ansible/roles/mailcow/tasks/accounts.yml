@@ -202,6 +202,40 @@
   # webmail, qui repond 403 a ses utilisateurs.
   notify: Redemarrer SOGo
 
+# La creation ne pose les quotas qu'une fois : relever `quota` dans les defaults
+# ne changeait rien sur un domaine existant, et Mailcow refusait alors la boite
+# suivante pour quota depasse. On compare en octets (unite de la lecture) et on
+# ne touche que les domaines qui different.
+- name: Aligner les quotas des domaines existants
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mailcow_http_port }}/api/v1/edit/domain"
+    method: POST
+    headers:
+      X-API-Key: "{{ mailcow_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      items: ["{{ item.name }}"]
+      attr:
+        quota: "{{ item.quota }}"
+        maxquota: "{{ item.maxquota }}"
+  loop: "{{ mailcow_domains_wanted }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    mailcow_domain_live: >-
+      {{ mailcow_domains.json | default([]) | selectattr('domain_name', 'equalto', item.name) | list | first | default({}) }}
+  when: >-
+    (mailcow_domain_live | length > 0)
+    and ((mailcow_domain_live.max_quota_for_domain | int) != (item.quota | int) * 1048576
+         or (mailcow_domain_live.max_quota_for_mbox | int) != (item.maxquota | int) * 1048576)
+  register: mailcow_domain_edited
+  changed_when: true
+  # Meme piege que la creation des boites : 200 meme en cas de refus.
+  failed_when: >-
+    mailcow_domain_edited.status | default(200) != 200
+    or (mailcow_domain_edited.json | default([]) | selectattr('type', 'in', ['danger', 'error']) | list | length > 0)
+
 # ---------------------------------------------------------------------------
 #  Boites et alias
 # ---------------------------------------------------------------------------

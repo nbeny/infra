@@ -69,7 +69,11 @@ mailcow_dkim_selector: dkim
 mailcow_domains_wanted:
   - name: urbanlink.fr
     description: "Courrier humain -- boites perso et adresses de service"
-    quota: 10240        # Mo par boite
+    # Vocabulaire de l'API Mailcow : `quota` = TOTAL du domaine, `maxquota` =
+    # plafond d'UNE boite. Releve de 10240 a 20480 le 2026-10-06 : les cinq
+    # premieres boites prenaient deja les 10240 Mo, et la VM a ~130 Go libres.
+    # Le domaine existant suit grace a « Aligner les quotas des domaines ».
+    quota: 20480
     maxquota: 10240
 
 # Champs optionnels par boite :
@@ -103,6 +107,11 @@ mailcow_mailboxes:
   # savoir qui usurpe le domaine.
   - { local_part: dmarc,   domain: urbanlink.fr, name: "Rapports DMARC",         quota: 1024 }
   - { local_part: tlsrpt,  domain: urbanlink.fr, name: "Rapports TLS",           quota: 1024 }
+  # Compte systeme « A decouvrir » de l'application (DISCOVER_ACCOUNT dans
+  # backTs/src/modules/discover/discover-account.service.ts) : sans boite, tout
+  # courrier adresse a ce compte (Kratos, notifications, comptes ouverts chez
+  # les sources de donnees) rebondissait.
+  - { local_part: decouvrir, domain: urbanlink.fr, name: "A decouvrir UrbanLink", quota: 1024 }
 
 # postmaster@ et abuse@ ne sont pas decoratifs : leur absence est un signal
 # negatif pour les grands fournisseurs, et abuse@ est l'adresse qu'un operateur

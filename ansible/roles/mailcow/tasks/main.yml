@@ -110,7 +110,14 @@
   ansible.builtin.include_tasks: certificates.yml
 
 - name: Creer le domaine, les boites, les alias et la cle DKIM
-  ansible.builtin.include_tasks: accounts.yml
+  ansible.builtin.include_tasks:
+    file: accounts.yml
+    # Meme piege que `theme` : sans `apply`, `--tags accounts` sauterait tout.
+    # Ce tag permet d'ajouter une boite sans rejouer clonage, `compose up -d`,
+    # certificats et DNS sur la messagerie en production.
+    apply:
+      tags: [accounts]
+  tags: [accounts]
 
 - name: Publier les enregistrements d'authentification
   ansible.builtin.include_tasks: dns.yml
