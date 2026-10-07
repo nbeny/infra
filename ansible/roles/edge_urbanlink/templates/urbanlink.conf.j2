@@ -24,8 +24,9 @@
 {% for svc in edge_urbanlink_services %}
 {% set upstream = svc.upstream | default(edge_urbanlink_gateway) %}
 {% set is_public = svc.public | default(false) %}
+{% set is_direct = is_public and (svc.direct | default(false)) %}
 
-# --- {{ svc.name }} [{{ 'PUBLIC ' if is_public else 'INTERNE' }}] {{ '-' * (57 - svc.name | length) }}
+# --- {{ svc.name }} [{{ ('DIRECT ' if is_direct else 'PUBLIC ') if is_public else 'INTERNE' }}] {{ '-' * (57 - svc.name | length) }}
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
@@ -36,7 +37,12 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-{% if is_public %}
+{% if is_direct %}
+    # `direct: true` : enregistrement en DNS-only, Cloudflare n'est PAS dans le
+    # chemin. Le filtre d'origine refuserait donc tout le monde ; il est omis
+    # pour ce seul nom. Restent le bouncer CrowdSec et la limite de debit de
+    # l'application. Raison dans defaults/main.yml (gros telechargements).
+{% elif is_public %}
 {% if edge_urbanlink_cloudflare_only %}
     # Ouvert a Internet, mais seulement par Cloudflare. `$uc_origin_allowed`
     # est calcule dans 45-cloudflare-origin.conf a partir de

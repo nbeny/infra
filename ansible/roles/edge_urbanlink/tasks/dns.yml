@@ -74,27 +74,39 @@
 # que `www.urbanlink.fr` est un CNAME vers l'apex. Les deux doivent basculer en
 # proxy, mais un CNAME ne doit surtout pas voir son type ni sa cible reecrits :
 # on ne touche alors qu'au drapeau `proxied`.
+- name: Lister les noms publics et leur mode (proxy ou direct)
+  ansible.builtin.set_fact:
+    edge_cf_public_hosts: >-
+      {{ edge_cf_public_hosts | default([]) + [{
+           'host': item.1,
+           'proxied': not (item.0.direct | default(false))
+         }] }}
+  loop: >-
+    {{ edge_urbanlink_services
+       | selectattr('public', 'defined') | selectattr('public') | list
+       | subelements('hosts') }}
+  loop_control:
+    label: "{{ item.1 }}"
+
 - name: Apparier chaque nom public a son enregistrement eventuel
   ansible.builtin.set_fact:
     edge_cf_plan: >-
       {{ edge_cf_plan | default([]) + [{
-           'name': item,
+           'name': item.host,
+           'proxied': item.proxied,
            'existing': (edge_cf_records.json.result
-                        | selectattr('name', 'equalto', item)
+                        | selectattr('name', 'equalto', item.host)
                         | selectattr('type', 'in', ['A', 'CNAME'])
                         | list | first | default({}))
          }] }}
-  loop: >-
-    {{ edge_urbanlink_services
-       | selectattr('public', 'defined') | selectattr('public')
-       | map(attribute='hosts') | flatten | list }}
+  loop: "{{ edge_cf_public_hosts }}"
   loop_control:
-    label: "{{ item }}"
+    label: "{{ item.host }}"
 
 - name: Recapitulatif du plan de publication
   ansible.builtin.debug:
     msg: >-
-      {{ item.name }} :
+      {{ item.name }} ({{ 'proxy' if item.proxied else 'DIRECT' }}) :
       {{ 'CREATION A -> ' ~ edge_urbanlink_public_ip
          if not item.existing
          else 'MISE A JOUR ' ~ item.existing.type
@@ -112,15 +124,16 @@
     headers:
       Authorization: "Bearer {{ edge_cf_token }}"
     body_format: json
-    body:
-      type: A
-      name: "{{ item.name }}"
-      content: "{{ edge_urbanlink_public_ip }}"
-      # `proxied: true` est le nuage orange. C'est lui qui met Cloudflare dans
-      # le chemin, donc qui rend vrai le filtre d'origine de nginx.
-      proxied: true
-      ttl: 1                      # 1 = automatique, impose par le mode proxy
-      comment: "public -- ansible role edge_urbanlink"
+    # `proxied: true` est le nuage orange. C'est lui qui met Cloudflare dans
+    # le chemin, donc qui rend vrai le filtre d'origine de nginx. Un nom
+    # `direct: true` est cree en nuage gris. Le corps est un seul dictionnaire
+    # Jinja : `proxied: "{{ ... }}"` arriverait en CHAINE « True » selon la
+    # version d'ansible-core, et l'API le refuserait.
+    body: >-
+      {{ {'type': 'A', 'name': item.name, 'content': edge_urbanlink_public_ip,
+          'proxied': item.proxied, 'ttl': 1,
+          'comment': ('public' if item.proxied else 'public DIRECT (DNS-only)')
+                     ~ ' -- ansible role edge_urbanlink'} }}
   loop: "{{ edge_cf_plan | rejectattr('existing.id', 'defined') | list }}"
   loop_control:
     label: "{{ item.name }}"
@@ -139,14 +152,14 @@
       Authorization: "Bearer {{ edge_cf_token }}"
     body_format: json
     body: >-
-      {{ {'proxied': true}
+      {{ {'proxied': item.proxied}
          if item.existing.type == 'CNAME'
-         else {'content': edge_urbanlink_public_ip, 'proxied': true} }}
+         else {'content': edge_urbanlink_public_ip, 'proxied': item.proxied} }}
   loop: "{{ edge_cf_plan | selectattr('existing.id', 'defined') | list }}"
   loop_control:
     label: "{{ item.name }}"
   when: >-
-    not item.existing.proxied
+    item.existing.proxied != item.proxied
     or (item.existing.type == 'A'
         and item.existing.content != edge_urbanlink_public_ip)
   no_log: true

@@ -121,6 +121,24 @@ Côté client : `realmlist.wtf` → `set realmlist turtle.urbanlink.fr`.
 
 La Freebox fait la boucle NAT : depuis le LAN, l'IP publique fonctionne aussi.
 
+## Site wow.urbanlink.fr (inscription, téléchargement du client)
+
+Dépôt `nbeny/wow-urbanlink` (Next.js). Tourne sur cette VM :
+`wow-site.service`, utilisateur `wowsite`, `/srv/wow-site/current`, port 3000.
+
+- **Comptes** : le site écrit `tw_logon.account` comme `turtle-compte`
+  (rang 0 uniquement), avec l'utilisateur MariaDB `wowsite` limité par
+  colonnes : lecture de `id, username, sha_pass_hash, banned, active`,
+  insertion, mise à jour de `sha_pass_hash, v, s` ; `online` de
+  `tw_char.characters` pour le compteur. Ni DELETE ni écriture du rang.
+- **Client** : `/srv/wow-site/client/TurtleWoW-UrbanLink.zip` (+ `.sha256`),
+  servi aux seuls comptes connectés. Fabrication et dépôt : README du dépôt.
+- **Exposition** : service `wow` de `edge_urbanlink`, en `direct: true`
+  (DNS-only, sans filtre Cloudflare : 9 Go ne passent pas par le CDN gratuit).
+  `nftables.conf` n'ouvre 3000 qu'à `10.0.0.1`.
+- Secrets : `/etc/wow-site/env` (640 root:wowsite), générés par
+  `deploy/install-vm.sh`, jamais versionnés.
+
 ## Réseau
 
 - MikroTik : deux `dstnat` dans `mikrotik/config/30-nat.rsc` (3724, 8091 →

@@ -126,6 +126,24 @@ edge_urbanlink_services:
     hosts: ["s3.urbanlink.fr"]
     public: true
     max_body: 0                 # 0 = illimite, pour les envois objet
+  # Site du serveur Turtle WoW (VM 150) : inscription et telechargement du
+  # client. Depot `wow-urbanlink`, servi par Next.js sur 10.0.0.150:3000
+  # (le pare-feu de la VM n'ouvre ce port qu'a 10.0.0.1, ce noeud).
+  #
+  # `direct: true` = enregistrement en DNS-ONLY (nuage gris), donc PAS de
+  # filtre d'origine Cloudflare pour ce nom. Raison : le site sert une archive
+  # de ~9 Go. Les conditions du CDN Cloudflare gratuit interdisent de lui faire
+  # relayer de gros fichiers hors de ses produits dedies, et une coupure de
+  # proxy au milieu d'un tel telechargement serait muette. L'IP de la maison
+  # est de toute facon deja publique pour ce serveur (turtle.urbanlink.fr,
+  # DNS-only, ports du jeu). Restent : CrowdSec sur ce noeud, la limite de
+  # debit de l'application, et le telechargement reserve aux comptes connectes.
+  - name: wow
+    hosts: ["wow.urbanlink.fr"]
+    public: true
+    direct: true
+    upstream: "http://10.0.0.150:3000"
+    read_timeout: 300s
   # --- consoles d'administration : LAN UNIQUEMENT ---------------------------
   # Aucune n'a `public: true`, et c'est deliberé : une console d'administration
   # exposee sur Internet, meme derriere un mot de passe, est la surface
