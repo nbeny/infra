@@ -136,7 +136,15 @@ Dépôt `nbeny/wow-urbanlink` (Next.js). Tourne sur cette VM :
 - **Exposition** : service `wow` de `edge_urbanlink`, en `direct: true`
   (DNS-only, sans filtre Cloudflare : 9 Go ne passent pas par le CDN gratuit).
   `nftables.conf` n'ouvre 3000 qu'à `10.0.0.1`.
-- Secrets : `/etc/wow-site/env` (640 root:wowsite), générés par
+- **Boutique** (points gagnés en jeu, jamais achetés) : base `wow_site`,
+  livreur `wow-shop.timer` chaque minute sous l'utilisateur et le compte
+  MariaDB `wowshop`, seul autorisé à écrire dans le jeu (`level`/`xp` de
+  `characters`, `character_spell`, `character_skills`, INSERT dans
+  `pending_commands`). Détail : README de `wow-urbanlink`.
+- ⚠️ `tw_char.characters`, `character_skills`, `character_spell` sont en
+  **MyISAM** : un `ROLLBACK` ne les annule pas.
+- Secrets : `/etc/wow-site/env` (640 root:wowsite) et `shop.env`
+  (640 root:wowshop), générés par
   `deploy/install-vm.sh`, jamais versionnés.
 
 ## Réseau
