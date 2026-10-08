@@ -370,6 +370,44 @@
         state: absent
 
     # ---------------------------------------------------------------------
+    #  Relais de courrier : mail.urbanlink.fr resolu vers la VM Mailcow
+    # ---------------------------------------------------------------------
+    # Backend et Kratos envoient par Mailcow sur mail.urbanlink.fr:465. Le nom
+    # public resout vers le VPS, qui n'expose que le port 25 : il faut donc,
+    # DANS le cluster, le faire pointer vers la VM (le certificat reste valide).
+    #
+    # ⚠️ `hostAliases` (deployments backend et kratos) ne suffit PAS : nodemailer
+    # resout par `dns.resolve4`, qui interroge le DNS sans lire /etc/hosts. Mesure
+    # le 2026-10-08 : ECONNRESET sur le VPS depuis le backend, alors que Kratos
+    # (Go, qui lit /etc/hosts) passait. D'ou cette entree dans CoreDNS.
+    #
+    #   ansible-playbook playbooks/31-urbanlink-deploy.yml --tags coredns
+    - name: Resoudre mail.urbanlink.fr vers Mailcow dans CoreDNS
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          export KUBECONFIG={{ urbanlink_kubeconfig }}
+          kubectl -n kube-system get cm coredns -o jsonpath='{.data.Corefile}' > /tmp/Corefile
+          if grep -q 'mail.urbanlink.fr' /tmp/Corefile; then echo inchange; exit 0; fi
+          python3 - <<'PY'
+          p = '/tmp/Corefile'
+          s = open(p).read()
+          bloc = ("    hosts {\n"
+                  "       {{ mail_relay_ip | default('10.0.0.140') }} mail.urbanlink.fr\n"
+                  "       fallthrough\n"
+                  "    }\n")
+          assert '    prometheus :9153\n' in s
+          open(p, 'w').write(s.replace('    prometheus :9153\n', bloc + '    prometheus :9153\n', 1))
+          PY
+          kubectl -n kube-system create cm coredns --from-file=Corefile=/tmp/Corefile \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo modifie
+        executable: /bin/bash
+      register: ul_coredns
+      changed_when: "'modifie' in ul_coredns.stdout"
+      tags: [coredns]
+
+    # ---------------------------------------------------------------------
     #  TLS de la passerelle
     # ---------------------------------------------------------------------
     # Traefik obtenait ses certificats seul via ACME. Istio ne fait pas d'ACME :

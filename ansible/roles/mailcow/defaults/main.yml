@@ -40,9 +40,22 @@ mailcow_https_port: 8443
 # d'attente qui gonfle.
 mailcow_ipv4_network: "{{ mail_docker_net_prefix }}"
 
-# ClamAV couterait ~1,5 Go de RAM pour un volume de courrier personnel, alors
-# que Rspamd fait deja le gros du filtrage.
-mailcow_skip_clamd: "y"
+# ClamAV ACTIVE depuis le 2026-10-08. Il etait coupe pour ~1,5 Go de RAM quand
+# l'hote etait surengage ; l'hote a depuis 314 Go et la VM ~5,7 Go libres. Coupe,
+# il laissait le module antivirus de Rspamd en echec sur chaque message
+# (CLAM_VIRUS_FAIL), et contact@ recoit de n'importe qui. Voir tasks/antispam.yml.
+mailcow_skip_clamd: "n"
+
+# Seuils d'action de Rspamd (score du message). Par rapport aux defauts Mailcow
+# (7 / 8 / 15), on classe en Indesirables plus tot, comme Gmail et Outlook :
+# un indesirable range dans Junk ne coute rien, un rejet est definitif -- d'ou
+# le seuil de rejet laisse a 15. Les messages au-dessus de `add_header` sont
+# deplaces dans Junk par le sieve global de Mailcow ; deplacer un message dans
+# ou hors de Junk entraine le filtre bayesien.
+mailcow_rspamd_actions:
+  greylist: 5
+  add_header: 6
+  reject: 15
 
 # Certificats fournis par le noeud (wildcard *.urbanlink.fr, DNS-01
 # Cloudflare). Un ACME local echouerait de toute facon : le port 80 du nom
@@ -87,8 +100,8 @@ mailcow_mailboxes:
   # La boite principale. C'est deja l'identite de l'utilisateur dans le lab
   # (CONSOLE_ADMIN_EMAIL).
   - { local_part: alesio,  domain: urbanlink.fr, name: "Nicolas",                quota: 5120 }
-  # Adresse publique, celle que Kratos utilise deja chez Infomaniak : la
-  # recreer ici evite de perdre l'adresse que les utilisateurs connaissent.
+  # Adresse publique, et expediteur de l'application (backend + Kratos), qui
+  # s'authentifie par un mot de passe d'application limite au SMTP.
   - { local_part: contact, domain: urbanlink.fr, name: "Contact UrbanConnect",   quota: 2048 }
   # Prospection de Nicolas (nbeny-sales). Mot de passe SEPARE de celui des
   # consoles : la revoquer ne touche donc pas Grafana, pgAdmin ni les autres
@@ -127,10 +140,13 @@ mailcow_aliases_wanted:
 mailcow_dns_zone: urbanlink.fr
 mailcow_cloudflare_credentials: /root/.secrets/cloudflare.ini
 
-# SPF de transition : les deux origines coexistent tant qu'Infomaniak sert.
+# Seule origine autorisee : l'IP du VPS, par ou sort tout le courrier de Mailcow.
+# L'`include:spf.infomaniak.ch` de la transition est tombe le 2026-10-08, quand
+# le backend et Kratos sont passes d'Infomaniak a Mailcow -- les rapports DMARC
+# ne montraient plus d'autre origine legitime.
 # `-all` (et non `~all`) parce qu'un SPF permissif n'apporte rien : il indique
 # aux recepteurs de ne rien conclure d'un echec, ce qui affaiblit DMARC.
-mailcow_spf_content: "v=spf1 ip4:147.79.102.17 include:spf.infomaniak.ch -all"
+mailcow_spf_content: "v=spf1 ip4:147.79.102.17 -all"
 
 # --- Observabilite ---------------------------------------------------------
 mailcow_sending_ip: "{{ mail_tunnel_public_ip | default('147.79.102.17') }}"

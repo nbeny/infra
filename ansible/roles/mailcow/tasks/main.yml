@@ -120,8 +120,20 @@
   tags: [accounts]
 
 - name: Publier les enregistrements d'authentification
-  ansible.builtin.include_tasks: dns.yml
+  ansible.builtin.include_tasks:
+    file: dns.yml
+    # Meme piege que `theme` : sans `apply`, `--tags dns` affichait un succes
+    # sans rien publier (constate le 2026-10-08 en retirant Infomaniak du SPF).
+    apply:
+      tags: [dns]
   tags: [dns]
+
+- name: Filtrer le courrier entrant (antivirus, seuils d'indesirables)
+  ansible.builtin.include_tasks:
+    file: antispam.yml
+    apply:
+      tags: [antispam]
+  tags: [antispam]
 
 - name: Poser l'observabilite
   ansible.builtin.include_tasks:

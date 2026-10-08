@@ -1,0 +1,51 @@
+---
+# ============================================================================
+#  Filtrage du courrier entrant : antivirus et seuils d'indesirables
+# ----------------------------------------------------------------------------
+#  Jouable seul, sans rejouer clonage, certificats ni DNS :
+#
+#      ansible-playbook playbooks/42-mailcow.yml --tags antispam -l mail
+#
+#  Les seuils vont dans override.d/ et NON dans local.d/actions.conf, qui est
+#  un fichier SUIVI par le depot Mailcow : le modifier ferait echouer, ou
+#  annulerait, la prochaine mise a jour (update.sh).
+# ============================================================================
+
+# ClamAV etait coupe pour economiser ~1,5 Go de RAM, mais Rspamd gardait son
+# module antivirus actif : chaque message portait CLAM_VIRUS_FAIL (« failed to
+# scan and retransmits exceed ») -- aucune analyse, et une erreur par message.
+- name: Activer ou couper ClamAV selon mailcow_skip_clamd
+  ansible.builtin.lineinfile:
+    path: "{{ mailcow_dir }}/mailcow.conf"
+    regexp: "^SKIP_CLAMD="
+    line: "SKIP_CLAMD={{ mailcow_skip_clamd }}"
+    mode: "0600"
+  register: mailcow_clamd_conf
+
+# `up -d` du seul service : il relit mailcow.conf, sans toucher au reste de la
+# pile en production.
+- name: Appliquer le choix ClamAV
+  ansible.builtin.command:
+    cmd: docker compose up -d clamd-mailcow
+    chdir: "{{ mailcow_dir }}"
+  when: mailcow_clamd_conf is changed
+  changed_when: true
+
+- name: Poser les seuils d'action de Rspamd
+  ansible.builtin.copy:
+    dest: "{{ mailcow_dir }}/data/conf/rspamd/override.d/actions.conf"
+    mode: "0644"
+    content: |
+      # Gere par Ansible (role mailcow, tasks/antispam.yml) -- ne pas editer ici.
+      # Defauts Mailcow : greylist 7, add_header 8, reject 15.
+      greylist = {{ mailcow_rspamd_actions.greylist }};
+      add_header = {{ mailcow_rspamd_actions.add_header }};
+      reject = {{ mailcow_rspamd_actions.reject }};
+  register: mailcow_rspamd_actions_file
+
+- name: Recharger Rspamd
+  ansible.builtin.command:
+    cmd: docker compose restart rspamd-mailcow
+    chdir: "{{ mailcow_dir }}"
+  when: mailcow_rspamd_actions_file is changed
+  changed_when: true
