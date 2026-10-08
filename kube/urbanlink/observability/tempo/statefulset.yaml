@@ -33,13 +33,23 @@ spec:
               readOnly: true
             - name: tempo-data
               mountPath: /var/tempo
+          env:
+            # Le tas Go grossit jusqu'a la limite du cgroup avant que le
+            # ramasse-miettes ne se presse : sans plafond logiciel, c'est le
+            # noyau qui tranche (exit 137). ~85 % de la limite ci-dessous.
+            - name: GOMEMLIMIT
+              value: "1300MiB"
           resources:
+            # 512Mi ne tenait pas : 824 redemarrages en 36 jours, tous des
+            # OOM du cgroup (anon-rss ~519 Mo). Le compacteur charge en
+            # memoire des traces geantes (« max size of trace exceeded »,
+            # 3439 spans jetes sur une seule trace sans racine).
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 1536Mi
           livenessProbe:
             httpGet:
               path: /ready
