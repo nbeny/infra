@@ -90,6 +90,7 @@ variable "extra_disk" {
     size      = number
     datastore = optional(string, null)
     interface = optional(string, "scsi1")
+    ssd       = optional(bool, null) # null = var.disk_ssd
   })
   default     = null
   description = <<-EOT

@@ -81,12 +81,12 @@ variable "vms" {
   EOT
 
   type = map(object({
-    profile     = string
-    vm_id       = number
-    ip          = string
-    cores       = optional(number, 2)
-    sockets     = optional(number, 1)
-    memory      = optional(number, 4096)
+    profile = string
+    vm_id   = number
+    ip      = string
+    cores   = optional(number, 2)
+    sockets = optional(number, 1)
+    memory  = optional(number, 4096)
     # 0 = pas de ballooning. Une valeur < memory laisse l'hote reprendre la
     # memoire inutilisee de la VM.
     memory_floating = optional(number, 0)
@@ -98,16 +98,17 @@ variable "vms" {
       size      = number
       datastore = optional(string, null)
       interface = optional(string, "scsi1")
+      ssd       = optional(bool, null) # null = celui de la VM (disk_ssd)
     }), null)
-    datastore   = optional(string, null)
-    on_boot     = optional(bool, true)
-    started     = optional(bool, true)
+    datastore = optional(string, null)
+    on_boot   = optional(bool, true)
+    started   = optional(bool, true)
     # Rang de demarrage au boot du noeud. Laisser `null` place la VM apres
     # toutes celles qui ont un rang -- ce qui est le bon defaut pour tout ce
     # qui n'est pas critique.
     startup_order    = optional(number, null)
     startup_up_delay = optional(number, null)
-    firewall    = optional(bool, false)
+    firewall         = optional(bool, false)
     # `false` obligatoire pour le profil debian-base : le socle 9000 n'a pas
     # qemu-guest-agent, et l'apply echouerait apres cinq minutes d'attente.
     # A repasser a `true` une fois le role `common` joue sur la VM.

@@ -38,6 +38,24 @@ resource "proxmox_virtual_environment_vm" "this" {
   # Sans cela, Terraform refuse de detruire une VM allumee.
   stop_on_destroy = true
 
+  # JAMAIS de redemarrage decide par le fournisseur. Par defaut il relance la
+  # VM des qu'un changement l'exige (ballon, drapeau de disque...) -- pour la
+  # VM 111, c'est tout le site coupe au moment ou l'apply se termine. Un
+  # changement de materiel reste donc EN ATTENTE cote Proxmox (`qm config
+  # --current` vs `qm config`) jusqu'a un `qm shutdown` / `qm start` choisi.
+  reboot_after_update = false
+
+  # `clone` ne sert qu'a la CREATION : apres coup, la VM ne garde aucun lien
+  # avec son template (clone complet). Le fournisseur marque pourtant toute
+  # difference dans ce bloc « forces replacement ». Mesure le 2026-10-09 : le
+  # disque de la VM 111 avait ete deplace de pool2 vers pool1 hors Terraform,
+  # l'etat retenait `clone.datastore_id = pool2`, et le plan proposait de
+  # DETRUIRE la production pour la recloner -- quel que soit le changement
+  # demande. L'emplacement reel des disques est porte par les blocs `disk`.
+  lifecycle {
+    ignore_changes = [clone]
+  }
+
   # Cloner un gros disque prend du temps : le defaut de 30 min ne suffit pas
   # pour une VM de plusieurs centaines de Gio sur ZFS.
   timeout_clone  = 3600
@@ -101,7 +119,7 @@ resource "proxmox_virtual_environment_vm" "this" {
     # jusqu'au noyau invite. Voir `variable "disk_ssd"` : ce drapeau valait
     # `true` en dur sur un noeud 100 % plateaux, et a fige un deploiement de
     # production 25 minutes le 2026-09-16.
-    ssd          = var.disk_ssd
+    ssd = var.disk_ssd
   }
 
   # Second disque optionnel (voir var.extra_disk). Bloc dynamique : une VM qui
@@ -114,8 +132,10 @@ resource "proxmox_virtual_environment_vm" "this" {
       size         = disk.value.size
       iothread     = true
       discard      = "on"
-      # Meme drapeau, meme raison : voir le disque systeme ci-dessus.
-      ssd          = var.disk_ssd
+      # Meme drapeau, meme raison : voir le disque systeme ci-dessus. Le second
+      # disque peut vivre sur un AUTRE stockage (etcd sur le SSD de local-lvm) :
+      # sa verite materielle se declare donc a part, `extra_disk.ssd`.
+      ssd = coalesce(disk.value.ssd, var.disk_ssd)
     }
   }
 
@@ -148,6 +168,12 @@ resource "proxmox_virtual_environment_vm" "this" {
   initialization {
     datastore_id = var.datastore_id
     interface    = var.cloud_init_interface
+    # Explicite, pas laisse au defaut : Proxmox derive l'instance-id cloud-init
+    # d'un condensat de cette configuration. Un `ciupgrade` qui bascule change
+    # l'instance-id, et au boot suivant cloud-init se croit sur une machine
+    # neuve -- cles d'hote SSH regenerees, mise a niveau des paquets (kubelet
+    # compris) sur un noeud de production.
+    upgrade = false
 
     ip_config {
       ipv4 {

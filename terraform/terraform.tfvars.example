@@ -60,10 +60,12 @@ vms = {
   # volumes une fois tous les composants demarres.
   #
   # BUDGET MEMOIRE DU NOEUD -- 110 Go utilisables au total.
+  # (PERIME : le noeud porte 314 Go depuis, 157 libres le 2026-10-09 -- le
+  # decompte ci-dessous reste vrai VM par VM, plus la conclusion.)
   # ATTENTION : le decompte precedent OUBLIAIT les deux VMs qui tournent
   # reellement a cote, et comptait deux VMs de test qui sont eteintes. Le vrai:
   #
-  #   urbanlink   96 Go   balloon 0  -- ne rend RIEN
+  #   urbanlink   96 Go   balloon = memory -- ne rend RIEN (statistiques seules)
   #   ci-runner   12 Go   balloon 4  -- VM MANUELLE, absente de cet etat
   #   mail         8 Go   balloon 4
   #   ARC ZFS      4 Go              -- plafonne dans /etc/modprobe.d/zfs.conf
@@ -93,6 +95,14 @@ vms = {
     cores       = 12
     sockets     = 2     # 24 vCPU sur les 32 threads du noeud
     memory      = 98304 # 96 Go
+    # Ballon ACTIVE mais jamais gonfle : plancher = allocation. La VM garde ses
+    # 96 Go (kubelet calcule ses seuils d'eviction sur le total vu au boot),
+    # mais le pilote virtio_balloon remonte enfin a Proxmox la memoire vue de
+    # l'interieur. Sans lui (balloon 0), l'interface affichait le RSS de QEMU
+    # -- cache disque compris, jamais rendu -- soit « 100,21 % » pour 20 Go
+    # reellement utilises et 76 Go disponibles (mesure 2026-10-09).
+    # Ajouter le peripherique exige un ARRET/DEMARRAGE complet de la VM.
+    memory_floating = 98304
     disk_size   = 700
     # etcd SUR SSD. Le disque systeme vit sur pool2 = UN SEUL Hitachi 3 To a
     # 7200 tr/min, et etcd fsync a chaque ecriture. Mesure sur 12 jours :
@@ -107,6 +117,7 @@ vms = {
     extra_disk = {
       size      = 32
       datastore = "local-lvm"
+      ssd       = true # le SEUL vrai SSD du noeud ; scsi0 (pool1) reste a false
     }
     on_boot     = true
     tags        = ["app", "urbanlink"]
