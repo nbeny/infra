@@ -332,13 +332,13 @@ configMapGenerator:
 images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend
-  newTag: sha-a3a54ac0
+  newTag: sha-49d3c8ec
 - name: urbanconnect-frontend
   newName: 10.0.0.130:5000/urbanconnect-frontend
-  newTag: sha-a3a54ac0
+  newTag: sha-49d3c8ec
 - name: urbanconnect-opencode
   newName: 10.0.0.130:5000/urbanconnect-opencode
-  newTag: sha-a3a54ac0
+  newTag: sha-49d3c8ec
 - name: urbanconnect-temporal-worker
   newName: 10.0.0.130:5000/urbanconnect-temporal-worker
-  newTag: sha-a3a54ac0
+  newTag: sha-49d3c8ec
