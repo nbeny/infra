@@ -15,6 +15,13 @@ spec:
       labels:
         app: kratos
     spec:
+      # ⚠️ mail.urbanlink.fr resout publiquement vers le VPS, qui n'expose que le
+      # port 25 : la soumission (465) n'y est PAS ouverte. Le pod joint donc
+      # Mailcow directement sur le reseau des VMs ; le nom reste celui du
+      # certificat, la verification TLS tient. Voir secrets.env (SMTP).
+      hostAliases:
+        - ip: "10.0.0.140"
+          hostnames: ["mail.urbanlink.fr"]
       containers:
         - name: kratos
           image: oryd/kratos:latest
