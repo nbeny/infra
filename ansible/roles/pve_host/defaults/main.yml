@@ -58,3 +58,9 @@ pve_urbanlink_move_mail_backup: true
 # quand pve_manage_network=true.
 pve_uplink_interface: nic3
 pve_unused_interfaces: [nic0, nic1, nic2]
+
+# Faire afficher par Proxmox la memoire UTILISEE des VMs (MemAvailable du
+# guest) au lieu de `total - free`, qui compte le cache disque : urbanlink
+# affichait 85 Go pour 17,7 reellement utilises. Patch de qemu-server, rejoue
+# apres chaque mise a jour du paquet -- voir files/pve-memoire-reelle.sh.
+pve_guest_mem_available: true

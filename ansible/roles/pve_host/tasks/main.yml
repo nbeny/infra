@@ -56,6 +56,11 @@
   when: pve_urbanlink_backup | bool
   tags: [sauvegarde]
 
+- name: Afficher la memoire reelle des VMs (hors cache disque)
+  ansible.builtin.import_tasks: memoire_reelle.yml
+  when: pve_guest_mem_available | bool
+  tags: [memoire]
+
 - name: Mettre a jour le noeud
   ansible.builtin.import_tasks: upgrade.yml
   when: pve_do_upgrade | bool

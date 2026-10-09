@@ -1,0 +1,30 @@
+---
+# Le script fait tout le travail (patch idempotent, controle de compilation,
+# restauration en cas d'echec, relance des services) : Ansible le depose, pose
+# le hook apt qui le rejoue apres chaque mise a jour de qemu-server, et le
+# lance. Une seule implementation, que l'on passe par Ansible ou par apt.
+
+- name: Deposer le script de memoire reelle
+  ansible.builtin.copy:
+    src: pve-memoire-reelle.sh
+    dest: /usr/local/sbin/pve-memoire-reelle
+    owner: root
+    group: root
+    mode: "0755"
+
+# Sans ce hook, la premiere mise a jour de qemu-server remplace
+# QemuServer.pm et l'affichage repasse silencieusement a `total - free`.
+- name: Rejouer le patch apres chaque mise a jour de paquets
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99-pve-memoire-reelle
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Gere par Ansible (role pve_host) -- cf. /usr/local/sbin/pve-memoire-reelle
+      DPkg::Post-Invoke { "/usr/local/sbin/pve-memoire-reelle >/dev/null 2>&1 || true"; };
+
+- name: Appliquer le patch
+  ansible.builtin.command: /usr/local/sbin/pve-memoire-reelle
+  register: pve_mem_patch
+  changed_when: "'applique' in pve_mem_patch.stdout and 'deja' not in pve_mem_patch.stdout"
