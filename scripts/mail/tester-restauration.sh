@@ -8,11 +8,11 @@
 #  PROCEDURE COMPLETE
 #
 #   1. Choisir une sauvegarde :
-#        pvesm list pool2-backup | grep vzdump-qemu-140
+#        pvesm list pool1-backup | grep vzdump-qemu-140
 #
 #   2. La restaurer sous un ID LIBRE. `--unique` regenere les adresses MAC :
 #      sans cela, deux cartes identiques se disputeraient le pont.
-#        qmrestore pool2-backup:backup/vzdump-qemu-140-<date>.vma.zst 141 #          --storage pool2 --unique 1
+#        qmrestore pool1-backup:backup/vzdump-qemu-140-<date>.vma.zst 141 #          --storage pool1 --unique 1
 #
 #   3. ISOLER AVANT DE DEMARRER. C'est l'etape a ne pas manquer : la copie
 #      porte la MEME cle privee WireGuard que la production. Si elle montait

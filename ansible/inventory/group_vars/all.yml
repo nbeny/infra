@@ -37,8 +37,10 @@ mail_docker_net_prefix: "172.22.1"
 # pool1 : raidz1 de 3 disques, ~4,4 To libres -> cible des VMs et des templates
 # ⚠️ pool2 : UN SEUL disque, sans redondance. Devenu inimportable apres la
 # coupure de courant du 2026-10-04 (`can't open objset ..., error 5`), il a
-# emporte urbanlink, mail, ci-runner et les templates 9000/9100. Desactive
-# dans storage.cfg ; ne plus rien y poser.
+# emporte urbanlink, mail, ci-runner et les templates 9000/9100. DETRUIT le
+# 2026-10-09 (`zpool destroy`, entrees pool2 / pool2-backup retirees de
+# storage.cfg) apres sauvetage sur pool1 des disques de 120/190 et des
+# templates 9001/9100/9101. Le disque physique (sde, Hitachi 3 To) est mort.
 pve_vm_storage: pool1
 pve_template_storage: pool1
 pve_iso_storage: local
