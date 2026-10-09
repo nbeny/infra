@@ -301,6 +301,11 @@ configMapGenerator:
   - config/prod/observability/grafana-dashboards/05-maillage-et-chaine.json
   name: grafana-dashboards
   options:
+    # 239 Ko de JSON : en client-side apply, l'annotation last-applied depasse
+    # la limite de 256 Kio et la synchro Argo ENTIERE echoue (constate le
+    # 2026-10-08). L'apply cote serveur n'ecrit pas cette annotation.
+    annotations:
+      argocd.argoproj.io/sync-options: ServerSideApply=true
     labels:
       grafana_dashboard: "1"
 - files:
