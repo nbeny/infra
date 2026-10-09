@@ -8,6 +8,11 @@
 k8s_apiserver_advertise_address: 10.0.0.111
 k8s_single_node: true
 
+# etcd sur le SSD du noeud : le disque `extra_disk` (scsi1, local-lvm) de
+# terraform/lab.auto.tfvars. Deja formate et monte en prod (LABEL=etcd) : le
+# role ne fait que verifier le montage.
+k8s_etcd_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+
 # --- Service mesh ---------------------------------------------------------
 # Istio n'est actif QUE sur cette VM : le cluster de test n'a pas de charge
 # reelle a mailler, et istiod + ztunnel y couteraient de la memoire pour rien.

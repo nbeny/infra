@@ -16,6 +16,12 @@
 mailcow_dir: /opt/mailcow-dockerized
 mailcow_repo: https://github.com/mailcow/mailcow-dockerized.git
 mailcow_branch: master
+# Commit EXACT en prod (releve le 2026-10-09, master du 2026-08-18). Sans lui,
+# une reconstruction clonerait le master du jour -- autres images, autres
+# migrations que ce qui tourne. Vide = tete de mailcow_branch. Apres un
+# ./update.sh, reporter ici le nouveau commit (`git -C /opt/mailcow-dockerized
+# rev-parse HEAD`).
+mailcow_commit: 02552ffefdf0869f988edf4a7e03822e8b467b34
 
 # Identite SMTP : ce nom est annonce en HELO et doit correspondre au PTR de
 # 147.79.102.17. Il resout PUBLIQUEMENT vers le VPS.

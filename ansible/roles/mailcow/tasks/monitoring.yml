@@ -101,6 +101,7 @@
   delay: 5
   until: mailcow_metrics is succeeded
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Exiger une sonde en bonne sante
   ansible.builtin.assert:

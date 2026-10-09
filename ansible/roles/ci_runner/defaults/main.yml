@@ -1,0 +1,24 @@
+---
+# Socle de la VM ci-runner, hors Docker (role docker), registre (registry) et
+# runners (github_runners). Releve sur la VM le 2026-10-09.
+
+ci_runner_packages:
+  - qemu-guest-agent   # fsfreeze de vzdump ; `agent = true` dans lab.auto.tfvars
+  - git
+  - curl
+  - vim
+  - screen
+  - socat
+  - tcpdump
+  - traceroute
+
+# Filet sous les builds paralleles du job `images` : 8 Go, comme en prod.
+ci_runner_swapfile: /swapfile
+ci_runner_swap_size_mb: 8192
+
+# Purge hebdomadaire des images Docker locales. ABSENTE de la prod au
+# 2026-10-09 (le cache garde 3 a 7 Go par tag, disque a 46 %), donc
+# desactivee par defaut : l'activer est un choix, pas une reprise de l'existant.
+ci_runner_docker_prune: false
+ci_runner_docker_prune_until: 168h
+ci_runner_docker_prune_schedule: "Sun *-*-* 05:00:00"

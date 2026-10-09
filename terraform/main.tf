@@ -23,12 +23,24 @@ locals {
 
   datastore = coalesce(var.default_datastore, local.lab.pve_vm_storage)
 
-  debian_vms = { for k, v in var.vms : k => v if v.profile == "debian-k8s" }
-  kali_vms   = { for k, v in var.vms : k => v if v.profile == "kali" }
+  # Seules les VMs qui n'ont pas deja leur place dans inventory/00-static.yml,
+  # et dont le groupe se deduit du profil.
+  inventory_vms = { for k, v in var.vms : k => v if v.ansible_inventory && v.ansible_group == null }
+
+  # VMs rangees dans un groupe explicite (`ansible_group`), groupe par groupe.
+  custom_groups = distinct([for k, v in var.vms : v.ansible_group if v.ansible_inventory && v.ansible_group != null])
+  custom_group_vms = {
+    for g in local.custom_groups : g => {
+      for k, v in var.vms : k => v if v.ansible_inventory && v.ansible_group == g
+    }
+  }
+
+  debian_vms = { for k, v in local.inventory_vms : k => v if v.profile == "debian-k8s" }
+  kali_vms   = { for k, v in local.inventory_vms : k => v if v.profile == "kali" }
   # Groupe DISTINCT de debian_nodes, et ce n'est pas une coquetterie : site.yml
   # applique le role `kubernetes` a debian_nodes. Y ranger la VM mail lui
   # installerait un plan de controle dont elle n'a que faire.
-  base_vms = { for k, v in var.vms : k => v if v.profile == "debian-base" }
+  base_vms = { for k, v in local.inventory_vms : k => v if v.profile == "debian-base" }
 
   # Ligne d'arguments QEMU des VMs macOS, construite ici pour que l'OSK ne
   # soit saisie qu'une fois dans terraform.tfvars.
@@ -74,8 +86,10 @@ module "vm" {
   dns_servers   = local.dns_servers
   search_domain = local.search_domain
 
-  admin_user      = local.admin_user
-  ssh_public_keys = local.ssh_public_keys
+  admin_user           = coalesce(each.value.admin_user, local.admin_user)
+  ssh_public_keys      = each.value.ssh_public_keys != null ? each.value.ssh_public_keys : local.ssh_public_keys
+  cloud_init_interface = each.value.cloud_init_interface
+  scsi_hardware        = each.value.scsi_hardware
 
   on_boot       = each.value.on_boot
   started       = each.value.started
@@ -153,7 +167,7 @@ resource "local_file" "ansible_inventory" {
     "# ce fichier est reecrit a chaque `terraform apply` et ignore par git.",
     "# Les VMs creees a la main se declarent dans 00-static.yml.",
     "",
-    yamlencode({
+    yamlencode(merge({
       debian_nodes = {
         hosts = { for k, v in local.debian_vms : k => {
           ansible_host = v.ip
@@ -182,7 +196,12 @@ resource "local_file" "ansible_inventory" {
           vm_id        = v.vm_id
         } }
       }
-    }),
+      }, { for g, vms in local.custom_group_vms : g => {
+        hosts = { for k, v in vms : k => {
+          ansible_host = v.ip
+          vm_id        = v.vm_id
+        } }
+    } })),
   ])
 
   depends_on = [module.vm, module.macos_vm]

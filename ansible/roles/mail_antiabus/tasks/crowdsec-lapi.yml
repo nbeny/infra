@@ -78,6 +78,7 @@
     cmd: docker exec {{ mail_antiabus_cs_container }} cscli machines list -o json
   register: mail_antiabus_cs_machines
   changed_when: false
+  check_mode: false   # lecture seule
   # L'API vient peut-etre d'etre redemarree par le handler ci-dessus.
   retries: 12
   delay: 5

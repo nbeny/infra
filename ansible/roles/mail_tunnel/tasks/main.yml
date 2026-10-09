@@ -39,6 +39,7 @@
     cmd: "wg pubkey < {{ mail_tunnel_keys_dir }}/privatekey"
   register: mail_tunnel_pub
   changed_when: false
+  check_mode: false   # lecture seule ; sautee, elle viderait PublicKey du --diff
 
 - name: Memoriser les cles pour le pair
   ansible.builtin.set_fact:

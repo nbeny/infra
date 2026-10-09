@@ -12,6 +12,13 @@
       cluster n'est cree. C'est le mode attendu pour un build d'image Packer.
   when: k8s_install_only | bool
 
+- name: Monter le disque etcd dedie
+  ansible.builtin.import_tasks: etcd_disk.yml
+  when:
+    - not (k8s_install_only | bool)
+    - k8s_etcd_disk | length > 0
+  tags: [k8s-cluster, k8s-etcd-disk]
+
 - name: Initialiser le cluster
   ansible.builtin.import_tasks: cluster.yml
   when: not (k8s_install_only | bool)

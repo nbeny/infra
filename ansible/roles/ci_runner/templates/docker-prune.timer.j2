@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Purge hebdomadaire des images Docker
+
+[Timer]
+OnCalendar={{ ci_runner_docker_prune_schedule }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

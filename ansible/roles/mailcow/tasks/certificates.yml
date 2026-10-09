@@ -23,6 +23,7 @@
       | openssl x509 -noout -checkend 604800 -subject
   register: mailcow_cert_check
   changed_when: false
+  check_mode: false   # lecture seule
   # `-checkend 604800` echoue si le certificat expire dans moins de sept jours.
   # Verifier qu'un certificat EXISTE ne dit rien : le mode de panne reel est
   # celui d'un certificat qui expire sans que le hook de renouvellement ait

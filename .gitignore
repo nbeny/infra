@@ -6,6 +6,8 @@ crash.log
 crash.*.log
 *.tfvars
 !*.tfvars.example
+# Les VMs du lab, sans secret : versionnees (le token reste dans terraform.tfvars).
+!terraform/lab.auto.tfvars
 override.tf
 override.tf.json
 *_override.tf

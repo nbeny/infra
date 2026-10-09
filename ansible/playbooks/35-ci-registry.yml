@@ -1,5 +1,6 @@
 ---
-# Installe le registre d'images du lab sur la VM de CI.
+# Configure la VM de CI : Docker, registre d'images du lab, socle et runners
+# GitHub Actions. Rejouable sans risque sur la VM en service.
 #
 #   ansible-playbook playbooks/35-ci-registry.yml
 #
@@ -48,6 +49,13 @@
       tags: docker
     - role: registry
       tags: registry
+    # Socle (swap, utilitaires, agent QEMU) et les cinq runners GitHub. Un
+    # runner deja enregistre n'est pas touche ; en enregistrer un neuf exige
+    # -e github_runners_pat=... (cf. roles/github_runners/defaults).
+    - role: ci_runner
+      tags: ci-runner
+    - role: github_runners
+      tags: runners
 
   post_tasks:
     - name: Recapitulatif

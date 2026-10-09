@@ -7,28 +7,21 @@ host principal.
 
 ---
 
-> **Déjà en place sur le nœud.** La chaîne complète a été déployée et validée
-> de bout en bout. Token API créé, `/root/infra` synchronisé, Terraform 1.16 et
-> Packer 1.16 installés, les quatre templates construits (**9000**, **9001**,
-> **9100**, **9101**) et deux VMs de démonstration déployées :
+> **Reconstruire tout le lab :** [`docs/reconstruction.md`](docs/reconstruction.md)
+> donne l'ordre complet, les secrets à avoir sous la main et ce qui reste
+> manuel. État de la prod relevé le 2026-10-09 :
 >
-> | VM | VMID | IP | État vérifié |
+> | VM | VMID | IP | Rôle |
 > |---|---|---|---|
-> | `urbanlink` | 111 | 10.0.0.111 | 16 vCPU / 64 Go / 700 Go — k8s 1.36.4, `local-path`, Istio ambient (Traefik et CrowdSec retirés du cluster — CrowdSec vit sur l'openresty du nœud), **stack UrbanLink déployé** (62 objets, 16 pods `Running`) |
-> | `test-k8s` | 190 | 10.0.0.190 | Kubernetes 1.36.4 `Ready`, 8 pods `Running`, Docker 29.7, Helm 4.2, k9s |
-> | `kali-test` | 120 | 10.0.0.120 | 2899 paquets, `kali-linux-large` (nmap, metasploit, burpsuite, bloodhound, impacket…) |
+> | `urbanlink` | 111 | 10.0.0.111 | Kubernetes 1.36 + stack UrbanLink (Argo CD suit `kube/urbanlink`) |
+> | `ci-runner` | 130 | 10.0.0.130 | 5 runners GitHub Actions + registre d'images du lab |
+> | `mail` | 140 | 10.0.0.140 | Mailcow, émission via le VPS Hostinger |
+> | `wow-turtle` | 150 | 10.0.0.150 | serveur Turtle WoW (`docs/turtle-wow.md`) |
+> | `kali-test`, `test-k8s` | 120, 190 | | éteintes ; disques sur pool2, perdus |
 >
-> Les deux sont taguées `test`, en `on_boot = false`, et se suppriment en
-> retirant leur entrée de `terraform.tfvars`. Les playbooks ont été rejoués
-> deux fois : `changed=0` au second passage sur les deux profils.
->
-> Les fichiers de secrets (`terraform.tfvars`, `lab.auto.pkrvars.hcl`) sont
-> renseignés côté nœud uniquement — ils ne sont pas dans git.
-> Tu peux donc reprendre directement à [Ajouter une VM](#ajouter-une-vm).
->
-> **Pas encore fait, volontairement :** `UrbanConnect` (VM 100) et `Kali`
-> (VM 103) n'ont pas été adoptées — c'est ta production, la décision te revient.
-> Voir [Reprendre en main une VM existante](#reprendre-en-main-une-vm-existante).
+> Toutes sont décrites dans `terraform/lab.auto.tfvars` (versionné) ;
+> `terraform.tfvars` ne porte plus que le token API. Les VMs 100-103 du
+> relevé initial n'existent plus.
 
 ## Sommaire
 
@@ -107,33 +100,24 @@ commandes. Ton poste garde un accès SSH direct à toutes les VMs via le rebond.
 
 ## Ce qui existe déjà sur le nœud
 
-Relevé au moment de la mise en place — utile pour comprendre les choix faits.
+Relevé du 2026-10-09.
 
 | | |
 |---|---|
-| Proxmox VE | 9.1.7 (Debian trixie, noyau 6.17) |
-| Nœud | `pve` — 32 vCPU, 118 Go de RAM |
+| Proxmox VE | 9.2 (Debian trixie, noyau 7.0) — Dell T620 |
+| Nœud | `pve` — 32 threads, 314 Go de RAM |
 | `vmbr0` | 192.168.100.50/24, passerelle 192.168.100.1 — administration |
 | `vmbr1` | 10.0.0.1/24, NAT vers vmbr0 — réseau des VMs, **pas de DHCP** |
-| Stockage | `pool1` ZFS (861 Go libres) · `pool2` ZFS (2,5 To libres) · `local` (ISO) |
+| Stockage | `pool1` ZFS raidz1 (~3,6 To libres) — VMs, templates, sauvegardes · `local-lvm` (SSD, etcd) · `pool2` **désactivé** (disque unique, corrompu le 2026-10-04) |
 
-VMs préexistantes, **non gérées par Terraform** :
+Toutes les VMs sont gérées par Terraform (`terraform/lab.auto.tfvars`).
+`ci-runner` (130) a été montée à la main puis importée le 2026-10-09 : elle
+garde son cloud-init d'origine et son propre groupe d'inventaire `ci_nodes`,
+pour ne **pas** recevoir le rôle `kubernetes` que `debian_nodes` reçoit.
+`wow-turtle` (150) est rangée dans `game_nodes`, pas dans `base_nodes` que
+visent les playbooks Mailcow.
 
-| VMID | Nom | IP | État | Note |
-|---|---|---|---|---|
-| 100 | UrbanConnect | 10.0.0.100 | démarrée | Host principal — Debian + Docker, 96 Go / 24 vCPU / 1 To |
-| 101 | Alesio | — | arrêtée | |
-| 102 | Other | 10.0.0.102 | démarrée | Accessible depuis le LAN sur `192.168.100.50:4242` (DNAT) |
-| 103 | Kali | 10.0.0.103 | arrêtée | |
-| 130 | ci-runner | 10.0.0.130 | démarrée | Montée à la main avant ce dépôt — 3 runners GitHub Actions + registre d'images du lab (`ansible/roles/registry`). L'éteindre annule toute CI en cours |
-
-> **Terraform ne touche jamais à ces VMs.** Elles ne sont pas dans son état.
-> Ansible peut les configurer une fois « adoptées » (voir plus bas), ce qui est
-> purement additif. Exception : `ci-runner`, déjà joignable en SSH, n'a pas
-> besoin d'adoption — elle a son propre groupe d'inventaire `ci_nodes` pour ne
-> **pas** recevoir le rôle `kubernetes` que `debian_nodes` reçoit.
-
-Le nouveau matériel va sur **`pool2`** : `pool1` est rempli à 76 %.
+Tout nouveau disque va sur **`pool1`**.
 
 ---
 
@@ -236,7 +220,7 @@ terraform plan       # relis toujours le plan
 terraform apply
 ```
 
-Les machines sont décrites dans `terraform.tfvars`.
+Les machines sont décrites dans `terraform/lab.auto.tfvars` (versionné).
 
 ### 7. Configurer les VMs
 
@@ -285,7 +269,7 @@ part à la fois dans cloud-init et dans Ansible.
 
 ## Ajouter une VM
 
-Une entrée dans `terraform/terraform.tfvars` :
+Une entrée dans `terraform/lab.auto.tfvars` :
 
 ```hcl
 vms = {
@@ -334,7 +318,7 @@ l'App Store**, qui exige un SDK récent.
 
 macOS n'a pas non plus de ballooning : la VM prend ses 8 Go et ne les rend
 jamais. Sur un nœud déjà surengagé, ça se planifie (voir le commentaire de
-budget dans `terraform.tfvars.example`).
+budget dans `terraform/lab.auto.tfvars`).
 
 ### Les quatre étapes
 
@@ -346,7 +330,7 @@ ansible-playbook playbooks/11-macos-template.yml -e pve_macos_osk='<64 caractèr
 # 2. Installer macOS -- MANUEL, une seule fois, via la console noVNC
 #    puis, sur le nœud :  qm stop 9200 && qm set 9200 --delete ide0 && qm template 9200
 
-# 3. Déployer (automatisé) -- après avoir rempli macos_vms dans terraform.tfvars
+# 3. Déployer (automatisé) -- après avoir rempli macos_vms dans lab.auto.tfvars
 cd ../terraform && terraform apply
 
 # 4. Configurer le runner (automatisé)
@@ -492,27 +476,9 @@ identités Kratos, photos déposées : rien de tout cela n'est dans git.
 
 ## Reconstruire le host principal
 
-UrbanConnect (VM 100) est décrite dans `terraform.tfvars.example`, commentée.
-Deux approches selon le besoin :
-
-**Le maintenir en place** — sans rien détruire :
-
-```bash
-ansible-playbook playbooks/05-adopt-existing.yml     # une seule fois
-ansible-playbook playbooks/20-debian-k8s.yml -l urbanconnect
-```
-
-Installe Kubernetes à côté du Docker existant et prend la main sur la
-configuration. La VM continue de tourner.
-
-**Le reconstruire à neuf** — décommente le bloc `urbanconnect` du tfvars. Il
-reprend le dimensionnement exact (12 cœurs × 2 sockets, 96 Go, 1 To) mais sous
-un **nouveau VMID (110)** et une nouvelle IP (10.0.0.110).
-
-C'est délibéré : Terraform ne réutilise pas le VMID 100, donc la machine
-actuelle n'est jamais en danger. Tu déploies la neuve, tu migres tes données,
-tu retires l'ancienne quand tu es sûr de toi. Un `terraform destroy` mal placé
-ne peut pas emporter ta production.
+Sans objet depuis la disparition de la VM 100 (`UrbanConnect`) : le stack
+applicatif tourne sur `urbanlink` (111), qui se reconstruit comme les autres —
+voir [`docs/reconstruction.md`](docs/reconstruction.md), étapes 2 à 4.
 
 ---
 
@@ -629,8 +595,8 @@ côté cluster — pas de mot de passe dans ce dépôt.
 ### Messagerie urbanlink.fr
 
 Boîtes mail sur Mailcow, hébergé sur une VM dédiée du nœud (profil
-`debian-base`, voir le bloc commenté `mail` de
-[`terraform.tfvars.example`](terraform/terraform.tfvars.example)) — **pas**
+`debian-base`, voir le bloc `mail` de
+[`lab.auto.tfvars`](terraform/lab.auto.tfvars)) — **pas**
 dans le cluster Kubernetes. Trois playbooks, dans l'ordre :
 
 ```bash
@@ -669,7 +635,7 @@ ansible-playbook playbooks/95-hardening.yml --check --diff   # voir sans rien ch
 | Plage | Usage |
 |---|---|
 | 10.0.0.1 | Passerelle (le nœud Proxmox) |
-| 10.0.0.100-103 | VMs préexistantes |
+| 10.0.0.100-103 | libres (anciennes VMs manuelles, supprimées) |
 | 10.0.0.110-189 | VMs Terraform (dont macOS et la VM de messagerie, **IP saisie à la main**) |
 | 10.0.0.130 | `ci-runner` — **hors Terraform**, montée à la main avant ce dépôt : runners GitHub Actions + registre d'images du lab |
 | 10.0.0.190 | VM de test |
@@ -680,7 +646,7 @@ plan : il est routable depuis Internet, pas depuis `vmbr1`.
 
 | VMID | Usage |
 |---|---|
-| 100-103 | VMs préexistantes |
+| 100-103 | libres (anciennes VMs manuelles) |
 | 110-899 | VMs Terraform |
 | 9000-9001 | Socles cloud-init |
 | 9100-9101 | Templates golden |
@@ -695,7 +661,8 @@ plan : il est routable depuis Internet, pas depuis `vmbr1`.
 | `ansible/inventory/group_vars/debian_nodes.yml` | Version de Kubernetes, CNI, options Docker |
 | `ansible/inventory/group_vars/kali_nodes.yml` | Métapaquet Kali, interface graphique |
 | `ansible/inventory/group_vars/macos_nodes.yml` | VMs macOS — hors du groupe `guests` (ni apt, ni cloud-init) |
-| `terraform/terraform.tfvars` | Token API, liste des VMs et **OSK macOS** — **non versionné** |
+| `terraform/lab.auto.tfvars` | Liste des VMs — **versionné**, sans secret |
+| `terraform/terraform.tfvars` | Token API et **OSK macOS** — **non versionné** |
 | `packer/lab.auto.pkrvars.hcl` | Secret du token API — **non versionné** |
 
 ### Choix par défaut

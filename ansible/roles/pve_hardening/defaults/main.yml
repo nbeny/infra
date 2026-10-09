@@ -32,9 +32,10 @@ pve_hardening_backup_schedule: "04:30"
 # sur cette VM.
 # 130 (ci-runner) ajoutee apres la perte de pool2 le 2026-10-04 : elle n'avait
 # aucune sauvegarde, runners et registre ont du etre remontes a la main.
-# ⚠️ La tache ne cree le job que s'il n'existe pas : sur un noeud ou il existe
-# deja, appliquer avec `pvesh set /cluster/backup/<id> --vmid 140,130`.
-pve_hardening_backup_vmids: "140,130"
+# 150 (wow-turtle) : seule copie des comptes, personnages, boutique et des
+# donnees serveur du jeu (DBC/maps du repack) -- aucune autre sauvegarde.
+# Le role aligne la liste d'un job existant (`pvesh set`).
+pve_hardening_backup_vmids: "140,130,150"
 pve_hardening_backup_mode: snapshot
 pve_hardening_backup_compress: zstd
 # Retention volontairement courte : un vzdump est une image COMPLETE a chaque

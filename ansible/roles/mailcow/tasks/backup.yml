@@ -56,6 +56,7 @@
     cmd: systemctl list-timers mailcow-backup.timer --no-pager
   register: mailcow_backup_timer
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Exiger un prochain declenchement
   ansible.builtin.assert:

@@ -1,0 +1,68 @@
+---
+- name: Installer les utilitaires de la VM de CI
+  ansible.builtin.apt:
+    name: "{{ ci_runner_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Activer l'agent QEMU
+  ansible.builtin.systemd_service:
+    name: qemu-guest-agent
+    state: started
+    enabled: true
+  # Echoue tant que Proxmox n'a pas attache le port virtio-serial (VM creee
+  # avec agent=0) : sans consequence, cf. lab.auto.tfvars, bloc mail.
+  failed_when: false
+
+# --- Swap -------------------------------------------------------------------
+- name: Relever le fichier d'echange
+  ansible.builtin.stat:
+    path: "{{ ci_runner_swapfile }}"
+  register: ci_runner_swap
+
+- name: Creer le fichier d'echange
+  when: not ci_runner_swap.stat.exists
+  block:
+    - name: Allouer {{ ci_runner_swap_size_mb }} Mo
+      ansible.builtin.command: >-
+        dd if=/dev/zero of={{ ci_runner_swapfile }} bs=1M count={{ ci_runner_swap_size_mb }}
+      changed_when: true
+
+    - name: Restreindre ses droits
+      ansible.builtin.file:
+        path: "{{ ci_runner_swapfile }}"
+        mode: "0600"
+
+    - name: Le formater
+      ansible.builtin.command: mkswap {{ ci_runner_swapfile }}
+      changed_when: true
+
+    - name: L'activer
+      ansible.builtin.command: swapon {{ ci_runner_swapfile }}
+      changed_when: true
+
+- name: Declarer le fichier d'echange dans fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^{{ ci_runner_swapfile }}\s'
+    line: "{{ ci_runner_swapfile }} none swap sw 0 0"
+
+# --- Purge Docker (optionnelle) ---------------------------------------------
+- name: Poser la purge hebdomadaire des images
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop:
+    - docker-prune.service
+    - docker-prune.timer
+  when: ci_runner_docker_prune | bool
+
+- name: Activer la purge hebdomadaire
+  ansible.builtin.systemd_service:
+    name: docker-prune.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: ci_runner_docker_prune | bool

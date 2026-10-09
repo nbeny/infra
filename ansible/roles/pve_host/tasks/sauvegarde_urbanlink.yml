@@ -54,7 +54,7 @@
 # ---------------------------------------------------------------------------
 - name: Deposer le script de sauvegarde des donnees
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../scripts/urbanlink/sauvegarder.sh"
+    src: "{{ playbook_dir }}/../../scripts/urbanlink/sauvegarder.sh"
     dest: "{{ pve_urbanlink_backup_script }}"
     owner: root
     group: root
@@ -63,7 +63,7 @@
 
 - name: Deposer l'exercice de restauration
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../scripts/urbanlink/tester-restauration.sh"
+    src: "{{ playbook_dir }}/../../scripts/urbanlink/tester-restauration.sh"
     dest: "{{ pve_urbanlink_restore_script }}"
     owner: root
     group: root

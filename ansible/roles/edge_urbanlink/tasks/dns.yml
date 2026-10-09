@@ -88,6 +88,16 @@
   loop_control:
     label: "{{ item.1 }}"
 
+# Noms publics SANS vhost : du TCP brut que nginx ne sert pas (le jeu Turtle).
+# Toujours en DNS-only -- le proxy Cloudflare ne relaie que du HTTP.
+- name: Ajouter les noms publics sans vhost
+  ansible.builtin.set_fact:
+    edge_cf_public_hosts: >-
+      {{ (edge_cf_public_hosts | default([]))
+         + (edge_urbanlink_dns_only_hosts
+            | map('community.general.dict_kv', 'host') | list
+            | map('combine', {'proxied': false}) | list) }}
+
 - name: Apparier chaque nom public a son enregistrement eventuel
   ansible.builtin.set_fact:
     edge_cf_plan: >-

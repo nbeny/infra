@@ -1,0 +1,116 @@
+---
+# Un runner = un repertoire sous github_runners_base_dir. Le service systemd est
+# nomme par GitHub : actions.runner.<owner>-<repo>.<name>.service.
+
+- name: Creer les repertoires des runners
+  ansible.builtin.file:
+    path: "{{ github_runners_base_dir }}/{{ item.dir }}"
+    state: directory
+    owner: "{{ github_runners_user }}"
+    group: "{{ github_runners_user }}"
+    mode: "0755"
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Le runner se met a jour tout seul cote GitHub : la version des defaults n'est
+# que celle du PREMIER deploiement, pas un plafond.
+- name: Deployer le runner {{ github_runners_version }}
+  ansible.builtin.unarchive:
+    src: >-
+      https://github.com/actions/runner/releases/download/v{{ github_runners_version
+      }}/actions-runner-{{ github_runners_arch }}-{{ github_runners_version }}.tar.gz
+    dest: "{{ github_runners_base_dir }}/{{ item.dir }}"
+    remote_src: true
+    owner: "{{ github_runners_user }}"
+    group: "{{ github_runners_user }}"
+    creates: "{{ github_runners_base_dir }}/{{ item.dir }}/config.sh"
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# `.runner` n'existe qu'une fois l'enregistrement reussi : c'est le temoin
+# d'idempotence. Sans lui, chaque execution creerait un doublon cote GitHub.
+- name: Relever les runners deja enregistres
+  ansible.builtin.stat:
+    path: "{{ github_runners_base_dir }}/{{ item.dir }}/.runner"
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: github_runners_state
+
+- name: Lister les runners a enregistrer
+  ansible.builtin.set_fact:
+    github_runners_todo: >-
+      {{ github_runners_state.results
+         | rejectattr('stat.exists') | map(attribute='item') | list }}
+
+- name: Signaler les runners non enregistres faute de PAT
+  ansible.builtin.debug:
+    msg: >-
+      Runner(s) NON enregistre(s) : {{ github_runners_todo | map(attribute='name') | join(', ') }}.
+      Rejouer avec -e github_runners_pat=... (voir defaults du role).
+  when:
+    - github_runners_todo | length > 0
+    - github_runners_pat | length == 0
+
+- name: Demander les jetons d'enregistrement a GitHub
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ item.repo }}/actions/runners/registration-token"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ github_runners_pat }}"
+      Accept: application/vnd.github+json
+    status_code: 201
+  loop: "{{ github_runners_todo }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: github_runners_tokens
+  when: github_runners_pat | length > 0
+  no_log: true
+
+- name: Enregistrer les runners
+  ansible.builtin.command:
+    cmd: >-
+      ./config.sh --unattended
+        --url https://github.com/{{ item.item.repo }}
+        --token {{ item.json.token }}
+        --name {{ item.item.name }}
+        --labels {{ item.item.labels }}
+        --work _work
+        --replace
+    chdir: "{{ github_runners_base_dir }}/{{ item.item.dir }}"
+  become: true
+  become_user: "{{ github_runners_user }}"
+  loop: "{{ github_runners_tokens.results | default([]) | selectattr('json', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: true
+  no_log: true          # le jeton d'enregistrement ne doit pas etre journalise
+
+- name: Relever les runners enregistres
+  ansible.builtin.stat:
+    path: "{{ github_runners_base_dir }}/{{ item.dir }}/.runner"
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: github_runners_registered
+
+# `svc.sh install` ecrit l'unite systemd, et `.service` (temoin d'idempotence).
+- name: Installer les services systemd des runners
+  ansible.builtin.command:
+    cmd: ./svc.sh install {{ github_runners_user }}
+    chdir: "{{ github_runners_base_dir }}/{{ item.item.dir }}"
+    creates: "{{ github_runners_base_dir }}/{{ item.item.dir }}/.service"
+  loop: "{{ github_runners_registered.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Demarrer les runners
+  ansible.builtin.systemd_service:
+    name: "actions.runner.{{ item.item.repo | replace('/', '-') }}.{{ item.item.name }}.service"
+    state: started
+    enabled: true
+  loop: "{{ github_runners_registered.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"

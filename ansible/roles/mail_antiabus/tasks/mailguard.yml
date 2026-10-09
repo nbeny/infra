@@ -106,6 +106,7 @@
     cmd: nft list table ip {{ mail_antiabus_nft_table }}
   register: mail_antiabus_nft_state
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Exiger une chaine sur le hook forward filtrant le port 25
   ansible.builtin.assert:

@@ -99,7 +99,7 @@
     - name: Deployer Flannel
       ansible.builtin.command: >-
         kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f
-        https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+        https://github.com/flannel-io/flannel/releases/download/{{ k8s_flannel_version }}/kube-flannel.yml
       when:
         - k8s_cni == 'flannel'
         - k8s_cni_present.stdout | trim | length == 0

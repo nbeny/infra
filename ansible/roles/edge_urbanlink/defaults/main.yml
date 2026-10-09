@@ -90,6 +90,13 @@ edge_urbanlink_cloudflare_ranges: []
 # ce qui suffit exactement a publier les enregistrements ci-dessous.
 edge_urbanlink_cloudflare_credentials: /root/.secrets/cloudflare.ini
 
+# Noms publics qui ne passent PAS par nginx : un enregistrement A DNS-only vers
+# edge_urbanlink_public_ip, et rien d'autre. Le MikroTik les redirige en TCP
+# brut vers leur VM (mikrotik/config/30-nat.rsc).
+#   turtle : serveur Turtle WoW, VM 150 -- 3724 (realmd) et 8091 (monde).
+edge_urbanlink_dns_only_hosts:
+  - turtle.urbanlink.fr
+
 # `upstream` absent => la passerelle Istio.
 # `public: true`    => joignable depuis Internet (cf. en-tete du fichier).
 edge_urbanlink_services:

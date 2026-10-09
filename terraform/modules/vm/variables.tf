@@ -110,6 +110,12 @@ variable "extra_disk" {
   EOT
 }
 
+variable "scsi_hardware" {
+  type        = string
+  description = "Controleur SCSI. Le defaut reprend celui du fournisseur, deja inscrit dans l'etat des VMs existantes."
+  default     = "virtio-scsi-pci"
+}
+
 variable "cpu_type" {
   type        = string
   description = "Modele de CPU expose a l'invite."

@@ -112,9 +112,28 @@ variable "vms" {
     # `false` obligatoire pour le profil debian-base : le socle 9000 n'a pas
     # qemu-guest-agent, et l'apply echouerait apres cinq minutes d'attente.
     # A repasser a `true` une fois le role `common` joue sur la VM.
-    agent       = optional(bool, true)
-    description = optional(string, "")
-    tags        = optional(list(string), [])
+    agent = optional(bool, true)
+    # Surcharges cloud-init, pour une VM ADOPTEE (montee a la main puis
+    # importee) dont le cloud-init differe des valeurs du lab. Elles doivent
+    # reproduire EXACTEMENT l'existant : Proxmox derive l'instance-id d'un
+    # condensat de cette configuration (utilisateur, cles ET leur ordre). Un
+    # ecart, et au boot suivant cloud-init se croit sur une machine neuve --
+    # cles d'hote SSH regenerees, utilisateur cree. `null` = valeurs du lab.
+    admin_user           = optional(string, null)
+    ssh_public_keys      = optional(list(string), null)
+    cloud_init_interface = optional(string, "ide0")
+    scsi_hardware        = optional(string, "virtio-scsi-pci")
+    # `false` = absente de l'inventaire genere, parce que declaree dans
+    # inventory/00-static.yml sous un autre groupe. Un profil `debian-base`
+    # tombe sinon dans base_nodes, que visent les playbooks Mailcow (40-43).
+    ansible_inventory = optional(bool, true)
+    # Groupe d'inventaire genere, a la place de celui que donne le profil
+    # (debian_nodes, kali_nodes, base_nodes). Indispensable pour une VM
+    # `debian-base` qui n'est PAS la messagerie : base_nodes est la cible des
+    # playbooks Mailcow (40-43), qui y installeraient Mailcow.
+    ansible_group = optional(string, null)
+    description       = optional(string, "")
+    tags              = optional(list(string), [])
   }))
 
   default = {}

@@ -50,6 +50,7 @@
   delay: 10
   until: mail_tunnel_mtasts_check is succeeded
   changed_when: false
+  check_mode: false   # simple GET
   delegate_to: "{{ groups['proxmox'] | first }}"
 
 - name: Exiger une politique coherente

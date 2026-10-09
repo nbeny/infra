@@ -56,3 +56,14 @@ pve_create_api_token: false
 pve_api_user: "terraform@pve"
 pve_api_token_name: "provider"
 pve_api_role: "TerraformProv"
+
+# ---------------------------------------------------------------------------
+#  Ce qui est REELLEMENT applique sur le noeud (releve le 2026-10-09)
+# ---------------------------------------------------------------------------
+# Ces bascules etaient passees en `-e` au fil des sessions, sans trace : un
+# noeud reconstruit ne les aurait pas recues. Les autres corrections de
+# l'audit (ssh, ufw, sysctl, services, unattended, scrub ZFS) restent a
+# `false` -- elles NE SONT PAS en place, c'est une decision encore ouverte.
+pve_hardening_backup: true          # vzdump quotidien 140,130,150 (role pve_hardening)
+pve_hardening_crowdsec_acquis: true # collections + acquisitions CrowdSec du nginx
+pve_urbanlink_backup: true          # Postgres/MinIO/etcd chaque nuit + vzdump hebdo de 111

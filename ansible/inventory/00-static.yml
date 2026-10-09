@@ -50,9 +50,10 @@ all:
     # aucun cluster a porter. L'y ranger installerait kubeadm, kubelet et un
     # plan de controle sur une machine dont ce n'est pas le role.
     #
-    # ⚠️ Elle n'est PAS geree par Terraform : elle a ete montee a la main,
-    # avant ce depot. On la declare ici pour pouvoir la configurer, sans la
-    # reprendre sous Terraform -- ce serait un chantier distinct.
+    # Geree par Terraform depuis le 2026-10-09 (importee), mais avec
+    # `ansible_inventory = false` : elle reste declaree ICI, dans ci_nodes, et
+    # non dans le base_nodes de 20-terraform.yml que visent les playbooks
+    # Mailcow.
     ci_nodes:
       hosts:
         ci-runner:
@@ -98,3 +99,7 @@ all:
         # l'inventaire genere. Les rattacher ici les fait entrer dans
         # 90-update.yml et 95-hardening.yml comme n'importe quelle autre VM.
         base_nodes:
+        # Serveur Turtle WoW (VM 150), lui aussi `debian-base`, mais range a
+        # part par Terraform (`ansible_group`) : base_nodes est la cible des
+        # playbooks Mailcow 40-43, qui y installeraient Mailcow.
+        game_nodes:

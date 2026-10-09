@@ -165,7 +165,15 @@ PVC_MINIO=$(sur_vm "kubectl -n $NS get pvc -l app=minio -o jsonpath='{.items[0].
 CHEMIN_MINIO=$(sur_vm "kubectl -n $NS get pvc $PVC_MINIO -o jsonpath='{.spec.volumeName}' 2>/dev/null \
   | xargs -r -I{} kubectl get pv {} -o jsonpath='{.spec.local.path}{.spec.hostPath.path}'" 2>/dev/null || true)
 if [ -n "$CHEMIN_MINIO" ]; then
-  sur_vm "sudo tar -cf - -C '$CHEMIN_MINIO' ." | gzip > "$TRAVAIL/minio.tar.gz" \
+  # tar rend 1 quand un fichier change ou disparait PENDANT la lecture. Sur un
+  # MinIO en service c'est permanent : .minio.sys/tmp (fichiers de travail,
+  # exclus ici) et les repertoires ou arrivent de nouveaux objets. Ce code 1 a
+  # fait echouer toutes les nuits du 2026-10-06 au 2026-10-08 ; seul un code
+  # >= 2 (erreur fatale) est un vrai echec. `gzip -t` plus bas garde le
+  # controle d'integrite de l'archive.
+  sur_vm "sudo tar --exclude=./.minio.sys/tmp --warning=no-file-changed \
+    --warning=no-file-removed -cf - -C '$CHEMIN_MINIO' . ; rc=\$?; [ \$rc -le 1 ]" \
+    | gzip > "$TRAVAIL/minio.tar.gz" \
     || echec "archive MinIO"
   # `gzip -t` relit l'archive entiere et verifie son CRC : un tuyau coupe ne
   # passe pas ce test, alors que le fichier a l'air parfaitement normal.

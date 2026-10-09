@@ -9,6 +9,11 @@ k8s_control_plane_host: ""
 k8s_pod_cidr: "10.244.0.0/16"
 k8s_service_cidr: "10.96.0.0/12"
 k8s_cni: flannel
+# Epingle sur la version en prod (releve le 2026-10-09) : `latest` ferait
+# qu'une reconstruction n'installe pas ce qui tourne.
+k8s_flannel_version: v0.28.9
+# Disque dedie a /var/lib/etcd (chemin /dev/disk/by-id). "" = disque systeme.
+k8s_etcd_disk: ""
 k8s_apiserver_advertise_address: "{{ ansible_default_ipv4.address }}"
 k8s_extra_tools:
   helm: true

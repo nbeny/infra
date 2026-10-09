@@ -1,0 +1,32 @@
+---
+# ============================================================================
+#  Runners GitHub Actions auto-heberges (Linux)
+# ----------------------------------------------------------------------------
+#  Releve sur ci-runner le 2026-10-09 : cinq runners, un repertoire et un
+#  service systemd chacun, tous sous `debian`. Leurs jobs se partagent la VM.
+#
+#  L'ENREGISTREMENT exige un jeton a usage unique, valable une heure, que seul
+#  GitHub delivre. Le role le demande lui-meme si on lui passe un jeton
+#  personnel (PAT, droit « Administration: write » sur les depots) :
+#
+#    ansible-playbook playbooks/35-ci-registry.yml -t runners \
+#      -e github_runners_pat=github_pat_...
+#
+#  Sans PAT, un runner deja enregistre (fichier .runner present) est laisse tel
+#  quel, et un runner absent est SIGNALE, pas enregistre.
+# ============================================================================
+
+github_runners_version: "2.337.0"
+github_runners_arch: linux-x64
+github_runners_user: "{{ ci_runner_service_user | default('debian') }}"
+github_runners_base_dir: /opt/actions-runner
+github_runners_pat: ""
+
+# Labels automatiques ajoutes par GitHub en plus : self-hosted, Linux, X64.
+# `folionbeny` a aussi un runner `folionbeny-vps` sur le VPS : hors de ce role.
+github_runners:
+  - { name: ci-runner-urbanlink,   dir: urbanlink,   repo: nbeny/UrbanConnct, labels: "urbanlink,docker,proxmox" }
+  - { name: ci-runner-urbanlink-2, dir: urbanlink-2, repo: nbeny/UrbanConnct, labels: "urbanlink,docker,proxmox" }
+  - { name: ci-runner-urbanlink-3, dir: urbanlink-3, repo: nbeny/UrbanConnct, labels: "urbanlink,docker,proxmox" }
+  - { name: ci-runner-folionbeny,  dir: folionbeny,  repo: nbeny/folionbeny,  labels: "folionbeny,docker,proxmox" }
+  - { name: ci-runner-froufolio,   dir: froufolio,   repo: nbeny/FrouFolio,   labels: "froufolio,docker,proxmox" }

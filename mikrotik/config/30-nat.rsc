@@ -33,9 +33,8 @@ add chain=dstnat action=dst-nat protocol=tcp in-interface=ether1 \
 add chain=dstnat action=dst-nat protocol=tcp in-interface=ether1 \
     dst-address=192.168.1.50 dst-port=22 to-addresses=192.168.100.50 to-ports=22 \
     comment="SSH -> noeud"
-add chain=dstnat action=dst-nat protocol=tcp in-interface=ether1 \
-    dst-address=192.168.1.50 dst-port=4242 to-addresses=192.168.100.50 to-ports=4242 \
-    comment="SSH VM 102"
+# (4242 "SSH VM 102" retiree le 2026-10-09 : la VM 102 n'existe plus. La
+# redirection 4242 de la Freebox est a retirer a la main.)
 
 # --- Turtle WoW (VM 150 wow-turtle) ------------------------------------------
 # TCP brut, que le proxy Cloudflare ne relaie pas : turtle.urbanlink.fr est en

@@ -20,6 +20,7 @@
     executable: /bin/bash
   register: mail_antiabus_hostname_raw
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Memoriser le nom d'hote
   ansible.builtin.set_fact:
@@ -58,6 +59,7 @@
       smtpd_client_recipient_rate_limit smtpd_client_new_tls_session_rate_limit
   register: mail_antiabus_postconf
   changed_when: false
+  check_mode: false   # lecture seule
   # L'attente porte sur les VALEURS, pas sur le succes de la commande. C'est la
   # difference qui compte : `postconf` repond immediatement apres un
   # `docker compose restart`, mais l'entrypoint n'a pas encore fusionne extra.cf

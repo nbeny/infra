@@ -10,8 +10,9 @@
   ansible.builtin.git:
     repo: "{{ mailcow_repo }}"
     dest: "{{ mailcow_dir }}"
-    version: "{{ mailcow_branch }}"
-    depth: 1
+    version: "{{ mailcow_commit | default('', true) or mailcow_branch }}"
+    # Un clone superficiel ne sait pas atteindre un commit arbitraire.
+    depth: "{{ omit if mailcow_commit | default('', true) else 1 }}"
     # `update: false` est deliberе : une montee de version de Mailcow se fait
     # par ./update.sh, qui gere les migrations de schema et les changements de
     # compose. Un `git pull` silencieux a chaque execution du role remplacerait

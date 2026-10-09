@@ -1,0 +1,57 @@
+---
+# ---------------------------------------------------------------------------
+#  etcd sur un disque dedie (SSD)
+# ---------------------------------------------------------------------------
+# etcd fsync a chaque ecriture : sur un disque mecanique, ses latences font
+# perdre leur bail au controller-manager et au scheduler, qui redemarrent en
+# boucle (mesure sur urbanlink, cf. terraform/lab.auto.tfvars). Le disque est
+# declare par `extra_disk` dans Terraform ; ce fichier le formate S'IL EST
+# VIERGE, puis le monte sur /var/lib/etcd -- AVANT kubeadm init, sans quoi etcd
+# s'installe sur le disque systeme.
+#
+# Le disque est designe par son chemin /dev/disk/by-id (stable), jamais par
+# /dev/sdX, dont l'ordre peut changer d'un demarrage a l'autre.
+
+- name: Relever le disque etcd
+  ansible.builtin.stat:
+    path: "{{ k8s_etcd_disk }}"
+  register: k8s_etcd_disk_stat
+
+- name: Exiger la presence du disque etcd
+  ansible.builtin.assert:
+    that: k8s_etcd_disk_stat.stat.exists
+    fail_msg: >-
+      {{ k8s_etcd_disk }} est introuvable. Verifier `extra_disk` dans
+      terraform/lab.auto.tfvars, ou vider k8s_etcd_disk pour garder etcd sur
+      le disque systeme.
+
+- name: Lire le systeme de fichiers du disque etcd
+  ansible.builtin.command: blkid -o value -s TYPE {{ k8s_etcd_disk }}
+  register: k8s_etcd_fstype
+  changed_when: false
+  failed_when: false
+  check_mode: false   # lecture seule ; sautee en --check, elle ferait croire a un disque vierge
+
+# `blkid` ne repond rien sur un disque vierge. Un disque qui porte DEJA un
+# systeme de fichiers n'est jamais reformate : ce serait perdre la base etcd.
+- name: Formater le disque etcd (vierge uniquement)
+  community.general.filesystem:
+    dev: "{{ k8s_etcd_disk }}"
+    fstype: ext4
+    opts: -L etcd
+  when: k8s_etcd_fstype.stdout | trim | length == 0
+
+- name: Lire l'UUID du disque etcd
+  ansible.builtin.command: blkid -o value -s UUID {{ k8s_etcd_disk }}
+  register: k8s_etcd_uuid
+  changed_when: false
+  check_mode: false
+
+- name: Monter le disque etcd
+  ansible.posix.mount:
+    path: /var/lib/etcd
+    src: "UUID={{ k8s_etcd_uuid.stdout | trim }}"
+    fstype: ext4
+    opts: defaults,noatime
+    passno: "2"
+    state: mounted

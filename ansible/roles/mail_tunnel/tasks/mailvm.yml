@@ -86,6 +86,7 @@
   ansible.builtin.command: ip rule show
   register: mail_tunnel_rules_effectives
   changed_when: false
+  check_mode: false   # lecture : sans elle, --check echoue sur l'assertion qui suit
 
 - name: Exiger que le courrier sorte bien par le tunnel
   ansible.builtin.assert:

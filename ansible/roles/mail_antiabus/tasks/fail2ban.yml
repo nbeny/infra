@@ -39,6 +39,7 @@
     return_content: true
   register: mail_antiabus_f2b_now
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 # Les cles du dictionnaire renvoye sont des chaines « 1 » a « 9 ». Les trier en
@@ -129,6 +130,7 @@
     return_content: true
   register: mail_antiabus_f2b_after
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Exiger que les expressions et les reglages soient en place
@@ -169,6 +171,7 @@
   delegate_to: localhost
   become: false
   changed_when: false
+  check_mode: false   # test pur sur le controleur, rien n'est ecrit
   register: mail_antiabus_f2b_selftest
 
 - name: Afficher le resultat du test des expressions

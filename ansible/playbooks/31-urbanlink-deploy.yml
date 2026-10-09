@@ -20,10 +20,9 @@
 # Prerequis :
 #   1. Le cluster existe, avec sa StorageClass et sa passerelle
 #      -> ansible-playbook playbooks/20-debian-k8s.yml -l urbanlink
-#   2. `config/` du depot applicatif est depose sur le noeud de controle
-#      -> voir urbanlink_config_control plus bas. Il n'est plus lu que pour
-#         DERIVER KRATOS_OIDC_PROVIDERS du Secret (cf. plus bas) : la
-#         configuration elle-meme passe desormais par Argo.
+#   2. kube/urbanlink/config/ a jour sur le noeud (ecrit par la CI). Il n'est
+#      plus lu que pour DERIVER KRATOS_OIDC_PROVIDERS du Secret (cf. plus
+#      bas) : la configuration elle-meme passe par Argo.
 #
 #   ansible-playbook playbooks/31-urbanlink-deploy.yml
 #   ansible-playbook playbooks/31-urbanlink-deploy.yml -e urbanlink_wipe=true   # repart de zero
@@ -62,7 +61,11 @@
     # absent, la tache de verification ci-dessous s'arrete en le disant plutot
     # que de creer des ConfigMaps vides -- ce qui laisserait Kratos en
     # CrashLoopBackOff sans expliquer pourquoi.
-    urbanlink_config_control: /root/urbanlink-src/config
+    # La copie de config/ que la CI d'UrbanConnct ecrit DANS CE DEPOT a chaque
+    # deploiement : c'est la version en prod. Elle remplace l'ancienne copie
+    # manuelle /root/urbanlink-src/config (figee au 2026-08-30), qui faisait de
+    # ce playbook une dependance hors depot pour une reconstruction.
+    urbanlink_config_control: "{{ playbook_dir }}/../../kube/urbanlink/config"
     urbanlink_config_dest: /opt/urbanlink-config
 
     # Environnement de configuration : `prod` ou `dev`.
@@ -156,14 +159,9 @@
         that: ul_config_check.results | rejectattr('stat.exists') | list | length == 0
         fail_msg: >-
           {{ urbanlink_config_control }} ne contient pas common/ et
-          {{ urbanlink_env }}/. Cette configuration vit dans le depot
-          UrbanConnct (repertoire config/), pas dans celui-ci. La deposer
-          depuis Windows :
-            cd C:/Users/nbeny/Documents/GitHub/UrbanConnct
-            tar -czf - --exclude=node_modules --exclude=.next --exclude=dist
-                       --exclude=.git --exclude=coverage backTs front config
-              | ssh root@192.168.100.50 'mkdir -p /root/urbanlink-src
-                                         && tar -xzf - -C /root/urbanlink-src'
+          {{ urbanlink_env }}/. C'est la copie que la CI d'UrbanConnct
+          ecrit dans kube/urbanlink/config/ : le depot pousse sur le noeud
+          est-il a jour (git pull ou tar | ssh, cf. README) ?
 
     - name: Creer le repertoire de configuration sur la VM
       ansible.builtin.file:

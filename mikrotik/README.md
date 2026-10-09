@@ -240,8 +240,8 @@ emprunte bien les règles prévues :
 | `input` | **drop WAN** | 3 (au test) |
 
 Le `drop` de la chaîne `forward` reste à zéro, et c'est attendu : la box FAI ne
-redirige vers le routeur que les ports 22, 80, 443 et 4242, tous couverts par
-une règle `dstnat`. Rien d'autre n'atteint le routeur depuis Internet.
+redirige vers le routeur que les ports 22, 80, 443, 3724 et 8091 (Turtle WoW),
+tous couverts par une règle `dstnat` (4242 retiré le 2026-10-09 avec la VM 102). Rien d'autre n'atteint le routeur depuis Internet.
 | **M3** | `/tool/mac-server` et `/tool/mac-server/mac-winbox` étaient sur `allowed-interface-list=all`. MAC-telnet et MAC-Winbox opèrent en couche 2 : aucune règle de pare-feu ne les arrête. | **corrigé** — `05-hardening.rsc` |
 | **M4** | La chaîne de blocage CrowdSec → MikroTik ne fonctionne pas. Détail ci-dessous. | **documenté, non corrigé** |
 | **M5** | Pool DHCP `192.168.100.0-200`, incluant l'adresse réseau **et la passerelle**. Entrée réseau fantôme `192.0.0.0/8`. API en clair (8728) activée. Scheduler orphelin. | **corrigé** — `20-addressing.rsc`, `05-hardening.rsc`, `00-system.rsc` |

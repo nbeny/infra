@@ -18,8 +18,12 @@
 }
 /ip address remove [find where dynamic=no and address!="192.168.100.1/24"]
 
-# La route par defaut vient du client DHCP et n'est pas geree ici. Seule
-# celle-ci est statique : les VMs du lab vivent derriere le noeud Proxmox.
+# La route par defaut vient du client DHCP (dynamique). Des copies STATIQUES
+# s'etaient accumulees -- cinq `0.0.0.0/0 gw 192.168.1.254` relevees le
+# 2026-10-09 : on les elague, la route DHCP n'est pas concernee.
+/ip route remove [find where dst-address="0.0.0.0/0" and dynamic=no]
+
+# Seule celle-ci est statique : les VMs du lab vivent derriere le noeud Proxmox.
 :if ([:len [/ip route find where static=yes and dst-address="10.0.0.0/24" and gateway="192.168.100.50"]] = 0) do={
     /ip route add dst-address=10.0.0.0/24 gateway=192.168.100.50 \
         comment="VMs Proxmox derriere vmbr1"

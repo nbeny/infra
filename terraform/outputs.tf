@@ -5,7 +5,7 @@ output "vms" {
       vm_id   = m.vm_id
       ip      = m.ip
       profile = var.vms[k].profile
-      ssh     = "ssh ${local.admin_user}@${m.ip}"
+      ssh     = "ssh ${coalesce(var.vms[k].admin_user, local.admin_user)}@${m.ip}"
     }
   }
 }
@@ -44,7 +44,7 @@ output "ssh_config" {
       for k, v in var.vms : [
         "Host ${k}",
         "    HostName ${v.ip}",
-        "    User ${local.admin_user}",
+        "    User ${coalesce(v.admin_user, local.admin_user)}",
         "    ProxyJump pve",
         "",
       ]

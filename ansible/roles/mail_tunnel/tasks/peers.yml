@@ -33,6 +33,7 @@
     label: "{{ item.name }}"
   register: mail_tunnel_peer_pubs
   changed_when: false
+  check_mode: false   # lecture seule
   delegate_to: "{{ groups['proxmox'] | first }}"
   run_once: true
 

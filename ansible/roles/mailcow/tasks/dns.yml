@@ -36,6 +36,7 @@
       Authorization: "Bearer {{ mailcow_cf_token }}"
   register: mailcow_cf_zone
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Exiger une zone unique
@@ -55,6 +56,7 @@
     return_content: true
   register: mailcow_dkim_pub
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Exiger une cle DKIM utilisable
   ansible.builtin.assert:
@@ -102,6 +104,7 @@
     label: "{{ item.name }}"
   register: mailcow_cf_existing
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Creer les enregistrements absents
@@ -165,6 +168,7 @@
       Authorization: "Bearer {{ mailcow_cf_token }}"
   register: mailcow_cf_apex
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 # ⚠️ Le motif tolere un guillemet initial. Cloudflare stocke certains TXT AVEC
@@ -245,6 +249,7 @@
       Authorization: "Bearer {{ mailcow_cf_token }}"
   register: mailcow_cf_after
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Exiger un et un seul SPF apres modification
@@ -280,6 +285,7 @@
       Authorization: "Bearer {{ mailcow_cf_token }}"
   register: mailcow_cf_vpn
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 # L'enregistrement de la politique MTA-STS est PROXIFIE, contrairement a tous
@@ -297,6 +303,7 @@
       Authorization: "Bearer {{ mailcow_cf_token }}"
   register: mailcow_cf_mtasts
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Publier le nom de la politique MTA-STS
@@ -334,3 +341,83 @@
       comment: "acces nomade par WireGuard -- adresse privee, volontairement"
   when: mailcow_cf_vpn.json.result | length == 0
   no_log: true
+
+# ---------------------------------------------------------------------------
+#  Identite SMTP et MX -- pour une RECONSTRUCTION
+# ---------------------------------------------------------------------------
+# Poses a la main lors de la bascule (plan messagerie, tache 7), codifies le
+# 2026-10-09 pour qu'une zone reconstruite de zero recoive le courrier. On ne
+# fait que CREER s'ils manquent : un MX existant qui pointe ailleurs est une
+# decision humaine (retour arriere, migration), pas une derive a ecraser --
+# on le signale seulement.
+#
+# `mail.urbanlink.fr` est en DNS-only : SMTP ne passe pas par le proxy
+# Cloudflare, et le nom doit resoudre vers l'IP REELLE d'emission (le VPS),
+# celle que verifient le SPF et le PTR.
+- name: Relever l'identite SMTP et le MX
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id
+      }}/dns_records?type={{ item.type }}&name={{ item.name }}
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+  loop:
+    - { type: A, name: "{{ mailcow_hostname }}" }
+    - { type: MX, name: "{{ mailcow_dns_zone }}" }
+  loop_control:
+    label: "{{ item.type }} {{ item.name }}"
+  register: mailcow_cf_mx
+  changed_when: false
+  check_mode: false   # lecture seule
+  no_log: true
+
+- name: Publier l'identite SMTP
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id }}/dns_records
+    method: POST
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      type: A
+      name: "{{ mailcow_hostname }}"
+      content: "{{ mailcow_sending_ip }}"
+      proxied: false
+      ttl: 300
+      comment: "identite SMTP -- DNS-only, IP d'emission du VPS -- ansible role mailcow"
+  when: mailcow_cf_mx.results[0].json.result | length == 0
+  no_log: true
+
+- name: Publier le MX
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ mailcow_cf_zone.json.result[0].id }}/dns_records
+    method: POST
+    headers:
+      Authorization: "Bearer {{ mailcow_cf_token }}"
+    body_format: json
+    body:
+      type: MX
+      name: "{{ mailcow_dns_zone }}"
+      content: "{{ mailcow_hostname }}"
+      priority: 10
+      ttl: 300
+      comment: "MX -- ansible role mailcow"
+  when: mailcow_cf_mx.results[1].json.result | length == 0
+  no_log: true
+
+- name: Signaler un MX ou une identite SMTP divergents
+  ansible.builtin.debug:
+    msg: >-
+      ATTENTION : {{ item.item.type }} {{ item.item.name }} pointe sur
+      {{ item.json.result | map(attribute='content') | join(', ') }} au lieu de
+      {{ mailcow_sending_ip if item.item.type == 'A' else mailcow_hostname }}.
+      Laisse en l'etat -- a corriger a la main si ce n'est pas voulu.
+  loop: "{{ mailcow_cf_mx.results }}"
+  loop_control:
+    label: "{{ item.item.type }} {{ item.item.name }}"
+  when:
+    - item.json.result | length > 0
+    - (item.json.result | map(attribute='content') | list)
+      != [mailcow_sending_ip if item.item.type == 'A' else mailcow_hostname]

@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Purge des images Docker de plus de {{ ci_runner_docker_prune_until }}
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker image prune --all --force --filter until={{ ci_runner_docker_prune_until }}
+ExecStart=/usr/bin/docker builder prune --force --filter until={{ ci_runner_docker_prune_until }}

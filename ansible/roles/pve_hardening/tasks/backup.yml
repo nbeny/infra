@@ -6,6 +6,7 @@
   ansible.builtin.command: "pvesm status --storage {{ pve_hardening_backup_storage }}"
   register: h_bk_storage
   changed_when: false
+  check_mode: false   # lecture seule
   failed_when: h_bk_storage.rc != 0
 
 - name: Relever l'espace libre sur {{ pve_hardening_backup_storage }}
@@ -16,6 +17,7 @@
     executable: /bin/bash
   register: h_bk_free
   changed_when: false
+  check_mode: false   # lecture seule
 
 # Un vzdump ecrit une image COMPLETE a chaque passage, sans deduplication.
 # Mieux vaut refuser de creer le job que de remplir le pool et faire tomber
@@ -25,7 +27,7 @@
     msg: >-
       {{ pve_hardening_backup_storage }} n'a que {{ h_bk_free.stdout }} Gio
       libres, moins que les {{ pve_hardening_backup_min_free_gb }} Gio exiges.
-      Un vzdump complet de la VM 100 pese plusieurs centaines de Gio.
+      Un vzdump complet de la VM 111 pese plusieurs centaines de Gio.
       Options : reduire pve_hardening_backup_vmids, baisser la retention
       (pve_hardening_backup_retention), ou passer a Proxmox Backup Server qui
       deduplique et n'envoie que les blocs modifies.
@@ -35,6 +37,7 @@
   ansible.builtin.command: pvesh get /cluster/backup --output-format json
   register: h_bk_jobs
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Creer le job de sauvegarde quotidien
   ansible.builtin.command: >-
@@ -49,13 +52,39 @@
       --enabled 1
       --notes-template "{% raw %}{{guestname}}{% endraw %}"
       --comment "Gere par Ansible (role pve_hardening)"
-  when: "'Gere par Ansible' not in h_bk_jobs.stdout"
+  # Reperer CE job par son commentaire exact : le job hebdomadaire de la VM 111
+  # (role pve_host) porte lui aussi « Gere par Ansible ». Tester ce seul
+  # prefixe empechait la creation de celui-ci quand pve_host passait avant.
+  when: h_bk_job | length == 0
   changed_when: true
+  vars:
+    h_bk_job: >-
+      {{ h_bk_jobs.stdout | from_json
+         | selectattr('comment', 'defined')
+         | selectattr('comment', 'search', 'role pve_hardening') | list }}
+
+# Le job existe deja : on aligne seulement sa liste de VMs sur la variable.
+- name: Aligner les VMs du job de sauvegarde quotidien
+  ansible.builtin.command: >-
+    pvesh set /cluster/backup/{{ h_bk_job[0].id }}
+      --vmid {{ pve_hardening_backup_vmids }}
+  when:
+    - pve_hardening_backup_vmids != 'all'
+    - h_bk_job | length == 1
+    - (h_bk_job[0].vmid | default('') | string).split(',') | sort
+      != pve_hardening_backup_vmids.split(',') | sort
+  changed_when: true
+  vars:
+    h_bk_job: >-
+      {{ h_bk_jobs.stdout | from_json
+         | selectattr('comment', 'defined')
+         | selectattr('comment', 'search', 'role pve_hardening') | list }}
 
 - name: Relire les jobs de sauvegarde
   ansible.builtin.command: pvesh get /cluster/backup --output-format json
   register: h_bk_after
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Recapitulatif des sauvegardes
   ansible.builtin.debug:

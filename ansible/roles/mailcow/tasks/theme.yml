@@ -87,6 +87,7 @@
     label: "{{ item.urls | first }}"
   register: mailcow_theme_served
   changed_when: false
+  check_mode: false   # lecture seule
   # Le conteneur nginx vient peut-etre d'etre relance par le handler.
   retries: 6
   delay: 5

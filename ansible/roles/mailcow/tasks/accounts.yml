@@ -71,6 +71,7 @@
     executable: /bin/bash
   register: mailcow_admin_current
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 # Une empreinte bcrypt est salee : deux calculs du MEME mot de passe donnent
@@ -91,6 +92,7 @@
   register: mailcow_admin_matches
   failed_when: false
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Calculer l'empreinte du nouveau mot de passe
@@ -103,6 +105,7 @@
     MCPASS: "{{ mailcow_admin_password }}"
   register: mailcow_admin_hash
   changed_when: false
+  check_mode: false   # lecture seule
   when: mailcow_admin_matches.rc != 0
   no_log: true
 
@@ -170,6 +173,7 @@
     return_content: true
   register: mailcow_domains
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Creer les domaines absents
@@ -247,6 +251,7 @@
     return_content: true
   register: mailcow_boxes
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Creer les boites absentes
@@ -324,6 +329,7 @@
     return_content: true
   register: mailcow_aliases
   changed_when: false
+  check_mode: false   # lecture seule
   no_log: true
 
 - name: Creer les alias absents
@@ -359,6 +365,7 @@
     label: "{{ item.name }}"
   register: mailcow_dkim_state
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Generer les cles DKIM absentes
   ansible.builtin.uri:
@@ -391,6 +398,7 @@
     label: "{{ item.name }}"
   register: mailcow_dkim_final
   changed_when: false
+  check_mode: false   # lecture seule
 
 - name: Afficher les enregistrements DKIM a poser dans le DNS
   ansible.builtin.debug:

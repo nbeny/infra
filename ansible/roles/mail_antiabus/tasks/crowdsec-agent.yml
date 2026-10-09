@@ -52,6 +52,7 @@
   delegate_to: "{{ groups['edge_nodes'] | first }}"
   register: mail_antiabus_cs_seen
   changed_when: false
+  check_mode: false   # lecture seule
   retries: 12
   delay: 10
   until: >-
@@ -83,6 +84,7 @@
     cmd: "docker logs crowdsec-mail 2>&1 | grep -c 'connected to container logs' || true"
   register: mail_antiabus_cs_abonne
   changed_when: false
+  check_mode: false   # lecture seule
   retries: 10
   delay: 10
   until: mail_antiabus_cs_abonne.stdout | int > 0

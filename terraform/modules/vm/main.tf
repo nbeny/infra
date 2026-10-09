@@ -81,6 +81,13 @@ resource "proxmox_virtual_environment_vm" "this" {
     timeout = "5m"
   }
 
+  # Explicite depuis l'import de ci-runner : sans cela le fournisseur applique
+  # son propre defaut (virtio-scsi-pci), et une VM importee en
+  # virtio-scsi-single se verrait changer de controleur -- ce qui retire
+  # l'iothread par disque. Le fournisseur ne relit pas ce champ au refresh :
+  # l'etat de mail et wow-turtle dit `pci` alors que Proxmox porte `single`.
+  scsi_hardware = var.scsi_hardware
+
   operating_system {
     type = "l26"
   }
