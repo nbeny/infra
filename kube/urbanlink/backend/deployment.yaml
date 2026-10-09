@@ -31,6 +31,18 @@ spec:
         - name: backend
           image: urbanconnect-backend:prod
           # En prod, remplacer par le registry : registry.urbanconnect.fr/backend:TAG
+          # L'image tourne en `nestjs` (uid 1001, `backTs/Dockerfile`) : on
+          # l'impose ici, et on retire ce qu'un process Node n'utilise jamais.
+          # `runAsUser` numerique est OBLIGATOIRE avec `runAsNonRoot` : l'image
+          # declare un NOM d'utilisateur, que le kubelet ne sait pas verifier.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 4000
           env:

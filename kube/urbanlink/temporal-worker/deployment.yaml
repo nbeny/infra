@@ -27,6 +27,18 @@ spec:
           # (cf. target à ajouter au Dockerfile) et pousser sous ce tag.
           image: urbanconnect-temporal-worker:prod
           # En prod, remplacer par le registry : registry.urbanconnect.fr/temporal-worker:TAG
+          # Ce worker porte la cle Stripe live. Sans `runAsNonRoot` POUR
+          # L'INSTANT : l'image passe a l'utilisateur `worker` (USER ajoute dans
+          # `backTs/Dockerfile.temporal-worker` le 2026-10-09), mais une image
+          # anterieure, encore en root, serait refusee au demarrage. A ajouter
+          # (avec le `runAsUser` numerique de l'image) une fois la nouvelle
+          # image deployee. Le reste vaut pour les deux.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           command:
             - sh
             - -c

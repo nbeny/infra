@@ -24,6 +24,17 @@ spec:
         - name: frontend
           image: urbanconnect-frontend:prod
           # En prod, remplacer par le registry : registry.urbanconnect.fr/frontend:TAG
+          # L'image tourne en `nextjs` (uid 1001, `front/Dockerfile`) : on
+          # l'impose ici. `runAsUser` numerique est OBLIGATOIRE avec
+          # `runAsNonRoot` : l'image declare un NOM d'utilisateur.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 3000
           env:

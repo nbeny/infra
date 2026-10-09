@@ -9,30 +9,34 @@
 #  ⚠️ **PAS de NetworkPolicy ici, et ce n'est pas un oubli.**
 #
 #  La specification en prevoyait une, pour interdire a l'agent de joindre
-#  Postgres, Redis, MinIO et Kafka. Elle serait INERTE dans ce cluster :
+#  Postgres, Redis, MinIO et Kafka. Elle serait INERTE dans ce cluster : le CNI
+#  est **flannel** (`ansible/inventory/group_vars/debian_nodes.yml`,
+#  `k8s_cni: flannel`), qui n'implemente PAS `NetworkPolicy` -- l'objet est
+#  accepte par l'API server et ignore par le reseau. Deployer un manifeste qui
+#  ne filtre rien serait pire que de ne rien deployer.
 #
-#    - le CNI est **flannel** (`ansible/inventory/group_vars/debian_nodes.yml`,
-#      `k8s_cni: flannel`), qui n'implemente PAS `NetworkPolicy` : l'objet est
-#      accepte par l'API server et ignore par le reseau ;
-#    - Istio est en mode ambient, mais le namespace `urbanconnect` ne porte pas
-#      le label `istio.io/dataplane-mode`, donc une `AuthorizationPolicy` L4 ne
-#      s'appliquerait pas non plus a ces pods.
+#  Le namespace EST enrole dans le maillage ambient
+#  (`ansible/inventory/host_vars/urbanlink.yml`, `k8s_istio_namespaces`) --
+#  l'ancienne version de ce commentaire disait le contraire. D'ou
+#  `authorization.yaml` : ce pod (identite `sa/opencode`) n'atteint plus l'API
+#  admin de Kratos. Pour Postgres/Redis/MinIO, une politique L4 n'aide pas : le
+#  worker, dans le MEME pod, en a besoin.
 #
-#  Deployer un manifeste qui ne filtre rien serait pire que de ne rien
-#  deployer : il ferait croire la question reglee.
+#  **Ce qui protege reellement l'agent (audit 2026-10-09) :**
+#    - le bac a sable d'opencode, pose par le lanceur
+#      (`common/opencode-runner/opencode-runner.ts`, `buildPermissionConfig`) :
+#      pas de terminal, pas de web (sauf le releve de tarifs), aucune lecture
+#      hors du repertoire du job -- `/proc/<pid du worker>/environ`, qui porte
+#      tous les secrets ci-dessous, est donc hors d'atteinte ;
+#    - l'environnement en LISTE BLANCHE du process `opencode` ;
+#    - l'utilisateur non privilegie de l'image, sans escalade ni capacites.
+#  ⚠️ L'agent tourne sous le MEME uid que le worker : sans le bac a sable, la
+#  liste blanche ne protegerait rien (voir `backTs/Dockerfile.opencode`).
 #
-#  **Ce qui protege reellement, aujourd'hui :** le process `opencode` recoit un
-#  environnement en LISTE BLANCHE (`agent/opencode.agent.ts`) -- ni
-#  `DATABASE_URL`, ni cle MinIO, ni secret Stripe. Un chemin reseau vers
-#  Postgres ne sert a rien sans accreditation. S'y ajoutent l'utilisateur non
-#  privilegie de l'image et la liste blanche des champs du validateur.
-#
-#  **Pour obtenir le filtrage reseau**, deux chemins, tous deux hors de ce lot
-#  parce qu'ils touchent tout le cluster : passer `k8s_cni` a `cilium` (la
-#  variable l'admet deja), ou labelliser le namespace en ambient puis poser des
-#  `AuthorizationPolicy` sur les services de donnees. Le second a un rayon
-#  d'action non nul sur les chemins de production (une mauvaise selection coupe
-#  le backend de Postgres) : a faire deliberement, pas en passant.
+#  **Pour filtrer la SORTIE de ce pod** (Internet public seulement, aucune
+#  plage privee hors des services dont le worker a besoin), il faudrait un CNI
+#  qui applique `NetworkPolicy` : passer `k8s_cni` a `cilium` (la variable
+#  l'admet deja). Hors de ce lot, il touche tout le cluster.
 # ============================================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -58,6 +62,10 @@ spec:
       labels:
         app: opencode
     spec:
+      # Identite propre (cf. serviceaccount.yaml) : c'est elle que vise
+      # `authorization.yaml`. Sans jeton Kubernetes monte.
+      serviceAccountName: opencode
+      automountServiceAccountToken: false
       containers:
         - name: opencode
           # Image DEDIEE : elle embarque le binaire `opencode` (plusieurs
@@ -65,6 +73,17 @@ spec:
           # Construite par la CI du depot applicatif depuis
           # `backTs/Dockerfile.opencode`.
           image: urbanconnect-opencode:prod
+          # L'image tourne deja en `agent`, non privilegie. Sans
+          # `runAsNonRoot` : l'utilisateur est cree par `useradd --system`,
+          # sans uid fixe, et `runAsNonRoot` exige un `runAsUser` numerique
+          # que ce depot ne peut pas connaitre. Le reste interdit a un agent
+          # detourne de regagner des privileges (setuid) ou des capacites.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             # Le seul port de ce processus : `GET /metrics`. Il ne sert
             # rien d'autre -- le worker n'a aucune raison d'exposer

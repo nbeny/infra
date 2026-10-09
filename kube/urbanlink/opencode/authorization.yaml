@@ -1,0 +1,43 @@
+# ============================================================================
+#  opencode -> API admin de Kratos : REFUSE
+# ----------------------------------------------------------------------------
+#  Audit 2026-10-09. Le pod opencode lance un agent pilote par des contenus
+#  d'inconnus (document importe, page web d'un lieu). L'API admin de Kratos
+#  (:4434) n'a AUCUNE authentification : `POST /admin/recovery/link` y rend un
+#  lien de connexion pour n'importe quel compte, admin compris. Le worker
+#  opencode n'en a pas l'usage (ses appelants sont l'admin, l'auth, les
+#  utilisateurs et la vitrine fournisseur -- API et worker Temporal).
+#
+#  Pourquoi un DENY cible et pas un refus par defaut : une politique ALLOW sur
+#  `app: kratos` fermerait aussi :4433 (public), que le front, Oathkeeper et la
+#  passerelle utilisent -- voir le refus par defaut, toujours commente, de
+#  `ingress/authorization.yaml`.
+#
+#  Pourquoi pas le reste (Postgres, Redis, MinIO...) : l'agent et le worker
+#  partagent le pod, et le worker en a besoin. Une politique L4 ne distingue
+#  pas deux process d'un meme pod ; c'est le bac a sable d'opencode
+#  (`backTs/src/common/opencode-runner/opencode-runner.ts`) qui prive l'agent
+#  de terminal et de reseau.
+#
+#  ⚠️ Ne mord que si le pod opencode est DANS le maillage (identite mTLS). Un
+#  pod sorti du maillage (cas deja vecu au redemarrage du noeud) parle en clair
+#  et n'a plus de principal : la regle ne le reconnait pas.
+# ============================================================================
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: opencode-deny-kratos-admin
+  namespace: urbanconnect
+spec:
+  selector:
+    matchLabels:
+      app: kratos
+  action: DENY
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/urbanconnect/sa/opencode
+      to:
+        - operation:
+            ports: ["4434"]

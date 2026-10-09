@@ -47,6 +47,9 @@ SUPER_USER="${POSTGRES_USER:-urbanconnect}"
 APP_DB="${POSTGRES_DB:-urbanconnect}"
 APP_USER="${POSTGRES_APP_USER:-urbanconnect_app}"
 APP_PASSWORD="${POSTGRES_APP_PASSWORD:-}"
+# Plafonds de durée du rôle applicatif (voir le bloc « Délais » plus bas).
+APP_STATEMENT_TIMEOUT="${POSTGRES_APP_STATEMENT_TIMEOUT:-30s}"
+APP_IDLE_TX_TIMEOUT="${POSTGRES_APP_IDLE_IN_TX_TIMEOUT:-60s}"
 
 if [ -z "$APP_PASSWORD" ]; then
   echo "ensure-app-role.sh: POSTGRES_APP_PASSWORD absent — rôle applicatif NON créé." >&2
@@ -76,6 +79,18 @@ BEGIN
 
   -- Ceintures explicites : ce rôle ne doit JAMAIS pouvoir administrer.
   EXECUTE format('ALTER ROLE %I NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS', '${APP_USER}');
+
+  -- Délais. Sans eux, une requête lente (ou une transaction oubliée ouverte)
+  -- garde sa connexion indéfiniment : dix d'entre elles suffisent à épuiser le
+  -- pool de 10 d'un processus (PrismaService), et toute l'API échoue ensuite au
+  -- bout de 5 s sur « timeout exceeded when trying to connect ».
+  --
+  -- Posés sur le RÔLE, pas par la connexion : PgBouncer (POOL_MODE=transaction)
+  -- refuse les paramètres de démarrage (`options=-c …`) et un `SET` de session
+  -- serait perdu au changement de connexion serveur. Le rôle propriétaire, qui
+  -- fait les migrations (CREATE INDEX longs), n'est PAS concerné.
+  EXECUTE format('ALTER ROLE %I SET statement_timeout = %L', '${APP_USER}', '${APP_STATEMENT_TIMEOUT}');
+  EXECUTE format('ALTER ROLE %I SET idle_in_transaction_session_timeout = %L', '${APP_USER}', '${APP_IDLE_TX_TIMEOUT}');
 END
 \$\$;
 

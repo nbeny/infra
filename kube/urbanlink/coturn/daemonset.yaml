@@ -9,6 +9,21 @@
 #   - Ouvrir 3478/tcp+udp et 49160-49200/udp sur le firewall / security group.
 #   - --no-tls/--no-dtls repris du dev : pour la prod, ajouter un cert (turns:5349).
 #   - TURN_URLS du backend doit pointer vers l'IP/FQDN public (voir backend/deployment.yaml).
+#
+# ⚠️ **Plages privées INTERDITES comme pair** (`--denied-peer-ip`, audit
+# 2026-10-09). En `hostNetwork`, le relais part DEPUIS le nœud : tout membre
+# connecté reçoit des identifiants TURN (`calls.service.ts`) et pouvait s'en
+# servir pour joindre les ClusterIP (Kratos admin :4434, Kafka en clair), les
+# pods, et le LAN 192.168.x — derrière le `allow/deny` qui y réserve les
+# consoles. `--no-tcp-relay` : les navigateurs n'allouent que de l'UDP, le
+# relais TCP (RFC 6062) ne servait qu'à ce détournement.
+#
+# Contrepartie à connaître : sans `--external-ip`, coturn annonce ses adresses
+# de relais en 10.0.0.111 (IP privée du nœud), désormais refusée comme pair. Un
+# appel où LES DEUX parties passent par le relais peut donc échouer. Le bon
+# remède n'est pas de réautoriser 10.0.0.111 (kubelet, API server et NodePorts
+# y écoutent) mais de poser `--external-ip=<IP publique>/10.0.0.111`, que ce
+# dépôt ne connaît pas : à renseigner.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -49,7 +64,19 @@ spec:
                 --realm=urbanconnect \
                 --no-cli \
                 --no-tls \
-                --no-dtls
+                --no-dtls \
+                --no-tcp-relay \
+                --no-multicast-peers \
+                --denied-peer-ip=0.0.0.0-0.255.255.255 \
+                --denied-peer-ip=10.0.0.0-10.255.255.255 \
+                --denied-peer-ip=100.64.0.0-100.127.255.255 \
+                --denied-peer-ip=127.0.0.0-127.255.255.255 \
+                --denied-peer-ip=169.254.0.0-169.254.255.255 \
+                --denied-peer-ip=172.16.0.0-172.31.255.255 \
+                --denied-peer-ip=192.168.0.0-192.168.255.255 \
+                --denied-peer-ip=::1 \
+                --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff \
+                --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
           env:
             - name: TURN_SECRET
               valueFrom:

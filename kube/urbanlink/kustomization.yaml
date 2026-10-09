@@ -178,6 +178,8 @@ resources:
 - backend/hpa.yaml
 - temporal-worker/deployment.yaml
 - temporal-worker/service.yaml
+- opencode/serviceaccount.yaml
+- opencode/authorization.yaml
 - opencode/deployment.yaml
 - opencode/service.yaml
 - frontend/deployment.yaml
