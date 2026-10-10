@@ -267,6 +267,9 @@ resources:
 # creer de nouvelles -- c'est voulu : un `uid` est ce que portent les liens et
 # les signets. Verifier apres deploiement qu'il y a bien SIX entrees et pas
 # dix.
+    # 239 Ko de JSON : en client-side apply, l'annotation last-applied depasse
+    # la limite de 256 Kio et la synchro Argo ENTIERE echoue (constate le
+    # 2026-10-08). L'apply cote serveur n'ecrit pas cette annotation.
 configMapGenerator:
 - files:
   - config/common/kratos/identity.schema.json
@@ -303,9 +306,6 @@ configMapGenerator:
   - config/prod/observability/grafana-dashboards/05-maillage-et-chaine.json
   name: grafana-dashboards
   options:
-    # 239 Ko de JSON : en client-side apply, l'annotation last-applied depasse
-    # la limite de 256 Kio et la synchro Argo ENTIERE echoue (constate le
-    # 2026-10-08). L'apply cote serveur n'ecrit pas cette annotation.
     annotations:
       argocd.argoproj.io/sync-options: ServerSideApply=true
     labels:
@@ -339,13 +339,13 @@ configMapGenerator:
 images:
 - name: urbanconnect-backend
   newName: 10.0.0.130:5000/urbanconnect-backend
-  newTag: sha-49d3c8ec
+  newTag: sha-24801dd3
 - name: urbanconnect-frontend
   newName: 10.0.0.130:5000/urbanconnect-frontend
-  newTag: sha-49d3c8ec
+  newTag: sha-24801dd3
 - name: urbanconnect-opencode
   newName: 10.0.0.130:5000/urbanconnect-opencode
-  newTag: sha-49d3c8ec
+  newTag: sha-24801dd3
 - name: urbanconnect-temporal-worker
   newName: 10.0.0.130:5000/urbanconnect-temporal-worker
-  newTag: sha-49d3c8ec
+  newTag: sha-24801dd3
