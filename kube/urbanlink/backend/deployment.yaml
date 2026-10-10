@@ -221,6 +221,18 @@ spec:
             # sinon deux endroits décideront de la même valeur.
             - name: GRAPHQL_MAX_COMPLEXITY
               value: "20000"
+            # Push Android (Firebase Cloud Messaging), lu par `PushService`
+            # (backTs/src/modules/push/push.service.ts) : le JSON du compte de
+            # service firebase-adminsdk du projet `urbanlink-cb300`, sur une ligne.
+            # `optional: true` : absente, le push se declare inactif au demarrage
+            # et l'app fonctionne sans notification systeme -- un etat voulu, pas
+            # une panne. Offre Spark de Firebase : FCM est gratuit, sans quota.
+            - name: FIREBASE_SERVICE_ACCOUNT
+              valueFrom:
+                secretKeyRef:
+                  name: urbanconnect-secrets
+                  key: FIREBASE_SERVICE_ACCOUNT
+                  optional: true
             - name: STRIPE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
