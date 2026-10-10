@@ -156,8 +156,8 @@ vms = {
   # ceux qui arriveront. Ballon a 8 Go : au repos (entre deux runs), l'hote
   # reprend le reste.
   #
-  # PREMIER apply : `agent = false` (socle 9000 sans agent QEMU), puis meme
-  # procedure que le bloc mail ci-dessus avant de repasser a `true`.
+  # Reconstruction : PREMIER apply avec `agent = false` (socle 9000 sans agent
+  # QEMU), puis meme procedure que le bloc mail ci-dessus.
   "agent-lab" = {
     profile         = "debian-base"
     vm_id           = 170
@@ -166,7 +166,7 @@ vms = {
     memory          = 24576
     memory_floating = 8192
     disk_size       = 120
-    agent           = false
+    agent           = true # premier apply a false, procedure faite le 2026-10-10
     on_boot         = true
     # PAS base_nodes : c'est la cible des playbooks Mailcow (40-43).
     ansible_group = "agent_nodes"

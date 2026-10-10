@@ -29,6 +29,26 @@
   loop_control:
     label: "{{ item.name }}"
 
+# Dependances natives du runner (.NET : libicu, libssl...). Absentes d'une
+# Debian nue, le runner meurt des `config.sh` dans RunnerWebProxy, sans
+# message utile. ci-runner les avait recues a la main ; c'est la VM agent-lab
+# (2026-10-10) qui a revele le manque. Script officiel, fourni avec le runner.
+- name: Installer les dependances natives du runner
+  ansible.builtin.command:
+    cmd: ./bin/installdependencies.sh
+    chdir: "{{ github_runners_base_dir }}/{{ (github_runners | first).dir }}"
+    creates: /var/lib/github-runners-deps.done
+  register: github_runners_deps
+  when: github_runners | length > 0
+
+- name: Marquer les dependances comme installees
+  ansible.builtin.file:
+    path: /var/lib/github-runners-deps.done
+    state: touch
+    modification_time: preserve
+    access_time: preserve
+  when: github_runners_deps is changed
+
 # `.runner` n'existe qu'une fois l'enregistrement reussi : c'est le temoin
 # d'idempotence. Sans lui, chaque execution creerait un doublon cote GitHub.
 - name: Relever les runners deja enregistres
