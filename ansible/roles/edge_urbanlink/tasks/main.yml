@@ -22,6 +22,17 @@
     mode: "0644"
   notify: reload openresty
 
+# Log d'acces avec l'hote, pour le rapport de trafic de la VM agent-lab.
+- name: Deposer le log d'acces par hote
+  ansible.builtin.template:
+    src: agentlab-vhost-log.conf.j2
+    dest: /etc/nginx/conf.d/35-agentlab-vhost-log.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: edge_urbanlink_vhost_log | length > 0
+  notify: reload openresty
+
 # ---------------------------------------------------------------------------
 #  Controle d'origine des noms publics
 # ---------------------------------------------------------------------------
@@ -251,6 +262,7 @@
         state: absent
       loop:
         - /etc/nginx/sites-enabled/{{ edge_urbanlink_domain }}
+        - /etc/nginx/conf.d/35-agentlab-vhost-log.conf
         - /etc/nginx/conf.d/45-cloudflare-origin.conf
         - /etc/nginx/conf.d/50-default-deny-tls.conf
 

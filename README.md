@@ -17,6 +17,7 @@ host principal.
 > | `ci-runner` | 130 | 10.0.0.130 | 5 runners GitHub Actions + registre d'images du lab |
 > | `mail` | 140 | 10.0.0.140 | Mailcow, émission via le VPS Hostinger |
 > | `wow-turtle` | 150 | 10.0.0.150 | serveur Turtle WoW (`docs/turtle-wow.md`) |
+> | `agent-lab` | 170 | 10.0.0.170 | agents Claude Code, rapport trafic 18:00 (`docs/agent-lab.md`) — à créer |
 > | `kali-test`, `test-k8s` | 120, 190 | | éteintes ; disques sur pool2, perdus |
 >
 > Toutes sont décrites dans `terraform/lab.auto.tfvars` (versionné) ;

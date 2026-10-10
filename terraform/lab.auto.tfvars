@@ -146,6 +146,34 @@ vms = {
     description     = "Turtle WoW 1.17.2 (mangosd/realmd natifs). turtle.urbanlink.fr"
   }
 
+  # --- Lab d'agents IA (Claude Code) ----------------------------------------
+  # Agents planifies (rapport trafic quotidien a 18:00, etc.), pilotes depuis le
+  # PC par la CLI `lab` (depot agent-lab) en ssh ProxyJump. Voir
+  # docs/agent-lab.md. Configuree par playbooks/50-agent-lab.yml.
+  #
+  # Memoire : un process Claude Code pese 0,5 a 1 Go, plus DuckDB sur les logs
+  # de l'edge. 24 Go tiennent 6 a 10 agents en parallele, marge comprise pour
+  # ceux qui arriveront. Ballon a 8 Go : au repos (entre deux runs), l'hote
+  # reprend le reste.
+  #
+  # PREMIER apply : `agent = false` (socle 9000 sans agent QEMU), puis meme
+  # procedure que le bloc mail ci-dessus avant de repasser a `true`.
+  "agent-lab" = {
+    profile         = "debian-base"
+    vm_id           = 170
+    ip              = "10.0.0.170"
+    cores           = 8
+    memory          = 24576
+    memory_floating = 8192
+    disk_size       = 120
+    agent           = false
+    on_boot         = true
+    # PAS base_nodes : c'est la cible des playbooks Mailcow (40-43).
+    ansible_group = "agent_nodes"
+    tags          = ["ai", "agents"]
+    description   = "Lab d'agents Claude Code (rapports trafic urbanlink.fr / wow). Depot agent-lab, CLI `lab`."
+  }
+
   # --- VMs de validation, eteintes -------------------------------------------
   # `on_boot = false` NE SUFFIT PAS : il ne regit que le demarrage du noeud.
   # L'etat courant est regi par `started`, dont le defaut est `true` ; sans

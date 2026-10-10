@@ -1,0 +1,13 @@
+#!/bin/sh
+# {{ ansible_managed }} -- roles/agent_lab
+# Commande forcee de la cle de la VM agent-lab (utilisateur {{ agent_lab_edge_user }}).
+# Seul usage permis : restituer le log d'acces courant et le precedent.
+set -eu
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  access-log) ;;
+  *) echo "commande refusee : ${SSH_ORIGINAL_COMMAND:-}" >&2; exit 1 ;;
+esac
+L={{ agent_lab_edge_log }}
+if [ -f "$L.1.gz" ]; then zcat "$L.1.gz"; elif [ -f "$L.1" ]; then cat "$L.1"; fi
+[ -f "$L" ] && cat "$L"
+exit 0

@@ -1,0 +1,78 @@
+---
+# Lab d'agents IA (VM 170) -- voir docs/agent-lab.md.
+#
+#   ansible-playbook playbooks/50-agent-lab.yml
+#
+# Prealables (une fois) :
+#   1. /root/.secrets/agent-lab.env sur le noeud (CLAUDE_CODE_OAUTH_TOKEN,
+#      CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID) ;
+#   2. AGENTS_MAILBOX_PASSWORD dans kube/urbanlink/secrets.env, puis
+#      `ansible-playbook playbooks/42-mailcow.yml --tags accounts` pour creer
+#      la boite agents@urbanlink.fr ;
+#   3. `playbooks/33-urbanlink-edge.yml` pour poser le log d'acces par hote.
+#
+# Le code des agents n'est PAS pose ici : `lab deploy` depuis le PC.
+
+- name: Socle de la VM agent-lab
+  hosts: agent_nodes
+  gather_facts: true
+  become: true
+  roles:
+    - common
+    - agent_lab
+
+- name: Lecture du log de l'edge par agent-lab
+  hosts: proxmox
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Poser l'acces au log edge
+      ansible.builtin.include_role:
+        name: agent_lab
+        tasks_from: edge_access.yml
+      vars:
+        agent_lab_pubkey: "{{ hostvars[groups['agent_nodes'] | first].agent_lab_pubkey }}"
+
+- name: Lecture de la base et des journaux WoW par agent-lab
+  hosts: game_nodes
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Poser l'acces WoW
+      ansible.builtin.include_role:
+        name: agent_lab
+        tasks_from: wow_access.yml
+      vars:
+        agent_lab_pubkey: "{{ hostvars[groups['agent_nodes'] | first].agent_lab_pubkey }}"
+
+# Les cles d'hote du noeud et de la VM 150 sont apprises ici (accept-new) :
+# un echec dit tout de suite quel acces manque, plutot qu'au premier run a 18h.
+- name: Verifier les acces depuis agent-lab
+  hosts: agent_nodes
+  gather_facts: false
+  become: true
+  become_user: "{{ agent_lab_user | default('agent') }}"
+  tasks:
+    - name: Lire une ligne du log edge
+      ansible.builtin.shell: ssh edge-log access-log | tail -n 1
+      register: agent_lab_check_edge
+      changed_when: false
+      failed_when: agent_lab_check_edge.rc != 0
+
+    - name: Interroger MariaDB WoW
+      ansible.builtin.shell: echo 'SELECT COUNT(*) AS comptes FROM tw_logon.account' | ssh wow-ro sql
+      register: agent_lab_check_wow
+      changed_when: false
+
+    - name: Interroger Prometheus par la passerelle
+      ansible.builtin.uri:
+        url: "{{ agent_lab_gateway | default('http://10.0.0.111:30080') }}/api/v1/query?query=up"
+        headers:
+          Host: "{{ agent_lab_prometheus_host | default('prometheus.urbanlink.fr') }}"
+
+    - name: Resume
+      ansible.builtin.debug:
+        msg:
+          - "edge : {{ 'OK' if agent_lab_check_edge.stdout else 'log vide (33-urbanlink-edge.yml joue ?)' }}"
+          - "wow  : {{ agent_lab_check_wow.stdout_lines | default([]) | join(' ') }}"
+          - "Suite : depuis le PC, `lab deploy` puis `lab run traffic`."

@@ -30,6 +30,10 @@ edge_urbanlink_binary: /usr/local/openresty/nginx/sbin/nginx
 # c'est l'en-tete Host qui les distingue cote Istio.
 edge_urbanlink_gateway: "http://10.0.0.111:30080"
 
+# Second log d'acces, avec l'hote, lu par la VM agent-lab (rapport de trafic).
+# Chaine vide = ne pas le poser.
+edge_urbanlink_vhost_log: /var/log/nginx/access-vhost.log
+
 # Les sources autorisees pour les services INTERNES. Leur nom resolvant deja
 # en IP privee, ce filtre est la seconde barriere -- pas la premiere.
 edge_urbanlink_allow:

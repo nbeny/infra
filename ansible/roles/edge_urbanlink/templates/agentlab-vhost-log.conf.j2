@@ -1,0 +1,17 @@
+# {{ ansible_managed }} -- roles/edge_urbanlink
+#
+# Second log d'acces, AVEC l'hote : le `access.log` historique (format
+# combined) melange urbanlink.fr, api., auth. et wow. sans pouvoir les
+# distinguer. Celui-ci est lu par la VM agent-lab (roles/agent_lab,
+# utilisateur `agentlog`) pour le rapport de trafic quotidien.
+#
+# access.log n'est PAS remplace : CrowdSec le lit dans son format actuel.
+# Les deux directives `access_log` au niveau http se cumulent, et aucun vhost
+# n'en declare une qui les masquerait.
+#
+# Tabulations comme separateur : nginx echappe les octets de controle des
+# variables en \xHH, une tabulation ne peut donc pas apparaitre dans un champ.
+# $remote_addr est deja l'IP du visiteur (cf. 30-cloudflare-realip.conf).
+# Rotation : /etc/logrotate.d/nginx couvre /var/log/nginx/*.log.
+log_format agentlab '$time_iso8601\t$host\t$remote_addr\t$request_method\t$request_uri\t$status\t$body_bytes_sent\t$request_time\t$http_referer\t$http_user_agent';
+access_log {{ edge_urbanlink_vhost_log }} agentlab;

@@ -1,0 +1,73 @@
+---
+# Compte de service Grafana `agent-lab`, role Viewer, et un jeton neuf.
+#
+# Un jeton Grafana ne se relit jamais apres emission : on n'en cree un que si
+# /etc/agent-lab/env n'en contient pas (cf. main.yml). Pour le renouveler,
+# retirer la ligne GRAFANA_TOKEN= de ce fichier et rejouer le playbook.
+#
+# Viewer suffit pour /api/ds/query, et la datasource postgres-metier se
+# connecte en grafana_ro : le compte ne peut rien ecrire, ni dans Grafana ni
+# en base.
+
+- name: Chercher le compte de service Grafana
+  ansible.builtin.uri:
+    url: "{{ agent_lab_gateway }}/api/serviceaccounts/search?query={{ agent_lab_grafana_sa }}"
+    headers:
+      Host: "{{ agent_lab_grafana_host }}"
+    url_username: "{{ agent_lab_console.CONSOLE_ADMIN_USER }}"
+    url_password: "{{ agent_lab_console.CONSOLE_ADMIN_PASSWORD }}"
+    force_basic_auth: true
+    return_content: true
+  register: agent_lab_sa_search
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  check_mode: false
+  no_log: true
+
+- name: Creer le compte de service Grafana
+  ansible.builtin.uri:
+    url: "{{ agent_lab_gateway }}/api/serviceaccounts"
+    method: POST
+    headers:
+      Host: "{{ agent_lab_grafana_host }}"
+    url_username: "{{ agent_lab_console.CONSOLE_ADMIN_USER }}"
+    url_password: "{{ agent_lab_console.CONSOLE_ADMIN_PASSWORD }}"
+    force_basic_auth: true
+    body_format: json
+    body: { name: "{{ agent_lab_grafana_sa }}", role: Viewer, isDisabled: false }
+    status_code: [200, 201]
+    return_content: true
+  register: agent_lab_sa_created
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  when: >-
+    agent_lab_sa_search.json.serviceAccounts
+    | selectattr('name', 'equalto', agent_lab_grafana_sa) | list | length == 0
+  no_log: true
+
+- name: Retenir l'identifiant du compte de service
+  ansible.builtin.set_fact:
+    agent_lab_sa_id: >-
+      {{ agent_lab_sa_created.json.id if (agent_lab_sa_created is not skipped)
+         else (agent_lab_sa_search.json.serviceAccounts
+               | selectattr('name', 'equalto', agent_lab_grafana_sa) | first).id }}
+
+- name: Emettre un jeton pour le compte de service
+  ansible.builtin.uri:
+    url: "{{ agent_lab_gateway }}/api/serviceaccounts/{{ agent_lab_sa_id }}/tokens"
+    method: POST
+    headers:
+      Host: "{{ agent_lab_grafana_host }}"
+    url_username: "{{ agent_lab_console.CONSOLE_ADMIN_USER }}"
+    url_password: "{{ agent_lab_console.CONSOLE_ADMIN_PASSWORD }}"
+    force_basic_auth: true
+    body_format: json
+    body: { name: "agent-lab-{{ ansible_date_time.epoch }}" }
+    status_code: [200, 201]
+    return_content: true
+  register: agent_lab_token_resp
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  no_log: true
+
+- name: Retenir le jeton
+  ansible.builtin.set_fact:
+    agent_lab_new_grafana_token: "{{ agent_lab_token_resp.json.key }}"
+  no_log: true

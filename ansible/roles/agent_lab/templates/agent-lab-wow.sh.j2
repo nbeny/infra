@@ -1,0 +1,22 @@
+#!/bin/bash
+# {{ ansible_managed }} -- roles/agent_lab
+# Commande forcee de la cle de la VM agent-lab (utilisateur {{ agent_lab_wow_user }}).
+#   sql            requete sur stdin -> MariaDB, utilisateur {{ agent_lab_wow_user }} (SELECT seul)
+#   journal U H    journalctl -u U des H dernieres heures (U dans la liste blanche)
+set -euo pipefail
+read -r -a ARGS <<< "${SSH_ORIGINAL_COMMAND:-}"
+case "${ARGS[0]:-}" in
+  sql)
+    # Lecture seule deux fois : les droits de l'utilisateur, et la transaction.
+    { echo "SET SESSION TRANSACTION READ ONLY; SET SESSION max_statement_time = 60;"; head -c 65536; } \
+      | mariadb --batch --skip-ssl
+    ;;
+  journal)
+    unit="${ARGS[1]:-}"; hours="${ARGS[2]:-24}"
+    case "$unit" in {{ agent_lab_wow_units | join('|') }}) ;; *) echo "unite refusee : $unit" >&2; exit 1 ;; esac
+    [[ "$hours" =~ ^[0-9]{1,3}$ ]] || { echo "heures invalides" >&2; exit 1; }
+    journalctl -u "$unit" --since "$hours hours ago" --no-pager -o short-iso
+    ;;
+  *)
+    echo "commande refusee : ${SSH_ORIGINAL_COMMAND:-}" >&2; exit 1 ;;
+esac

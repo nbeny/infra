@@ -1,0 +1,18 @@
+# {{ ansible_managed }} -- roles/agent_lab
+# En face, chaque cle est bridee a une commande forcee en lecture seule.
+
+Host edge-log
+    HostName {{ agent_lab_edge_host }}
+    User {{ agent_lab_edge_user }}
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    BatchMode yes
+
+Host wow-ro
+    HostName {{ agent_lab_wow_host }}
+    User {{ agent_lab_wow_user }}
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+    BatchMode yes

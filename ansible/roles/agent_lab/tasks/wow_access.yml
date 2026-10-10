@@ -1,0 +1,79 @@
+---
+# Sur la VM 150 (wow-turtle) : lecture de MariaDB et des journaux du site.
+#
+# La VM 150 est traitee en voisin hostile (scripts/turtle/nftables.conf). On
+# n'y ouvre qu'une chose : ssh depuis agent-lab, vers un utilisateur dont la
+# cle est bridee a une commande forcee. La sortie de la VM 150 vers le lab
+# reste fermee -- c'est agent-lab qui vient chercher, jamais l'inverse.
+
+# Une ligne inseree dans le fichier en place, pas une copie de
+# scripts/turtle/nftables.conf : on ne sait pas que le fichier deploye est
+# identique au depot, et l'ecraser pourrait rouvrir ou fermer autre chose. La
+# meme ligne est reportee dans le depot pour une reconstruction.
+- name: Ouvrir ssh a agent-lab dans le pare-feu de la VM
+  ansible.builtin.lineinfile:
+    path: /etc/nftables.conf
+    insertafter: 'tcp dport 22 ip saddr \{'
+    line: '    tcp dport 22 ip saddr {{ agent_lab_ip }} accept comment "agent-lab : cle bridee a une commande forcee en lecture (roles/agent_lab)"'
+    validate: nft -c -f %s
+  register: agent_lab_wow_nft
+
+- name: Recharger le pare-feu
+  ansible.builtin.command: nft -f /etc/nftables.conf
+  when: agent_lab_wow_nft is changed
+
+- name: Creer l'utilisateur de lecture
+  ansible.builtin.user:
+    name: "{{ agent_lab_wow_user }}"
+    system: true
+    shell: /bin/bash
+    home: "/var/lib/{{ agent_lab_wow_user }}"
+    create_home: true
+    # Lire le journal des unites wow-site / wow-shop.
+    groups: [systemd-journal]
+    password: "!"
+
+- name: Poser la commande forcee
+  ansible.builtin.template:
+    src: agent-lab-wow.sh.j2
+    dest: /usr/local/bin/agent-lab-wow
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Autoriser la cle de la VM agent-lab, bridee
+  ansible.posix.authorized_key:
+    user: "{{ agent_lab_wow_user }}"
+    key: "{{ agent_lab_pubkey }}"
+    key_options: 'restrict,from="{{ agent_lab_ip }}",command="/usr/local/bin/agent-lab-wow"'
+    exclusive: true
+
+# unix_socket : pas de mot de passe a stocker, l'utilisateur systeme EST
+# l'identite MariaDB. Droits : SELECT sur les bases listees, et sur
+# tw_logon.account seulement les colonnes sans secret (ni hash, ni email, ni IP).
+- name: Creer l'utilisateur MariaDB en lecture seule
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      mariadb <<'SQL'
+      CREATE USER IF NOT EXISTS '{{ agent_lab_wow_user }}'@'localhost' IDENTIFIED VIA unix_socket;
+      REVOKE ALL PRIVILEGES, GRANT OPTION FROM '{{ agent_lab_wow_user }}'@'localhost';
+      {% for db in agent_lab_wow_databases %}
+      GRANT SELECT ON `{{ db }}`.* TO '{{ agent_lab_wow_user }}'@'localhost';
+      {% endfor %}
+      GRANT SELECT (`{{ agent_lab_wow_account_columns | join('`, `') }}`)
+        ON `tw_logon`.`account` TO '{{ agent_lab_wow_user }}'@'localhost';
+      ALTER USER '{{ agent_lab_wow_user }}'@'localhost' WITH MAX_STATEMENT_TIME 60 MAX_USER_CONNECTIONS 2;
+      SQL
+    executable: /bin/bash
+  changed_when: false
+
+- name: Verifier que l'utilisateur ne peut PAS lire les hash de mots de passe
+  ansible.builtin.shell:
+    cmd: "echo 'SELECT sha_pass_hash FROM tw_logon.account LIMIT 1;' | mariadb 2>&1 || true"
+    executable: /bin/bash
+  become: true
+  become_user: "{{ agent_lab_wow_user }}"
+  register: agent_lab_wow_probe
+  changed_when: false
+  failed_when: "'denied' not in agent_lab_wow_probe.stdout"

@@ -1,0 +1,19 @@
+# {{ ansible_managed }} -- roles/agent_lab
+# Run planifie d'un agent. Declenche par agent-lab-<agent>.timer, que genere
+# `labctl sync-timers` a partir de agents/<agent>/agent.toml.
+[Unit]
+Description=Agent lab : run de %i
+After=network-online.target
+
+[Service]
+Type=exec
+EnvironmentFile={{ agent_lab_etc }}/env
+Environment=PATH=/home/{{ agent_lab_user }}/.local/bin:{{ agent_lab_home }}/.venv/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory={{ agent_lab_home }}
+ExecStart={{ agent_lab_home }}/.venv/bin/labctl run %i --scheduled
+# Le delai propre a l'agent (timeout_min) est gere par labctl ; ceci n'est
+# qu'un filet.
+TimeoutStartSec=2h
+TimeoutStopSec=60
+KillMode=control-group
+Nice=5

@@ -1,0 +1,198 @@
+---
+# Socle de la VM agent-lab. Joue sur agent_nodes, APRES le role `common`.
+
+# ---------------------------------------------------------------------------
+#  Secrets
+# ---------------------------------------------------------------------------
+- name: Lire les secrets du lab d'agents sur le noeud
+  ansible.builtin.slurp:
+    src: "{{ agent_lab_secrets_file }}"
+  register: agent_lab_secrets_raw
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  no_log: true
+
+# Meme extraction que roles/mailcow/tasks/accounts.yml (regex_search ligne a
+# ligne), eprouvee sous ansible-core 2.19 -- ou les echappements dans les
+# chaines Jinja d'un scalaire replie ne se comportent plus comme avant.
+- name: Extraire les secrets
+  ansible.builtin.set_fact:
+    agent_lab_secret: >-
+      {{ agent_lab_secret | default({}) | combine({
+           item: ((agent_lab_secrets_raw.content | b64decode
+             | regex_search('^' ~ item ~ '=(.*)$', '\1', multiline=True)) or [''])[0] | trim
+         }) }}
+  loop: [CLAUDE_CODE_OAUTH_TOKEN, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID]
+  no_log: true
+
+# Les identifiants des consoles (compte Grafana) et le mot de passe de la boite
+# agents@ vivent dans le fichier de secrets du cluster : c'est lui que lit deja
+# le role mailcow pour CREER la boite. Une seule source, pas de copie a tenir
+# synchronisee.
+- name: Lire les secrets des consoles
+  ansible.builtin.slurp:
+    src: "{{ agent_lab_console_secrets }}"
+  register: agent_lab_console_raw
+  delegate_to: "{{ groups['proxmox'] | first }}"
+  no_log: true
+
+- name: Extraire les secrets des consoles
+  ansible.builtin.set_fact:
+    agent_lab_console: >-
+      {{ agent_lab_console | default({}) | combine({
+           item: ((agent_lab_console_raw.content | b64decode
+             | regex_search('^' ~ item ~ '=(\S*)', '\1', multiline=True)) or [''])[0] | trim
+         }) }}
+  loop: [CONSOLE_ADMIN_USER, CONSOLE_ADMIN_PASSWORD, AGENTS_MAILBOX_PASSWORD]
+  no_log: true
+
+- name: Exiger les secrets indispensables
+  ansible.builtin.assert:
+    that:
+      - (agent_lab_secret.CLAUDE_CODE_OAUTH_TOKEN | default('')) | length > 20
+      - (agent_lab_secret.CLOUDFLARE_API_TOKEN | default('')) | length > 20
+      - (agent_lab_secret.CLOUDFLARE_ZONE_ID | default('')) | length == 32
+      - (agent_lab_console.AGENTS_MAILBOX_PASSWORD | default('')) | length >= 12
+      - (agent_lab_console.CONSOLE_ADMIN_PASSWORD | default('')) | length >= 8
+    fail_msg: >-
+      Secrets incomplets. {{ agent_lab_secrets_file }} : CLAUDE_CODE_OAUTH_TOKEN
+      (`claude setup-token` sur le PC), CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID.
+      {{ agent_lab_console_secrets }} : AGENTS_MAILBOX_PASSWORD (12 caracteres
+      min., la boite agents@ est creee par 42-mailcow.yml) et
+      CONSOLE_ADMIN_PASSWORD. Voir docs/agent-lab.md.
+  no_log: true
+
+# ---------------------------------------------------------------------------
+#  Utilisateur et arborescence
+# ---------------------------------------------------------------------------
+- name: Installer les paquets
+  ansible.builtin.apt:
+    name: "{{ agent_lab_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Claude Code refuse de tourner en root avec des permissions etendues, et un
+# agent n'a de toute facon rien a faire en root.
+- name: Creer l'utilisateur des agents
+  ansible.builtin.user:
+    name: "{{ agent_lab_user }}"
+    shell: /bin/bash
+    create_home: true
+    generate_ssh_key: true
+    ssh_key_type: ed25519
+    ssh_key_comment: "agent@agent-lab"
+  register: agent_lab_account
+
+# Le PC (CLI `lab`) se connecte directement sous ce compte.
+- name: Autoriser les cles du lab sur le compte des agents
+  ansible.posix.authorized_key:
+    user: "{{ agent_lab_user }}"
+    key: "{{ lab_ssh_public_keys | join('\n') }}"
+    exclusive: true
+
+- name: Creer les repertoires
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ agent_lab_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ agent_lab_home }}", owner: "{{ agent_lab_user }}", mode: "0755" }
+    - { path: "{{ agent_lab_data }}", owner: "{{ agent_lab_user }}", mode: "0750" }
+    - { path: "{{ agent_lab_etc }}", owner: root, mode: "0750" }
+
+- name: Lire le jeton Grafana deja emis
+  ansible.builtin.shell: "grep -oP '^GRAFANA_TOKEN=\\K.+' {{ agent_lab_etc }}/env || true"
+  register: agent_lab_existing_grafana
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Emettre le jeton Grafana
+  ansible.builtin.include_tasks: grafana_token.yml
+  when: agent_lab_existing_grafana.stdout | trim | length == 0
+
+- name: Ecrire l'environnement des agents
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ agent_lab_etc }}/env"
+    owner: root
+    group: "{{ agent_lab_user }}"
+    mode: "0640"
+  vars:
+    agent_lab_grafana_token: "{{ agent_lab_new_grafana_token | default(agent_lab_existing_grafana.stdout | trim) }}"
+  no_log: true
+
+- name: Epingler le serveur de messagerie sur son IP interne
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "\\s{{ agent_lab_mail_name | regex_escape }}$"
+    line: "{{ agent_lab_mail_ip }} {{ agent_lab_mail_name }}"
+
+# ---------------------------------------------------------------------------
+#  Acces ssh sortants, bornes par des commandes forcees en face
+# ---------------------------------------------------------------------------
+- name: Configurer les alias ssh des sources
+  ansible.builtin.template:
+    src: ssh_config.j2
+    dest: "/home/{{ agent_lab_user }}/.ssh/config"
+    owner: "{{ agent_lab_user }}"
+    group: "{{ agent_lab_user }}"
+    mode: "0600"
+
+- name: Relever la cle publique des agents
+  ansible.builtin.slurp:
+    src: "/home/{{ agent_lab_user }}/.ssh/id_ed25519.pub"
+  register: agent_lab_pubkey_raw
+
+- name: Exposer la cle aux autres plays
+  ansible.builtin.set_fact:
+    agent_lab_pubkey: "{{ agent_lab_pubkey_raw.content | b64decode | trim }}"
+
+# ---------------------------------------------------------------------------
+#  Claude Code et services
+# ---------------------------------------------------------------------------
+# Installeur natif : binaire dans ~/.local/bin, mis a jour par lui-meme. Pas de
+# Node a maintenir.
+- name: Installer Claude Code
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://claude.ai/install.sh | bash
+    creates: "/home/{{ agent_lab_user }}/.local/bin/claude"
+  become: true
+  become_user: "{{ agent_lab_user }}"
+  environment:
+    HOME: "/home/{{ agent_lab_user }}"
+
+# Sans linger, les timers --user ne tournent que pendant une session ouverte.
+- name: Activer le linger de l'utilisateur des agents
+  ansible.builtin.command: "loginctl enable-linger {{ agent_lab_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ agent_lab_user }}"
+
+- name: Creer le repertoire des unites utilisateur
+  ansible.builtin.file:
+    path: "/home/{{ agent_lab_user }}/.config/systemd/user"
+    state: directory
+    owner: "{{ agent_lab_user }}"
+    group: "{{ agent_lab_user }}"
+    mode: "0755"
+
+- name: Poser le gabarit de service des runs planifies
+  ansible.builtin.template:
+    src: agent-lab-run@.service.j2
+    dest: "/home/{{ agent_lab_user }}/.config/systemd/user/agent-lab-run@.service"
+    owner: "{{ agent_lab_user }}"
+    group: "{{ agent_lab_user }}"
+    mode: "0644"
+
+# Visibles par ssh (`lab` du PC) sans PATH particulier. Pendants tant que
+# `lab deploy` n'a pas cree le venv : c'est attendu.
+- name: Lier labctl et labtools dans /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ agent_lab_home }}/.venv/bin/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    force: true
+    follow: false
+  loop: [labctl, labtools]

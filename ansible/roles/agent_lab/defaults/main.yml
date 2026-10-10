@@ -1,0 +1,82 @@
+---
+# ============================================================================
+#  Lab d'agents IA (VM 170) -- voir docs/agent-lab.md
+# ----------------------------------------------------------------------------
+#  Le role pose le SYSTEME : utilisateur, Claude Code, secrets, acces en
+#  lecture aux sources de donnees. Le CODE des agents (depot agent-lab) arrive
+#  par `lab deploy` depuis le PC, sans root.
+#
+#  Principe directeur : LECTURE SEULE. Chaque acces est borne a la source, pas
+#  seulement par la liste blanche d'outils de Claude Code :
+#    - Postgres : role grafana_ro (transactions read-only), via Grafana Viewer
+#    - edge     : utilisateur `agentlog` du noeud, commande forcee `cat` du log
+#    - WoW      : utilisateur `agentro` de la VM 150, commande forcee, MariaDB
+#                 SELECT seul sans les colonnes secretes de tw_logon.account
+# ============================================================================
+
+agent_lab_user: agent
+agent_lab_home: /opt/agent-lab
+agent_lab_data: /var/lib/agent-lab
+agent_lab_etc: /etc/agent-lab
+
+agent_lab_packages:
+  - python3
+  - python3-venv
+  - python3-pip
+  - rsync
+  - sqlite3
+  - openssh-client
+  - git
+  - curl
+  - jq
+
+# --- Secrets, lus sur le noeud de controle (jamais versionnes) ------------
+# Modele : agent-lab/.secrets/agent-lab.env dans le depot agent-lab.
+# Cles attendues : CLAUDE_CODE_OAUTH_TOKEN, CLOUDFLARE_API_TOKEN,
+# CLOUDFLARE_ZONE_ID, AGENTS_MAILBOX_PASSWORD.
+agent_lab_secrets_file: /root/.secrets/agent-lab.env
+# Pour creer le compte de service Grafana (CONSOLE_ADMIN_USER / _PASSWORD).
+agent_lab_console_secrets: "{{ playbook_dir }}/../../kube/urbanlink/secrets.env"
+
+# --- Sources --------------------------------------------------------------
+agent_lab_gateway: "http://10.0.0.111:30080"
+agent_lab_grafana_host: grafana.urbanlink.fr
+agent_lab_prometheus_host: prometheus.urbanlink.fr
+agent_lab_grafana_sa: agent-lab
+
+# Mailcow. Le nom est epingle sur l'IP interne dans /etc/hosts : la connexion
+# reste dans le lab et le certificat se verifie sous son vrai nom.
+agent_lab_mail_name: mail.urbanlink.fr
+agent_lab_mail_ip: 10.0.0.140
+agent_lab_mail_from: agents@urbanlink.fr
+
+# Noeud Proxmox vu depuis vmbr1 ; log ecrit par roles/edge_urbanlink.
+agent_lab_edge_host: 10.0.0.1
+agent_lab_edge_user: agentlog
+agent_lab_edge_log: /var/log/nginx/access-vhost.log
+
+agent_lab_wow_host: 10.0.0.150
+agent_lab_wow_user: agentro
+agent_lab_wow_units: [wow-site, wow-shop]
+# Colonnes de tw_logon.account lisibles. ABSENTES a dessein : username, sha_pass_hash,
+# sessionkey, v, s, email, tfa_verif, last_ip, last_local_ip, security,
+# pass_verif, token_key, email_keyword, geolock_pin, comments.
+agent_lab_wow_account_columns:
+  - id
+  - rank
+  - joindate
+  - last_login
+  - online
+  - expansion
+  - locale
+  - os
+  - platform
+  - current_realm
+  - banned
+  - locked
+  - failed_logins
+  - email_verif
+agent_lab_wow_databases: [tw_char, wow_site]
+
+# IP de la VM agent-lab, vue par le noeud et la VM 150 (filtre `from=`).
+agent_lab_ip: "{{ hostvars[groups['agent_nodes'] | first].ansible_host }}"
