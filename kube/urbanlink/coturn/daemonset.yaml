@@ -22,8 +22,10 @@
 # de relais en 10.0.0.111 (IP privée du nœud), désormais refusée comme pair. Un
 # appel où LES DEUX parties passent par le relais peut donc échouer. Le bon
 # remède n'est pas de réautoriser 10.0.0.111 (kubelet, API server et NodePorts
-# y écoutent) mais de poser `--external-ip=<IP publique>/10.0.0.111`, que ce
-# dépôt ne connaît pas : à renseigner.
+# y écoutent) mais de poser `--external-ip=<IP publique>/10.0.0.111` : posé ci-
+# dessous avec l'IP WAN de la maison (`82.65.87.60`, `mikrotik/README.md`).
+# ⚠️ Cette IP n'est PAS garantie fixe (`docs/reconstruction.md`) : si elle change,
+# la mettre à jour ici, sinon les candidats de relais annoncés sont faux.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -67,6 +69,7 @@ spec:
                 --no-dtls \
                 --no-tcp-relay \
                 --no-multicast-peers \
+                --external-ip=82.65.87.60/10.0.0.111 \
                 --denied-peer-ip=0.0.0.0-0.255.255.255 \
                 --denied-peer-ip=10.0.0.0-10.255.255.255 \
                 --denied-peer-ip=100.64.0.0-100.127.255.255 \
