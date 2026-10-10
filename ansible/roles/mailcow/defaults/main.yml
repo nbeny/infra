@@ -131,11 +131,12 @@ mailcow_mailboxes:
   # courrier adresse a ce compte (Kratos, notifications, comptes ouverts chez
   # les sources de donnees) rebondissait.
   - { local_part: decouvrir, domain: urbanlink.fr, name: "A decouvrir UrbanLink", quota: 1024 }
-  # Expediteur des rapports du lab d'agents IA (VM 170, roles/agent_lab), qui
-  # s'authentifie en SMTP depuis 10.0.0.170. Mot de passe SEPARE, lu aussi par
-  # roles/agent_lab dans le meme fichier. Limite basse : un agent en boucle ne
-  # doit pas pouvoir abimer la reputation de l'IP d'emission.
-  - { local_part: agents,  domain: urbanlink.fr, name: "Agent lab",             quota: 256, password_env: AGENTS_MAILBOX_PASSWORD, ratelimit: "20/h" }
+  # Expediteur des rapports du lab d'agents IA (VM 170, depot agent-lab), qui
+  # s'authentifie en SMTP depuis 10.0.0.170. Mot de passe des consoles, comme
+  # les autres boites ; la VM le recoit des GitHub Secrets du depot agent-lab
+  # (AGENTS_MAILBOX_PASSWORD). Limite basse : un agent en boucle ne doit pas
+  # pouvoir abimer la reputation de l'IP d'emission.
+  - { local_part: agents,  domain: urbanlink.fr, name: "Agent lab",             quota: 256, ratelimit: "20/h" }
 
 # postmaster@ et abuse@ ne sont pas decoratifs : leur absence est un signal
 # negatif pour les grands fournisseurs, et abuse@ est l'adresse qu'un operateur

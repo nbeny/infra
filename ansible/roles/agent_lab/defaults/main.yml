@@ -2,9 +2,9 @@
 # ============================================================================
 #  Lab d'agents IA (VM 170) -- voir docs/agent-lab.md
 # ----------------------------------------------------------------------------
-#  Le role pose le SYSTEME : utilisateur, Claude Code, secrets, acces en
-#  lecture aux sources de donnees. Le CODE des agents (depot agent-lab) arrive
-#  par `lab deploy` depuis le PC, sans root.
+#  Le role pose le SYSTEME : utilisateur, Claude Code, runner CI, acces en
+#  lecture aux sources de donnees. Le CODE des agents et leurs secrets arrivent
+#  par la CI du depot agent-lab (push sur main), sans root.
 #
 #  Principe directeur : LECTURE SEULE. Chaque acces est borne a la source, pas
 #  seulement par la liste blanche d'outils de Claude Code :
@@ -30,13 +30,17 @@ agent_lab_packages:
   - curl
   - jq
 
-# --- Secrets, lus sur le noeud de controle (jamais versionnes) ------------
-# Modele : agent-lab/.secrets/agent-lab.env dans le depot agent-lab.
-# Cles attendues : CLAUDE_CODE_OAUTH_TOKEN, CLOUDFLARE_API_TOKEN,
-# CLOUDFLARE_ZONE_ID, AGENTS_MAILBOX_PASSWORD.
-agent_lab_secrets_file: /root/.secrets/agent-lab.env
-# Pour creer le compte de service Grafana (CONSOLE_ADMIN_USER / _PASSWORD).
+# --- Secrets --------------------------------------------------------------
+# Ceux des agents viennent des GitHub Secrets du depot agent-lab (job deploy).
+# Ici, seulement de quoi creer le compte de service Grafana
+# (CONSOLE_ADMIN_USER / _PASSWORD).
 agent_lab_console_secrets: "{{ playbook_dir }}/../../kube/urbanlink/secrets.env"
+
+# --- CI/CD : runner GitHub Actions sur la VM ------------------------------
+# Le job `deploy` du depot agent-lab tourne ICI, sous l'utilisateur des agents.
+# Enregistrement (une fois) : -e github_runners_pat=$(gh auth token)
+agent_lab_repo: nbeny/agent-lab
+agent_lab_runner_name: agent-lab
 
 # --- Sources --------------------------------------------------------------
 agent_lab_gateway: "http://10.0.0.111:30080"

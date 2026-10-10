@@ -31,24 +31,42 @@ est en lecture à la source.**
 
 Les IP du log edge sont remplacées par un condensat salé avant analyse.
 
+## Secrets et CI/CD
+
+**Source de vérité des secrets des agents : les GitHub Secrets du dépôt
+`nbeny/agent-lab`** — `CLAUDE_CODE_OAUTH_TOKEN` (abonnement, `claude
+setup-token`), `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
+`CLOUDFLARE_ZONE_ID`, `AGENTS_MAILBOX_PASSWORD` (= mot de passe des consoles,
+comme les autres boîtes). Copie lisible : `agent-lab/.secrets/agent-lab.env`
+sur le PC, repoussée par `scripts/github-sync-secrets.sh`.
+
+**Déploiement automatique** (`.github/workflows/ci-cd.yml` du dépôt agent-lab) :
+
+```
+push main ─► test (ubuntu-latest : pytest, agents, scripts)
+          └► deploy (runner auto-hébergé SUR la VM, label agent-lab, utilisateur agent)
+               1. écrit ~/.config/agent-lab/secrets.env depuis les GitHub Secrets (0600)
+               2. bin/install.sh : rsync → /opt/agent-lab, pip, labctl sync-timers
+               3. vérifie Cloudflare et Prometheus
+```
+
+Aucun port ouvert vers le lab : le runner va chercher ses jobs chez GitHub.
+Ansible ne garde que le jeton Grafana (`/etc/agent-lab/env`), qu'il émet avec
+les identifiants des consoles.
+
 ## Mise en service
 
-1. **Secrets** — sur le PC, `claude setup-token` (connexion à l'abonnement),
-   puis sur le nœud `/root/.secrets/agent-lab.env` (0600) :
-   ```
-   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
-   CLOUDFLARE_API_TOKEN=...
-   CLOUDFLARE_ZONE_ID=b8f77d7d9755c33f819b8116aee8dd40
-   ```
-   et dans `kube/urbanlink/secrets.env` : `AGENTS_MAILBOX_PASSWORD=` (12+ car.).
-2. **Boîte mail** : `ansible-playbook playbooks/42-mailcow.yml` (crée `agents@`).
-3. **Log edge par hôte** : `ansible-playbook playbooks/33-urbanlink-edge.yml`.
-4. **VM** : `terraform apply` (crée 170 avec `agent = false`), puis
-   `ansible-playbook playbooks/50-agent-lab.yml`, puis la procédure de l'agent
+1. **Boîte mail** : `ansible-playbook playbooks/42-mailcow.yml --tags accounts`.
+2. **Log edge par hôte** : `ansible-playbook playbooks/33-urbanlink-edge.yml`.
+3. **VM** : `terraform apply` (crée 170 avec `agent = false`), puis
+   `ansible-playbook playbooks/50-agent-lab.yml -e github_runners_pat=$(gh auth token)`
+   (le PAT enregistre le runner, une seule fois), puis la procédure de l'agent
    QEMU (`qm set 170 --agent enabled=1 && qm stop 170 && qm start 170`, et
    `agent = true` dans `lab.auto.tfvars`).
+4. **Premier déploiement** : push sur `main` du dépôt agent-lab (ou relancer le
+   workflow `ci-cd`). Secours sans CI : `lab deploy` depuis le PC.
 5. **PC** : bloc `lab ssh-config` dans `~/.ssh/config`, `pipx install <agent-lab>`,
-   puis `lab deploy` et `lab run traffic`.
+   puis `lab run traffic`.
 
 ## Exploitation
 
@@ -62,8 +80,13 @@ Les IP du log edge sont remplacées par un condensat salé avant analyse.
 | État et prochains déclenchements | `lab status` |
 
 Sur la VM : `/opt/agent-lab` (code + `.venv`), `/var/lib/agent-lab` (lab.db,
-rapports, journaux de runs), `/etc/agent-lab/env` (secrets, 0640 root:agent).
+rapports, journaux de runs), `/etc/agent-lab/env` (config + jeton Grafana,
+0640 root:agent), `~agent/.config/agent-lab/secrets.env` (écrit par la CI),
+`/opt/actions-runner/agent-lab` (runner).
 Timers : `systemctl --user list-timers` sous `agent`.
+
+**Changer un secret d'agent** : `.secrets/agent-lab.env` puis
+`scripts/github-sync-secrets.sh`, et relancer le workflow `ci-cd`.
 
 **Renouveler le jeton Grafana** : retirer la ligne `GRAFANA_TOKEN=` de
 `/etc/agent-lab/env` et rejouer 50-agent-lab.yml.

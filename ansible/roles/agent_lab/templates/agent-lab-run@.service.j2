@@ -8,6 +8,8 @@ After=network-online.target
 [Service]
 Type=exec
 EnvironmentFile={{ agent_lab_etc }}/env
+# Ecrit par la CI ; `-` : absent avant le premier deploiement.
+EnvironmentFile=-%h/.config/agent-lab/secrets.env
 Environment=PATH=/home/{{ agent_lab_user }}/.local/bin:{{ agent_lab_home }}/.venv/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory={{ agent_lab_home }}
 ExecStart={{ agent_lab_home }}/.venv/bin/labctl run %i --scheduled

@@ -4,30 +4,11 @@
 # ---------------------------------------------------------------------------
 #  Secrets
 # ---------------------------------------------------------------------------
-- name: Lire les secrets du lab d'agents sur le noeud
-  ansible.builtin.slurp:
-    src: "{{ agent_lab_secrets_file }}"
-  register: agent_lab_secrets_raw
-  delegate_to: "{{ groups['proxmox'] | first }}"
-  no_log: true
-
-# Meme extraction que roles/mailcow/tasks/accounts.yml (regex_search ligne a
-# ligne), eprouvee sous ansible-core 2.19 -- ou les echappements dans les
-# chaines Jinja d'un scalaire replie ne se comportent plus comme avant.
-- name: Extraire les secrets
-  ansible.builtin.set_fact:
-    agent_lab_secret: >-
-      {{ agent_lab_secret | default({}) | combine({
-           item: ((agent_lab_secrets_raw.content | b64decode
-             | regex_search('^' ~ item ~ '=(.*)$', '\1', multiline=True)) or [''])[0] | trim
-         }) }}
-  loop: [CLAUDE_CODE_OAUTH_TOKEN, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID]
-  no_log: true
-
-# Les identifiants des consoles (compte Grafana) et le mot de passe de la boite
-# agents@ vivent dans le fichier de secrets du cluster : c'est lui que lit deja
-# le role mailcow pour CREER la boite. Une seule source, pas de copie a tenir
-# synchronisee.
+# Les secrets des AGENTS (jeton Claude, Cloudflare, boite agents@) ne passent
+# pas par ici : ils vivent dans les GitHub Secrets du depot agent-lab, et le
+# job de deploiement les ecrit dans ~agent/.config/agent-lab/secrets.env.
+# Ansible ne tient que ce que la CI ne peut pas faire : le compte de service
+# Grafana, emis avec les identifiants des consoles.
 - name: Lire les secrets des consoles
   ansible.builtin.slurp:
     src: "{{ agent_lab_console_secrets }}"
@@ -35,6 +16,8 @@
   delegate_to: "{{ groups['proxmox'] | first }}"
   no_log: true
 
+# Meme extraction que roles/mailcow/tasks/accounts.yml (regex_search ligne a
+# ligne), eprouvee sous ansible-core 2.19.
 - name: Extraire les secrets des consoles
   ansible.builtin.set_fact:
     agent_lab_console: >-
@@ -42,23 +25,15 @@
            item: ((agent_lab_console_raw.content | b64decode
              | regex_search('^' ~ item ~ '=(\S*)', '\1', multiline=True)) or [''])[0] | trim
          }) }}
-  loop: [CONSOLE_ADMIN_USER, CONSOLE_ADMIN_PASSWORD, AGENTS_MAILBOX_PASSWORD]
+  loop: [CONSOLE_ADMIN_USER, CONSOLE_ADMIN_PASSWORD]
   no_log: true
 
-- name: Exiger les secrets indispensables
+- name: Exiger les identifiants des consoles
   ansible.builtin.assert:
     that:
-      - (agent_lab_secret.CLAUDE_CODE_OAUTH_TOKEN | default('')) | length > 20
-      - (agent_lab_secret.CLOUDFLARE_API_TOKEN | default('')) | length > 20
-      - (agent_lab_secret.CLOUDFLARE_ZONE_ID | default('')) | length == 32
-      - (agent_lab_console.AGENTS_MAILBOX_PASSWORD | default('')) | length >= 12
-      - (agent_lab_console.CONSOLE_ADMIN_PASSWORD | default('')) | length >= 8
-    fail_msg: >-
-      Secrets incomplets. {{ agent_lab_secrets_file }} : CLAUDE_CODE_OAUTH_TOKEN
-      (`claude setup-token` sur le PC), CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID.
-      {{ agent_lab_console_secrets }} : AGENTS_MAILBOX_PASSWORD (12 caracteres
-      min., la boite agents@ est creee par 42-mailcow.yml) et
-      CONSOLE_ADMIN_PASSWORD. Voir docs/agent-lab.md.
+      - agent_lab_console.CONSOLE_ADMIN_USER | length > 0
+      - agent_lab_console.CONSOLE_ADMIN_PASSWORD | length >= 8
+    fail_msg: "CONSOLE_ADMIN_USER / CONSOLE_ADMIN_PASSWORD absents de {{ agent_lab_console_secrets }}."
   no_log: true
 
 # ---------------------------------------------------------------------------

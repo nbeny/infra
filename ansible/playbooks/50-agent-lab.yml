@@ -1,17 +1,20 @@
 ---
 # Lab d'agents IA (VM 170) -- voir docs/agent-lab.md.
 #
-#   ansible-playbook playbooks/50-agent-lab.yml
+#   ansible-playbook playbooks/50-agent-lab.yml -e github_runners_pat=$(gh auth token)
+#
+# Le PAT ne sert qu'au PREMIER passage, pour enregistrer le runner GitHub
+# Actions du depot agent-lab ; ensuite, il peut etre omis.
 #
 # Prealables (une fois) :
-#   1. /root/.secrets/agent-lab.env sur le noeud (CLAUDE_CODE_OAUTH_TOKEN,
-#      CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID) ;
-#   2. AGENTS_MAILBOX_PASSWORD dans kube/urbanlink/secrets.env, puis
-#      `ansible-playbook playbooks/42-mailcow.yml --tags accounts` pour creer
-#      la boite agents@urbanlink.fr ;
-#   3. `playbooks/33-urbanlink-edge.yml` pour poser le log d'acces par hote.
+#   1. `ansible-playbook playbooks/42-mailcow.yml --tags accounts` : cree la
+#      boite agents@urbanlink.fr (mot de passe des consoles) ;
+#   2. `ansible-playbook playbooks/33-urbanlink-edge.yml` : log d'acces par hote ;
+#   3. les GitHub Secrets du depot agent-lab (CLAUDE_CODE_OAUTH_TOKEN,
+#      CLOUDFLARE_*, AGENTS_MAILBOX_PASSWORD).
 #
-# Le code des agents n'est PAS pose ici : `lab deploy` depuis le PC.
+# Le code des agents et leurs secrets ne sont PAS poses ici : la CI du depot
+# agent-lab les deploie a chaque push sur main, par le runner installe ici.
 
 - name: Socle de la VM agent-lab
   hosts: agent_nodes
@@ -20,6 +23,16 @@
   roles:
     - common
     - agent_lab
+    # Runner du job `deploy` (depot agent-lab), sous l'utilisateur des agents :
+    # il installe le code sans root et ecrit les secrets la ou labctl les lit.
+    - role: github_runners
+      vars:
+        github_runners_user: "{{ agent_lab_user | default('agent') }}"
+        github_runners:
+          - name: agent-lab
+            dir: agent-lab
+            repo: nbeny/agent-lab
+            labels: agent-lab
 
 - name: Lecture du log de l'edge par agent-lab
   hosts: proxmox
@@ -75,4 +88,4 @@
         msg:
           - "edge : {{ 'OK' if agent_lab_check_edge.stdout else 'log vide (33-urbanlink-edge.yml joue ?)' }}"
           - "wow  : {{ agent_lab_check_wow.stdout_lines | default([]) | join(' ') }}"
-          - "Suite : depuis le PC, `lab deploy` puis `lab run traffic`."
+          - "Suite : push sur main du depot agent-lab (la CI deploie), puis `lab run traffic`."
