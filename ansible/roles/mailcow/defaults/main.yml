@@ -137,6 +137,14 @@ mailcow_mailboxes:
   # (AGENTS_MAILBOX_PASSWORD). Limite basse : un agent en boucle ne doit pas
   # pouvoir abimer la reputation de l'IP d'emission.
   - { local_part: agents,  domain: urbanlink.fr, name: "Agent lab",             quota: 256, ratelimit: "20/h" }
+  # Compte de test fourni a l'examinateur Google Play (Play Console -> Contenu
+  # de l'application -> Informations de connexion). Identite Kratos de prod
+  # 90293505-64dd-419b-930c-f258c1318646, meme adresse ; la boite recoit les
+  # mails de l'application (verification, notifications) adresses a ce compte.
+  # Mot de passe SEPARE, distinct de celui du compte UrbanLink. Creee a la main
+  # par l'API le 2026-10-10 ; cette ligne la garde dans l'etat voulu. Limite
+  # d'envoi basse : la boite n'a aucune raison d'emettre.
+  - { local_part: examinateur-play, domain: urbanlink.fr, name: "Examinateur Google Play", quota: 256, password_env: EXAMINATEUR_PLAY_MAIL_PASSWORD, ratelimit: "5/h" }
 
 # postmaster@ et abuse@ ne sont pas decoratifs : leur absence est un signal
 # negatif pour les grands fournisseurs, et abuse@ est l'adresse qu'un operateur
